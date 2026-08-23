@@ -1,0 +1,14 @@
+CMU Pronouncing Dictionary notice
+
+Component: CMU Pronouncing Dictionary (0.6), distributed through NLTK Data
+Source: https://www.nltk.org/nltk_data/packages/corpora/cmudict.xml
+Original project: http://www.speech.cs.cmu.edu/cgi-bin/cmudict
+
+Copyright 1998 Carnegie Mellon University
+
+Use of this dictionary, for any research or commercial purpose, is completely
+unrestricted. If you use or redistribute this material, acknowledgement of
+its origin is appreciated.
+
+AnifLive-TTS acknowledges Carnegie Mellon University as the origin of the CMU
+Pronouncing Dictionary data redistributed in the container image.

@@ -1,0 +1,40 @@
+name: aniflive-tts
+
+services:
+  aniflive-tts:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        CUDA_BASE_IMAGE: ${CUDA_BASE_IMAGE:-nvidia/cuda:12.8.1-cudnn-runtime-ubuntu24.04@sha256:9175fa92f96de35a8cfb9493f0dfcf9435c7a597e9d95ad41d2cae382a95e3f9}
+        TORCH_REQUIREMENTS: ${TORCH_REQUIREMENTS:-requirements/torch-cu128.txt}
+    image: ${ANIFLIVE_TTS_IMAGE:-aniflive-tts:1.0.0-cu128}
+    container_name: aniflive-tts
+    init: true
+    gpus: all
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    ports:
+      - "127.0.0.1:${ANIFLIVE_TTS_HOST_PORT:-9882}:9880"
+    environment:
+      ANIFLIVE_TTS_MODEL_PACKAGE: ${ANIFLIVE_TTS_MODEL_PACKAGE:-/data/models/active}
+      ANIFLIVE_TTS_SHARED_DIR: /data/shared
+      ANIFLIVE_TTS_CACHE_DIR: /data/cache
+      ANIFLIVE_TTS_PORT: "9880"
+      HF_HUB_OFFLINE: "1"
+      TRANSFORMERS_OFFLINE: "1"
+    volumes:
+      - ${ANIFLIVE_TTS_MODELS_DIR:-./data/models}:/data/models
+      - ${ANIFLIVE_TTS_SHARED_HOST_DIR:-./data/shared}:/data/shared
+      - ${ANIFLIVE_TTS_CACHE_HOST_DIR:-./data/cache}:/data/cache
+      - ${ANIFLIVE_TTS_REPORTS_DIR:-./data/reports}:/data/reports
+    shm_size: "2gb"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import json,urllib.request; d=json.load(urllib.request.urlopen('http://127.0.0.1:9880/health',timeout=5)); assert d['ready'] and d['backend']=='TensorRT-11'\""]
+      interval: 15s
+      timeout: 10s
+      retries: 40
+      start_period: 5m

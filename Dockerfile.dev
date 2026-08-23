@@ -1,0 +1,8 @@
+ARG BASE_IMAGE=aniflive-tts:1.0.0-cu128
+FROM ${BASE_IMAGE}
+
+# Development-only source overlay. Dependencies and offline resources remain
+# inherited from the immutable release image while GPU hot-path iterations
+# replace only the installed AnifLive-TTS package.
+COPY src/aniflive_tts /opt/venv/lib/python3.12/site-packages/aniflive_tts
+COPY scripts/build_gpt_step_short.py /app/scripts/build_gpt_step_short.py

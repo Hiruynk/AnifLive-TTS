@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools==84.0.0", "wheel==0.48.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "aniflive-tts"
+version = "1.0.0"
+description = "First-party low-latency TTS runtime for AnifEngine-Voice"
+readme = "README.md"
+requires-python = ">=3.10,<3.13"
+license = { text = "PolyForm-Noncommercial-1.0.0" }
+authors = [{ name = "AnifEngine" }]
+dependencies = [
+  "fastapi>=0.115,<1",
+  "numpy>=1.26,<3",
+  "pydantic>=2.10,<3",
+  "uvicorn[standard]>=0.34,<1",
+]
+
+[project.scripts]
+aniflive-tts = "aniflive_tts.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src", ".", "minimal_inference", "minimal_inference/GPT_SoVITS"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"

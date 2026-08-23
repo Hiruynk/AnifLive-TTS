@@ -1,0 +1,9 @@
+# NVIDIA's 11.2.1.2 placeholder currently carries a stale wheel digest. Pin
+# the official package-index artifact directly so Docker builds stay verified.
+tensorrt-cu12-bindings==11.2.1.2
+tensorrt-cu12-libs @ https://pypi.nvidia.com/tensorrt-cu12-libs/tensorrt_cu12_libs-11.2.1.2-py3-none-manylinux_2_28_x86_64.whl#sha256=d13d25345b1f87279478e2c63e0f1286c00c0824bc9eb0915ad0935857bc4e8e
+onnx-graphsurgeon==0.6.1
+onnxruntime-gpu==1.22.0
+onnxsim==0.6.5
+polygraphy==0.50.3
+torchprofile==0.1.0

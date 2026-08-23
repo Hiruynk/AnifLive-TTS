@@ -1,0 +1,180 @@
+{
+  "schema_version": 1,
+  "component": "GPT-SoVITS Minimal Inference",
+  "distribution": "AnifLive-TTS",
+  "upstream": {
+    "repository": "https://github.com/GPT-SoVITS-Devel/GPT-SoVITS_minimal_inference",
+    "revision": "6916eb2e9c227aeb28468ce6fa86ad5b17ead532",
+    "license": "Apache-2.0",
+    "license_file": "LICENSE"
+  },
+  "notice": "Modified by AnifLive-TTS in 2026.",
+  "scope": "Upstream files changed in the AnifLive-TTS vendored distribution, including predecessor integration changes retained by AnifLive-TTS. Each record retains its stated upstream license.",
+  "modified_files": [
+    {
+      "path": "export_onnx.py",
+      "upstream_sha256": "ce34e4a3d1a1b8a7dcd7fac4e21d094397f98112c7901f9953e0db8692cf7d00",
+      "changes": [
+        "safe weights-only checkpoint loading",
+        "explicit trusted-pickle opt-in",
+        "offline export hardening",
+        "local-only Transformer assets with remote model code disabled",
+        "privacy-minimized inference package configuration"
+      ]
+    },
+    {
+      "path": "config/voices.json",
+      "upstream_sha256": "2bd4f749158a94ba82a8e634f56aa8b0c1069d3b6b7d92177aa3f7bedff86bd2",
+      "changes": [
+        "replaced character-specific sample data with generic public examples"
+      ]
+    },
+    {
+      "path": "onnx_to_fp16.py",
+      "upstream_sha256": "3e1b5d2027b1166bf304c4683bef495b642e10604e2e82fa3a7414bae836464c",
+      "changes": [
+        "optional ONNX simplification",
+        "validated fallback when onnxsim is unavailable"
+      ]
+    },
+    {
+      "path": "run_inference.py",
+      "upstream_sha256": "8e914bad2db9844a51e1a27acfbfff3c15698aa6d67a2c70b7946e6416fd2f14",
+      "changes": [
+        "removed environment-specific proxy configuration",
+        "V2ProPlus warmup support",
+        "deterministic sampling controls",
+        "stage profiling output"
+      ]
+    },
+    {
+      "path": "run_streaming_inference.py",
+      "upstream_sha256": "7172717273c46765d92441b753042e443f75a4ba1c0203a8d9af1ff2ab2ee171",
+      "changes": [
+        "AnifLive-TTS default service-port integration"
+      ]
+    },
+    {
+      "path": "run_onnx_inference.py",
+      "upstream_sha256": "1baa5f19db4320b0ca7cc47b1e13914150d65f2664eef8d2a930107d4ed57e89",
+      "changes": [
+        "replaced character-specific default paths with generic public examples"
+      ]
+    },
+    {
+      "path": "run_onnx_streaming_inference.py",
+      "upstream_sha256": "cfc9c27dce306173a1667b9e9e9e4045d55bd722b28b982ae13dc209c9114a82",
+      "changes": [
+        "replaced character-specific default paths with generic public examples"
+      ]
+    },
+    {
+      "path": "run_onnx_long_inference.py",
+      "upstream_sha256": "0053a33f2b8634ae643af039deec7b1e2ef57aadb6a3608525806ce92aad375f",
+      "changes": [
+        "replaced character-specific default paths with generic public examples"
+      ]
+    },
+    {
+      "path": "run_trt_inference.py",
+      "upstream_sha256": "2530ced19b72705090d1ab21d3d210c0430fb136025e603d35cccd8679566943",
+      "changes": [
+        "strict TensorRT 11 API compatibility",
+        "persistent tensor bindings and buffer reuse",
+        "validated asynchronous enqueue errors",
+        "top-k and nucleus sampling controls",
+        "local-only tokenizer assets with remote model code disabled",
+        "generic public example paths"
+      ]
+    },
+    {
+      "path": "utils.py",
+      "upstream_sha256": "1fe61949951989b72edef9730fd4de613f4fba49b96c03ba6305068793308639",
+      "changes": [
+        "removed an environment-specific executable example path"
+      ]
+    },
+    {
+      "path": "README.md",
+      "upstream_sha256": "9a268abe15440aee4b5eacacbee702b48e811aaa82f532cbd1f74bdd656311ae",
+      "changes": [
+        "adapted the API documentation link for the AnifLive-TTS distribution"
+      ]
+    },
+    {
+      "path": "README_zh.md",
+      "upstream_sha256": "409d5acad77d1d75433938c037915f33a85ab5e0eea2d28566b048f9cf95926c",
+      "changes": [
+        "adapted the API documentation link for the AnifLive-TTS distribution"
+      ]
+    }
+  ],
+  "modified_embedded_components": [
+    {
+      "name": "GPT-SoVITS",
+      "license": "MIT",
+      "license_file": "licenses/GPT-SoVITS-MIT.txt",
+      "modified_files": [
+        {
+          "path": "GPT_SoVITS/AR/models/t2s_lightning_module.py",
+          "upstream_sha256": "2dcb877af0e8831a0720645331704c9f420ce8a60cf12703c4b983c345255b29",
+          "changes": [
+            "replaced the training framework base class with torch.nn.Module",
+            "made the vendored module explicitly inference-only",
+            "removed the runtime dependency on pytorch-lightning"
+          ]
+        },
+        {
+          "path": "GPT_SoVITS/AR/models/t2s_model.py",
+          "upstream_sha256": "1362e52a82d36ff058340f4227ada88573f5a8f91d777c6df2f60df1e218809e",
+          "changes": [
+            "replaced the torchmetrics accuracy helper with an inference-compatible local module",
+            "removed the runtime dependency on torchmetrics"
+          ]
+        },
+        {
+          "path": "GPT_SoVITS/feature_extractor/cnhubert.py",
+          "upstream_sha256": "f3572c1e8b2229b28970772d5e0ee744a8d3742a0b0a82307d93bd6076efadce",
+          "changes": [
+            "required local-only Transformer assets",
+            "disabled remote model code"
+          ]
+        },
+        {
+          "path": "GPT_SoVITS/utils.py",
+          "upstream_sha256": "1fe61949951989b72edef9730fd4de613f4fba49b96c03ba6305068793308639",
+          "changes": [
+            "removed an environment-specific executable example path"
+          ]
+        }
+      ]
+    }
+  ],
+  "vendored_apache_components": [
+    {
+      "name": "g2p-en",
+      "version": "2.1.0",
+      "repository": "https://github.com/Kyubyong/g2p",
+      "license": "Apache-2.0",
+      "license_file": "GPT_SoVITS/text/g2p_en/LICENSE.txt",
+      "modified_files": [
+        {
+          "path": "GPT_SoVITS/text/g2p_en/g2p.py",
+          "upstream_sha256": "fc2548b855e102f774506a6afe4f4bc88424229b69701ab6040aa16710ddff3a",
+          "changes": [
+            "removed runtime NLTK downloads",
+            "fail-fast offline resource checks",
+            "Python invalid-escape warning cleanup"
+          ]
+        },
+        {
+          "path": "GPT_SoVITS/text/g2p_en/homographs.en",
+          "upstream_sha256": "0403edcc6aefe8945f8987be398279fd98bf6b767e54b741331d3bc99a307071",
+          "changes": [
+            "normalized trailing whitespace without changing homograph records"
+          ]
+        }
+      ]
+    }
+  ]
+}

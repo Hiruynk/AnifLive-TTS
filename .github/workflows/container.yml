@@ -1,0 +1,273 @@
+name: container
+on:
+  workflow_dispatch:
+    inputs:
+      sbom_only:
+        description: Export attestations from existing private images without rebuilding
+        required: false
+        default: false
+        type: boolean
+      offline_only:
+        description: Verify existing private images with networking disabled
+        required: false
+        default: false
+        type: boolean
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: |
+          python -m pip install -r requirements/dev.txt
+          python -m pip install -e .
+      - run: ruff check src tests scripts
+      - run: >-
+          pytest -q
+          tests/test_no_runtime_install.py
+          tests/test_release_dependencies.py
+          tests/test_naming_and_boundaries.py
+          tests/test_release_hygiene.py
+          tests/test_benchmark_readme_contract.py
+          tests/test_api_contract.py
+          tests/test_runtime_safety.py
+          tests/test_release_security.py
+          tests/test_spdx_sbom_normalization.py
+          tests/test_shared_assets_integrity.py
+          tests/test_upstream_provenance.py
+  release-security-gate:
+    needs: quality
+    if: ${{ !inputs.sbom_only && !inputs.offline_only }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Require the reviewed main-branch source
+        shell: bash
+        run: |
+          test "${GITHUB_REF}" = "refs/heads/main"
+          test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"
+          test -z "$(git status --porcelain)"
+      - name: Run release security policy
+        run: python scripts/check_release_security.py --expected-version 1.0.0
+  build:
+    needs: [quality, release-security-gate]
+    if: ${{ !inputs.sbom_only && !inputs.offline_only }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - tag: cu128
+            base: nvidia/cuda:12.8.1-cudnn-runtime-ubuntu24.04@sha256:9175fa92f96de35a8cfb9493f0dfcf9435c7a597e9d95ad41d2cae382a95e3f9
+            torch: requirements/torch-cu128.txt
+          - tag: cu121
+            base: nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04@sha256:810756cab1c28ce693499a5c2ebb66f6d10a61d026998c8606bad449643a4c49
+            torch: requirements/torch-cu121.txt
+    runs-on: ubuntu-latest
+    env:
+      IMAGE: ghcr.io/hiruynk/aniflive-tts:1.0.0-${{ matrix.tag }}
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.11"
+      - name: Resolve reproducible build date
+        id: build_date
+        shell: bash
+        run: echo "value=$(git show -s --format=%cI "${GITHUB_SHA}")" >> "${GITHUB_OUTPUT}"
+      - name: Reclaim runner disk space
+        shell: bash
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /opt/hostedtoolcache/CodeQL
+          docker system prune --all --force
+          df -h /
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: build
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          push: true
+          sbom: true
+          provenance: mode=max
+          tags: ${{ env.IMAGE }}
+          build-args: |
+            CUDA_BASE_IMAGE=${{ matrix.base }}
+            TORCH_REQUIREMENTS=${{ matrix.torch }}
+            VCS_REF=${{ github.sha }}
+            BUILD_DATE=${{ steps.build_date.outputs.value }}
+          annotations: |
+            index:org.opencontainers.image.title=AnifLive-TTS
+            index:org.opencontainers.image.description=First-party TTS runtime for AnifEngine-Voice
+            index:org.opencontainers.image.source=https://github.com/Hiruynk/AnifLive-TTS
+            index:org.opencontainers.image.revision=${{ github.sha }}
+            index:org.opencontainers.image.created=${{ steps.build_date.outputs.value }}
+            index:org.opencontainers.image.licenses=PolyForm-Noncommercial-1.0.0
+      - name: Reclaim post-build disk space
+        shell: bash
+        run: |
+          docker buildx prune --all --force
+          docker system prune --all --force
+          df -h /
+      - name: Verify fastText large model with network disabled
+        shell: bash
+        run: |
+          docker pull "${IMAGE}@${{ steps.build.outputs.digest }}"
+          docker run --rm --network none --tmpfs /data/shared \
+            --entrypoint python \
+            -e PYTHONPATH=/app/minimal_inference:/app/minimal_inference/GPT_SoVITS \
+            "${IMAGE}@${{ steps.build.outputs.digest }}" \
+            -c 'import fast_langdetect; from text.LangSegmenter.langsegmenter import LangSegmenter; result = fast_langdetect.infer._default_detector.detect("Hello 世界", low_memory=False); assert result; assert LangSegmenter.getTexts("Hello 世界"); print(result)'
+      - name: Export and validate the image-derived SPDX SBOM
+        shell: bash
+        run: |
+          output="SBOM-AnifLive-TTS-v1.0.0-${{ matrix.tag }}.spdx.json"
+          docker buildx imagetools inspect \
+            "${IMAGE}@${{ steps.build.outputs.digest }}" \
+            --format '{{ json .SBOM.SPDX }}' > "${output}"
+          python scripts/normalize_spdx_sbom.py "${output}"
+          python -m pip install spdx-tools==0.8.3
+          pyspdxtools -i "${output}"
+      - name: Write immutable release metadata
+        shell: bash
+        env:
+          IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
+          SOURCE_COMMIT: ${{ github.sha }}
+          BUILD_DATE: ${{ steps.build_date.outputs.value }}
+          WORKFLOW_RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          PROFILE: ${{ matrix.tag }}
+        run: >-
+          python -c 'import json,os,pathlib;
+          profile=os.environ["PROFILE"];
+          data={"schema":1,"image":os.environ["IMAGE"],
+          "image_digest":os.environ["IMAGE_DIGEST"],
+          "source_commit":os.environ["SOURCE_COMMIT"],
+          "build_date":os.environ["BUILD_DATE"],
+          "workflow_run":os.environ["WORKFLOW_RUN_URL"],
+          "sbom_file":f"SBOM-AnifLive-TTS-v1.0.0-{profile}.spdx.json",
+          "trivy_file":f"TRIVY-AnifLive-TTS-v1.0.0-{profile}.json",
+          "provenance":"BuildKit mode=max attestation attached to image digest",
+          "license":"PolyForm-Noncommercial-1.0.0"};
+          pathlib.Path(f"RELEASE-METADATA-AnifLive-TTS-v1.0.0-{profile}.json").write_text(
+          json.dumps(data,indent=2)+"\n",encoding="utf-8")'
+      - name: Scan the built image for fixed HIGH and CRITICAL vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ env.IMAGE }}@${{ steps.build.outputs.digest }}
+          scanners: vuln
+          vuln-type: os,library
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          format: json
+          output: TRIVY-AnifLive-TTS-v1.0.0-${{ matrix.tag }}.json
+          exit-code: "0"
+      - name: Enforce the image vulnerability policy
+        run: >-
+          python scripts/check_trivy_report.py
+          --profile ${{ matrix.tag }}
+          --report TRIVY-AnifLive-TTS-v1.0.0-${{ matrix.tag }}.json
+      - name: Upload image-derived release evidence
+        if: ${{ always() && steps.build.outcome == 'success' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: image-release-evidence-${{ matrix.tag }}
+          path: |
+            SBOM-AnifLive-TTS-v1.0.0-${{ matrix.tag }}.spdx.json
+            RELEASE-METADATA-AnifLive-TTS-v1.0.0-${{ matrix.tag }}.json
+            TRIVY-AnifLive-TTS-v1.0.0-${{ matrix.tag }}.json
+          if-no-files-found: error
+  export-existing-sbom:
+    needs: quality
+    if: ${{ inputs.sbom_only }}
+    strategy:
+      fail-fast: false
+      matrix:
+        tag: [cu121, cu128]
+    runs-on: ubuntu-latest
+    env:
+      IMAGE: ghcr.io/hiruynk/aniflive-tts:1.0.0-${{ matrix.tag }}
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.11"
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Export and validate the image-derived SPDX SBOM
+        shell: bash
+        run: |
+          output="SBOM-AnifLive-TTS-v1.0.0-${{ matrix.tag }}.spdx.json"
+          docker buildx imagetools inspect \
+            "${IMAGE}" \
+            --format '{{ json .SBOM.SPDX }}' > "${output}"
+          python scripts/normalize_spdx_sbom.py "${output}"
+          python -m pip install spdx-tools==0.8.3
+          pyspdxtools -i "${output}"
+      - name: Upload image-derived SBOM
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: image-sbom-${{ matrix.tag }}
+          path: SBOM-AnifLive-TTS-v1.0.0-${{ matrix.tag }}.spdx.json
+          if-no-files-found: error
+  verify-existing-offline:
+    needs: quality
+    if: ${{ inputs.offline_only }}
+    strategy:
+      fail-fast: false
+      matrix:
+        tag: [cu121, cu128]
+    runs-on: ubuntu-latest
+    env:
+      IMAGE: ghcr.io/hiruynk/aniflive-tts:1.0.0-${{ matrix.tag }}
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - name: Reclaim runner disk space
+        shell: bash
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /opt/hostedtoolcache/CodeQL
+          docker system prune --all --force
+          df -h /
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Verify fastText large model with network disabled
+        shell: bash
+        run: |
+          docker pull "${IMAGE}"
+          docker run --rm --network none --tmpfs /data/shared \
+            --entrypoint python \
+            -e PYTHONPATH=/app/minimal_inference:/app/minimal_inference/GPT_SoVITS \
+            "${IMAGE}" \
+            -c 'import fast_langdetect; from text.LangSegmenter.langsegmenter import LangSegmenter; result = fast_langdetect.infer._default_detector.detect("Hello 世界", low_memory=False); assert result; assert LangSegmenter.getTexts("Hello 世界"); print(result)'

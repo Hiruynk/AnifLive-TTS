@@ -1,0 +1,43 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  static-quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install static test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements/dev.txt
+          python -m pip install -e .
+      - name: Ruff
+        run: ruff check src tests scripts
+      - name: Static, API, and runtime contract tests
+        run: >-
+          pytest -q
+          tests/test_no_runtime_install.py
+          tests/test_release_dependencies.py
+          tests/test_naming_and_boundaries.py
+          tests/test_release_hygiene.py
+          tests/test_benchmark_readme_contract.py
+          tests/test_api_contract.py
+          tests/test_runtime_safety.py
+          tests/test_release_security.py
+          tests/test_shared_assets_integrity.py
+          tests/test_upstream_provenance.py
+      - name: Release security gate
+        run: python scripts/check_release_security.py --expected-version 1.0.0

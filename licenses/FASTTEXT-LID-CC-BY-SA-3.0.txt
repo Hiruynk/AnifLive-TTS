@@ -1,0 +1,18 @@
+fastText language identification model notice
+
+Component: lid.176.bin
+Source: https://dl.fbaipublicfiles.com/fasttext/supervised-models/lid.176.bin
+Project page: https://fasttext.cc/docs/en/language-identification.html
+License: Creative Commons Attribution-ShareAlike 3.0 Unported (CC BY-SA 3.0)
+License URI: https://creativecommons.org/licenses/by-sa/3.0/
+Legal code: https://creativecommons.org/licenses/by-sa/3.0/legalcode
+
+Attribution:
+
+The lid.176 language-identification model is distributed by the fastText
+project. It was trained on data from Wikipedia, Tatoeba, and SETimes. The
+model is redistributed unchanged by the AnifLive-TTS container image.
+
+The model license applies to the model artifact. It does not replace the
+licenses of AnifLive-TTS source code or other separately distributed
+components.

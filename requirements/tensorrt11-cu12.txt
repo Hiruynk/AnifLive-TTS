@@ -1,0 +1,7 @@
+tensorrt-cu12==11.2.1.2
+nvidia-modelopt==0.37.0
+onnx-graphsurgeon==0.6.1
+onnxruntime-gpu==1.22.0
+onnxsim==0.6.5
+polygraphy==0.50.3
+torchprofile==0.1.0

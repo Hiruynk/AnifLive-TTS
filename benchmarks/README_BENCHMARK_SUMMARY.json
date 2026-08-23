@@ -1,0 +1,98 @@
+{
+  "schema": 1,
+  "measured_at": "2026-08-22",
+  "project": "AnifLive-TTS",
+  "release": "1.0.0",
+  "scope": "local AnifLive-TTS runtime only",
+  "environment": {
+    "gpu": "NVIDIA GeForce RTX 5070 Ti 16 GB",
+    "driver": "596.36",
+    "cuda_runtime": "12.8",
+    "pytorch": "2.7.0+cu128",
+    "tensorrt": "11.2.1.2",
+    "precision": "FP16",
+    "container": "aniflive-tts:1.0.0-cu128"
+  },
+  "benchmark_provenance": {
+    "status": "historical measured build",
+    "image_content_id": "sha256:f3ab9407f22bf42686ef79b47f8b25aee925ed06f42529430b1d1338d8ec8230",
+    "source_commit": null,
+    "final_security_rebuild_measured": false,
+    "note": "These measurements belong to the 2026-08-22 PyTorch 2.7.0+cu128 benchmark build. Later dependency and security rebuilds are not represented by these figures."
+  },
+  "workload": {
+    "model_family": "gsv-v2proplus",
+    "voice_asset": "external test asset; not distributed with AnifLive-TTS",
+    "text": "今日はいい天気ですね。",
+    "language": "ja",
+    "seed": 1234,
+    "top_k": 15,
+    "top_p": 1.0,
+    "temperature": 1.0,
+    "audio_duration_seconds": 2.96,
+    "semantic_tokens": 74
+  },
+  "methodology": {
+    "sessions": 10,
+    "warmup_requests_per_session": 10,
+    "full_wav_requests_per_session": 100,
+    "stream_requests_per_session": 100,
+    "formal_full_wav_requests": 1000,
+    "formal_stream_requests": 1000,
+    "concurrency": 1,
+    "request_scheduling": "serialized single-request latency",
+    "transport": "new local HTTP/1.1 connection per request",
+    "connection_reuse": false,
+    "ttfa_definition": "client wall-clock time from sending the HTTP request until reading the first server-emitted PCM audio chunk",
+    "headline_statistic": "median of the ten session-level medians"
+  },
+  "session_distribution": {
+    "complete_wav_wall_p50_ms": {"session_median": 252.862425, "best": 249.4559, "worst": 263.88265},
+    "complete_wav_wall_p95_ms": {"session_median": 311.77765, "best": 287.8708, "worst": 346.5587},
+    "server_inference_p50_ms": {"session_median": 230.53325, "best": 227.3685, "worst": 244.072},
+    "wall_rtf_p50": {"session_median": 0.085426495, "best": 0.084275642, "worst": 0.089149544},
+    "stream_ttfa_p50_ms": {"session_median": 78.964375, "best": 77.1064, "worst": 81.38535},
+    "stream_ttfa_p95_ms": {"session_median": 104.4405, "best": 90.4043, "worst": 127.4972},
+    "gpu_busy_p50_percent": {"session_median": 47.0, "best": 46.0, "worst": 48.0},
+    "gpu_busy_p95_percent": {"session_median": 51.5, "best": 51.0, "worst": 53.0},
+    "vram_p50_mib": {"session_median": 4554.0, "best": 4543.0, "worst": 4776.0},
+    "gpt_decode_p50_ms": {"session_median": 218.31925, "best": 215.7055, "worst": 230.815},
+    "sovits_p50_ms": {"session_median": 7.41575, "best": 7.312, "worst": 7.6725}
+  },
+  "best_complete_session": {
+    "id": "09",
+    "complete_wav_wall_p50_ms": 249.4559,
+    "server_inference_p50_ms": 228.2935,
+    "wall_rtf_p50": 0.084275642,
+    "stream_ttfa_p50_ms": 80.5112,
+    "stream_ttfa_p95_ms": 127.4972
+  },
+  "first_audio_payload_audit": {
+    "measured_at": "2026-08-23",
+    "formal_stream_requests": 100,
+    "capture_method": "first server-emitted HTTP chunk via HTTPResponse.read1(65536)",
+    "sample_format": "pcm_s16le",
+    "sample_rate_hz": 32000,
+    "first_chunk_semantic_tokens": 8,
+    "first_chunk_lookahead_tokens": 8,
+    "first_audio_bytes": {"p50": 8186, "min": 7234, "max": 8186},
+    "first_audio_samples": {"p50": 4093, "min": 3617, "max": 4093},
+    "first_audio_duration_ms": {"p50": 127.90625, "min": 113.03125, "max": 127.90625}
+  },
+  "execution_gates": {
+    "all_sessions_backend": "TensorRT-11",
+    "all_sessions_pytorch_fallback": false,
+    "engine_count": 8,
+    "all_requests_completed": true
+  },
+  "quality_gates": {
+    "regression_wav_sha256": "6e8aaeb33cf265a6442bec73383b0892b7dbe0e1e78fef59f3a5cec40d35da30",
+    "waveform_correlation": 1.0,
+    "log_mel_cosine": 1.0,
+    "log_mel_mae_db": 0.0,
+    "speaker_cosine": 1.0,
+    "si_sdr_db": 120.0,
+    "duration_difference_percent": 0.0
+  },
+  "external_comparison_policy": "All non-AnifLive-TTS values shown in README files are upstream-reported and are not local measurements."
+}
