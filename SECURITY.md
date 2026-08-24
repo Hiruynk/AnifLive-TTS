@@ -30,12 +30,11 @@ Use it only for a trusted local checkpoint, preferably in an isolated,
 network-disabled converter container with read-only checkpoint mounts. Never
 enable it in the API request path.
 
-The `cu128` image uses PyTorch 2.10 or newer, which contains the upstream fixes
-for `GHSA-53q9-r3pm-6pq6` and `GHSA-63cw-57p8-fm3p`. PyTorch does not publish a
-2.10 CUDA 12.1 wheel, so the compatibility-focused `cu121` image retains an
-older PyTorch runtime. In that profile, checkpoint conversion is an explicit
-trusted-administrator operation and not a remote API capability. Do not mount
-untrusted checkpoints into the `cu121` container.
+The `cu126` and `cu128` images use PyTorch 2.10 or newer, which contains the
+upstream fixes for `GHSA-53q9-r3pm-6pq6` and `GHSA-63cw-57p8-fm3p`. Release
+images are rejected when the image-derived vulnerability report contains an
+unfixed HIGH or CRITICAL finding. Checkpoint conversion remains an explicit
+trusted-administrator operation and is not exposed through the remote API.
 
 The vendored GPT-SoVITS frontend uses a patched Transformers release and is
 also constrained to local, checksum-pinned assets with

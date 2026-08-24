@@ -199,10 +199,15 @@ class TRTModule:
             shape = self.output_shapes.get(name)
             if shape is None:
                 shape = tuple(self.context.get_tensor_shape(name))
-                self.output_shapes[name] = shape
-            if any(int(value) < 0 for value in shape):
-                raise RuntimeError(f"TensorRT output {name} has unresolved shape {shape}")
-            if outputs.get(name) is None:
+                if not any(int(value) < 0 for value in shape):
+                    self.output_shapes[name] = shape
+            unresolved = any(int(value) < 0 for value in shape)
+            if unresolved and outputs.get(name) is None:
+                raise RuntimeError(
+                    f"TensorRT output {name} has data-dependent shape {shape}; "
+                    "provide a correctly sized output tensor"
+                )
+            if not unresolved and outputs.get(name) is None:
                 cached = self.output_tensors.get(name)
                 if cached is None or tuple(cached.shape) != shape:
                     out_device = "cpu" if target_loc == trt.TensorLocation.HOST else self.device
@@ -211,10 +216,20 @@ class TRTModule:
                 outputs[name] = cached
 
             output_tensor = outputs[name]
-            if tuple(output_tensor.shape) != shape:
+            if not unresolved and tuple(output_tensor.shape) != shape:
                 raise ValueError(
                     f"TensorRT output {name} buffer shape {tuple(output_tensor.shape)} != {shape}"
                 )
+            if unresolved:
+                supplied = tuple(int(value) for value in output_tensor.shape)
+                if len(supplied) != len(shape) or any(
+                    declared >= 0 and supplied[index] != declared
+                    for index, declared in enumerate(shape)
+                ):
+                    raise ValueError(
+                        f"TensorRT output {name} buffer shape {supplied} is incompatible "
+                        f"with data-dependent shape {shape}"
+                    )
             if output_tensor.dtype != self.tensor_dtype[name]:
                 raise TypeError(
                     f"TensorRT output {name} buffer dtype {output_tensor.dtype} != "
@@ -281,6 +296,9 @@ class GPTSoVITS_TRT_Inference:
         self.model_gpt_enc = TRTModule(f"{trt_dir}/gpt_encoder.engine", device, self.stream)
         self.model_gpt_step = TRTModule(f"{trt_dir}/gpt_step.engine", device, self.stream)
         self.model_sovits = TRTModule(f"{trt_dir}/sovits.engine", device, self.stream)
+        self.model_sovits_stream = TRTModule(
+            f"{trt_dir}/sovits_stream.engine", device, self.stream
+        )
         self.model_spectrogram = TRTModule(f"{trt_dir}/spectrogram.engine", device, self.stream)
         self.model_sv_embedding = TRTModule(f"{trt_dir}/sv_embedding.engine", device, self.stream)
 

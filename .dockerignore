@@ -13,6 +13,7 @@ __pycache__
 *.egg-info
 .pytest-temp*
 .pytest-tmp*
+.pytest_tmp*
 .test-tmp*
 *.ckpt
 *.pth
@@ -24,6 +25,7 @@ __pycache__
 *.wav
 *.flac
 *.mp3
+*.mp4
 .cloudflared-token
 cloudflare-token*
 tunnel-token*

@@ -1,3 +1,4 @@
+# Modified by AnifLive-TTS in 2026: removed the unused ModelScope dependency.
 --no-binary=opencc
 numpy<2.0
 scipy
@@ -18,7 +19,6 @@ pypinyin
 pyopenjtalk>=0.4.1
 g2p_en
 torchaudio
-modelscope==1.10.0
 sentencepiece
 transformers>=4.43,<=4.50
 peft

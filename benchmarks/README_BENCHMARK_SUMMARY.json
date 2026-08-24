@@ -1,98 +1,301 @@
 {
-  "schema": 1,
-  "measured_at": "2026-08-22",
+  "schema": 3,
+  "measured_at": "2026-08-25",
   "project": "AnifLive-TTS",
-  "release": "1.0.0",
-  "scope": "local AnifLive-TTS runtime only",
-  "environment": {
-    "gpu": "NVIDIA GeForce RTX 5070 Ti 16 GB",
-    "driver": "596.36",
-    "cuda_runtime": "12.8",
-    "pytorch": "2.7.0+cu128",
-    "tensorrt": "11.2.1.2",
-    "precision": "FP16",
-    "container": "aniflive-tts:1.0.0-cu128"
-  },
-  "benchmark_provenance": {
-    "status": "historical measured build",
-    "image_content_id": "sha256:f3ab9407f22bf42686ef79b47f8b25aee925ed06f42529430b1d1338d8ec8230",
-    "source_commit": null,
-    "final_security_rebuild_measured": false,
-    "note": "These measurements belong to the 2026-08-22 PyTorch 2.7.0+cu128 benchmark build. Later dependency and security rebuilds are not represented by these figures."
-  },
+  "release": "1.1.0",
+  "models": [
+    "roxy-v2proplus"
+  ],
+  "voice_profile": "default",
   "workload": {
-    "model_family": "gsv-v2proplus",
-    "voice_asset": "external test asset; not distributed with AnifLive-TTS",
     "text": "今日はいい天気ですね。",
     "language": "ja",
     "seed": 1234,
     "top_k": 15,
     "top_p": 1.0,
-    "temperature": 1.0,
-    "audio_duration_seconds": 2.96,
-    "semantic_tokens": 74
+    "temperature": 1.0
   },
   "methodology": {
     "sessions": 10,
+    "models": 1,
+    "total_model_sessions": 10,
     "warmup_requests_per_session": 10,
     "full_wav_requests_per_session": 100,
     "stream_requests_per_session": 100,
+    "keepalive_stream_requests_per_session": 100,
+    "concurrency": 1,
+    "transport": "new HTTP/1.1 connection per request plus a separately reported persistent HTTP/1.1 connection workload",
+    "connection_reuse": "reported separately",
+    "keepalive_connection_warmup_requests_per_session": 1,
+    "session_idle_barrier": "health active_requests=0 and switching=false before each session; barrier time is outside every measured request",
+    "ttfp_definition": "client wall-clock time from sending the HTTP request until reading the first server-emitted PCM chunk",
+    "audible_ttfa_definition": "device-independent earliest audible playback time at the first PCM sample above threshold within the earliest active RMS frame, constrained by that PCM chunk's arrival time",
+    "audible_threshold_dbfs": -45.0,
+    "audible_frame_ms": 10.0,
+    "headline_statistic": "median of all model-session-level statistics"
+  },
+  "environment": {
+    "gpu": {
+      "name": "NVIDIA GeForce RTX 5070 Ti",
+      "compute_capability": "12.0",
+      "vram_bytes": 17094475776
+    },
+    "cuda": "12.8",
+    "tensorrt": "11.2.1.2",
+    "engine_count": 9
+  },
+  "execution_proof": {
+    "backend": "TensorRT-11",
+    "pytorch_fallback": false,
     "formal_full_wav_requests": 1000,
     "formal_stream_requests": 1000,
-    "concurrency": 1,
-    "request_scheduling": "serialized single-request latency",
-    "transport": "new local HTTP/1.1 connection per request",
-    "connection_reuse": false,
-    "ttfa_definition": "client wall-clock time from sending the HTTP request until reading the first server-emitted PCM audio chunk",
-    "headline_statistic": "median of the ten session-level medians"
+    "formal_keepalive_stream_requests": 1000,
+    "gpu_samples": 4567
   },
+  "table": [
+    {
+      "key": "complete_wav_wall_p50_ms",
+      "label": "Complete REST WAV wall P50",
+      "median": 224.8682249974081,
+      "range_min": 223.44049999810522,
+      "range_max": 233.0072000004293
+    },
+    {
+      "key": "complete_wav_wall_p95_ms",
+      "label": "Complete REST WAV wall P95",
+      "median": 270.2279999975872,
+      "range_min": 254.86870000167983,
+      "range_max": 298.8005000006524
+    },
+    {
+      "key": "server_inference_p50_ms",
+      "label": "Server inference P50",
+      "median": 204.18625,
+      "range_min": 199.7555,
+      "range_max": 208.611
+    },
+    {
+      "key": "wall_rtf_p50",
+      "label": "RTF P50",
+      "median": 0.12871678591723418,
+      "range_min": 0.12789954207103904,
+      "range_max": 0.1333756153408296
+    },
+    {
+      "key": "stream_ttfp_p50_ms",
+      "label": "Streaming first-packet latency P50",
+      "median": 95.09609999986424,
+      "range_min": 92.52855000158888,
+      "range_max": 101.43415000129608
+    },
+    {
+      "key": "stream_ttfp_p95_ms",
+      "label": "Streaming first-packet latency P95",
+      "median": 121.4291999967827,
+      "range_min": 110.24140000517946,
+      "range_max": 143.4517000016058
+    },
+    {
+      "key": "stream_keepalive_ttfp_p50_ms",
+      "label": "Keep-alive streaming first-packet latency P50",
+      "median": 82.67117499781307,
+      "range_min": 81.48670000082348,
+      "range_max": 84.61634999912349
+    },
+    {
+      "key": "stream_keepalive_ttfp_p95_ms",
+      "label": "Keep-alive streaming first-packet latency P95",
+      "median": 116.56529999891063,
+      "range_min": 100.0999000025331,
+      "range_max": 132.89680000161752
+    },
+    {
+      "key": "stream_audible_ttfa_p50_ms",
+      "label": "Audible streaming TTFA P50",
+      "median": 101.72109999986424,
+      "range_min": 99.15355000158888,
+      "range_max": 108.05915000129608
+    },
+    {
+      "key": "stream_audible_ttfa_p95_ms",
+      "label": "Audible streaming TTFA P95",
+      "median": 128.0541999967827,
+      "range_min": 116.86640000517946,
+      "range_max": 150.0767000016058
+    },
+    {
+      "key": "stream_keepalive_audible_ttfa_p50_ms",
+      "label": "Keep-alive audible streaming TTFA P50",
+      "median": 89.29617499781307,
+      "range_min": 88.11170000082348,
+      "range_max": 91.24134999912349
+    },
+    {
+      "key": "stream_keepalive_audible_ttfa_p95_ms",
+      "label": "Keep-alive audible streaming TTFA P95",
+      "median": 123.19029999891063,
+      "range_min": 106.7249000025331,
+      "range_max": 139.52180000161752
+    },
+    {
+      "key": "gpu_busy_p50_percent",
+      "label": "GPU busy-time P50",
+      "median": 44.0,
+      "range_min": 43.0,
+      "range_max": 45.0
+    },
+    {
+      "key": "gpu_busy_p95_percent",
+      "label": "GPU busy-time P95",
+      "median": 48.0,
+      "range_min": 48.0,
+      "range_max": 49.0
+    }
+  ],
   "session_distribution": {
-    "complete_wav_wall_p50_ms": {"session_median": 252.862425, "best": 249.4559, "worst": 263.88265},
-    "complete_wav_wall_p95_ms": {"session_median": 311.77765, "best": 287.8708, "worst": 346.5587},
-    "server_inference_p50_ms": {"session_median": 230.53325, "best": 227.3685, "worst": 244.072},
-    "wall_rtf_p50": {"session_median": 0.085426495, "best": 0.084275642, "worst": 0.089149544},
-    "stream_ttfa_p50_ms": {"session_median": 78.964375, "best": 77.1064, "worst": 81.38535},
-    "stream_ttfa_p95_ms": {"session_median": 104.4405, "best": 90.4043, "worst": 127.4972},
-    "gpu_busy_p50_percent": {"session_median": 47.0, "best": 46.0, "worst": 48.0},
-    "gpu_busy_p95_percent": {"session_median": 51.5, "best": 51.0, "worst": 53.0},
-    "vram_p50_mib": {"session_median": 4554.0, "best": 4543.0, "worst": 4776.0},
-    "gpt_decode_p50_ms": {"session_median": 218.31925, "best": 215.7055, "worst": 230.815},
-    "sovits_p50_ms": {"session_median": 7.41575, "best": 7.312, "worst": 7.6725}
+    "complete_wav_wall_p50_ms": {
+      "session_median": 224.8682249974081,
+      "best": 223.44049999810522,
+      "worst": 233.0072000004293
+    },
+    "complete_wav_wall_p95_ms": {
+      "session_median": 270.2279999975872,
+      "best": 254.86870000167983,
+      "worst": 298.8005000006524
+    },
+    "server_inference_p50_ms": {
+      "session_median": 204.18625,
+      "best": 199.7555,
+      "worst": 208.611
+    },
+    "wall_rtf_p50": {
+      "session_median": 0.12871678591723418,
+      "best": 0.12789954207103904,
+      "worst": 0.1333756153408296
+    },
+    "stream_ttfp_p50_ms": {
+      "session_median": 95.09609999986424,
+      "best": 92.52855000158888,
+      "worst": 101.43415000129608
+    },
+    "stream_ttfp_p95_ms": {
+      "session_median": 121.4291999967827,
+      "best": 110.24140000517946,
+      "worst": 143.4517000016058
+    },
+    "stream_keepalive_ttfp_p50_ms": {
+      "session_median": 82.67117499781307,
+      "best": 81.48670000082348,
+      "worst": 84.61634999912349
+    },
+    "stream_keepalive_ttfp_p95_ms": {
+      "session_median": 116.56529999891063,
+      "best": 100.0999000025331,
+      "worst": 132.89680000161752
+    },
+    "stream_audible_ttfa_p50_ms": {
+      "session_median": 101.72109999986424,
+      "best": 99.15355000158888,
+      "worst": 108.05915000129608
+    },
+    "stream_audible_ttfa_p95_ms": {
+      "session_median": 128.0541999967827,
+      "best": 116.86640000517946,
+      "worst": 150.0767000016058
+    },
+    "stream_keepalive_audible_ttfa_p50_ms": {
+      "session_median": 89.29617499781307,
+      "best": 88.11170000082348,
+      "worst": 91.24134999912349
+    },
+    "stream_keepalive_audible_ttfa_p95_ms": {
+      "session_median": 123.19029999891063,
+      "best": 106.7249000025331,
+      "worst": 139.52180000161752
+    },
+    "gpu_busy_p50_percent": {
+      "session_median": 44.0,
+      "best": 43.0,
+      "worst": 45.0
+    },
+    "gpu_busy_p95_percent": {
+      "session_median": 48.0,
+      "best": 48.0,
+      "worst": 49.0
+    }
   },
-  "best_complete_session": {
-    "id": "09",
-    "complete_wav_wall_p50_ms": 249.4559,
-    "server_inference_p50_ms": 228.2935,
-    "wall_rtf_p50": 0.084275642,
-    "stream_ttfa_p50_ms": 80.5112,
-    "stream_ttfa_p95_ms": 127.4972
-  },
-  "first_audio_payload_audit": {
-    "measured_at": "2026-08-23",
-    "formal_stream_requests": 100,
-    "capture_method": "first server-emitted HTTP chunk via HTTPResponse.read1(65536)",
-    "sample_format": "pcm_s16le",
-    "sample_rate_hz": 32000,
-    "first_chunk_semantic_tokens": 8,
-    "first_chunk_lookahead_tokens": 8,
-    "first_audio_bytes": {"p50": 8186, "min": 7234, "max": 8186},
-    "first_audio_samples": {"p50": 4093, "min": 3617, "max": 4093},
-    "first_audio_duration_ms": {"p50": 127.90625, "min": 113.03125, "max": 127.90625}
-  },
-  "execution_gates": {
-    "all_sessions_backend": "TensorRT-11",
-    "all_sessions_pytorch_fallback": false,
-    "engine_count": 8,
-    "all_requests_completed": true
-  },
-  "quality_gates": {
-    "regression_wav_sha256": "6e8aaeb33cf265a6442bec73383b0892b7dbe0e1e78fef59f3a5cec40d35da30",
-    "waveform_correlation": 1.0,
-    "log_mel_cosine": 1.0,
-    "log_mel_mae_db": 0.0,
-    "speaker_cosine": 1.0,
-    "si_sdr_db": 120.0,
-    "duration_difference_percent": 0.0
-  },
-  "external_comparison_policy": "All non-AnifLive-TTS values shown in README files are upstream-reported and are not local measurements."
+  "per_model": {
+    "roxy-v2proplus": {
+      "complete_wav_wall_p50_ms": {
+        "session_median": 224.8682249974081,
+        "best": 223.44049999810522,
+        "worst": 233.0072000004293
+      },
+      "complete_wav_wall_p95_ms": {
+        "session_median": 270.2279999975872,
+        "best": 254.86870000167983,
+        "worst": 298.8005000006524
+      },
+      "server_inference_p50_ms": {
+        "session_median": 204.18625,
+        "best": 199.7555,
+        "worst": 208.611
+      },
+      "wall_rtf_p50": {
+        "session_median": 0.12871678591723418,
+        "best": 0.12789954207103904,
+        "worst": 0.1333756153408296
+      },
+      "stream_ttfp_p50_ms": {
+        "session_median": 95.09609999986424,
+        "best": 92.52855000158888,
+        "worst": 101.43415000129608
+      },
+      "stream_ttfp_p95_ms": {
+        "session_median": 121.4291999967827,
+        "best": 110.24140000517946,
+        "worst": 143.4517000016058
+      },
+      "stream_keepalive_ttfp_p50_ms": {
+        "session_median": 82.67117499781307,
+        "best": 81.48670000082348,
+        "worst": 84.61634999912349
+      },
+      "stream_keepalive_ttfp_p95_ms": {
+        "session_median": 116.56529999891063,
+        "best": 100.0999000025331,
+        "worst": 132.89680000161752
+      },
+      "stream_audible_ttfa_p50_ms": {
+        "session_median": 101.72109999986424,
+        "best": 99.15355000158888,
+        "worst": 108.05915000129608
+      },
+      "stream_audible_ttfa_p95_ms": {
+        "session_median": 128.0541999967827,
+        "best": 116.86640000517946,
+        "worst": 150.0767000016058
+      },
+      "stream_keepalive_audible_ttfa_p50_ms": {
+        "session_median": 89.29617499781307,
+        "best": 88.11170000082348,
+        "worst": 91.24134999912349
+      },
+      "stream_keepalive_audible_ttfa_p95_ms": {
+        "session_median": 123.19029999891063,
+        "best": 106.7249000025331,
+        "worst": 139.52180000161752
+      },
+      "gpu_busy_p50_percent": {
+        "session_median": 44.0,
+        "best": 43.0,
+        "worst": 45.0
+      },
+      "gpu_busy_p95_percent": {
+        "session_median": 48.0,
+        "best": 48.0,
+        "worst": 49.0
+      }
+    }
+  }
 }

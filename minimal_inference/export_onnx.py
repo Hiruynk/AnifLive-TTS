@@ -121,6 +121,44 @@ class SoVITS(nn.Module):
             pred_semantic, text_seq, refer_list, sv_emb=sv_emb_list, noise_scale=noise_scale, speed=speed
         )
 
+
+class SoVITSStreaming(nn.Module):
+    """Export the native V2ProPlus latent-overlap streaming decoder."""
+
+    def __init__(self, vq_model, version):
+        super().__init__()
+        self.vq_model = vq_model
+        self.version = version
+
+    def forward(
+        self,
+        pred_semantic,
+        text_seq,
+        refer_spec,
+        sv_emb,
+        noise_scale,
+        speed,
+        result_length,
+        overlap_frames,
+        overlap_enabled,
+        acoustic_noise,
+    ):
+        refer_list = [refer_spec]
+        sv_emb_list = [sv_emb] if sv_emb is not None else None
+        return self.vq_model.decode_streaming(
+            pred_semantic,
+            text_seq,
+            refer_list,
+            sv_emb=sv_emb_list,
+            noise_scale=noise_scale,
+            speed=speed,
+            result_length=result_length[0],
+            overlap_frames=overlap_frames,
+            padding_length=None,
+            overlap_enabled=overlap_enabled,
+            acoustic_noise=acoustic_noise,
+        )
+
 class VQEncoder(nn.Module):
     def __init__(self, vq_model):
         super().__init__()
@@ -640,6 +678,57 @@ def export_onnx(args):
         dynamo=False
     )
 
+    if "Pro" not in model_version:
+        raise RuntimeError(
+            "AnifLive-TTS v1.1 streaming export currently requires a V2ProPlus model"
+        )
+    print("Exporting SoVITS streaming decoder...")
+    sovits_streaming_wrapper = SoVITSStreaming(vq_model, model_version)
+    streaming_result_length = torch.tensor([18], dtype=torch.int64)
+    streaming_overlap = torch.zeros(
+        1, 192, args.stream_overlap_frames, dtype=torch.float32
+    )
+    streaming_overlap_enabled = torch.ones(1, dtype=torch.float32)
+    streaming_acoustic_noise = torch.randn(1, 192, 36, dtype=torch.float32)
+    torch.onnx.export(
+        sovits_streaming_wrapper,
+        (
+            pred_semantic,
+            text_seq,
+            refer_spec,
+            sv_emb,
+            noise_scale,
+            speed,
+            streaming_result_length,
+            streaming_overlap,
+            streaming_overlap_enabled,
+            streaming_acoustic_noise,
+        ),
+        f"{output_dir}/sovits_stream.onnx",
+        input_names=[
+            "pred_semantic",
+            "text_seq",
+            "refer_spec",
+            "sv_emb",
+            "noise_scale",
+            "speed",
+            "result_length",
+            "overlap_frames",
+            "overlap_enabled",
+            "acoustic_noise",
+        ],
+        output_names=["audio", "latent", "latent_mask"],
+        dynamic_axes={
+            "pred_semantic": {2: "sem_len"},
+            "text_seq": {1: "text_len"},
+            "refer_spec": {2: "ref_len"},
+            "result_length": {0: "one"},
+            "acoustic_noise": {2: "result_frames"},
+        },
+        opset_version=20,
+        dynamo=False,
+    )
+
     # Export SpectrogramWrapper
     print("Exporting Spectrogram...")
     spec_wrapper = SpectrogramWrapper(
@@ -726,6 +815,9 @@ def export_onnx(args):
             "embedding_size": 20480 if "Pro" in model_version else 512,
             "model_version": model_version,
         },
+        "streaming": {
+            "overlap_frames": args.stream_overlap_frames,
+        },
     }
     with open(f"{output_dir}/config.json", "w", encoding="utf-8") as f:
         json.dump(config_dict, f, indent=4, ensure_ascii=False)
@@ -745,6 +837,12 @@ if __name__ == "__main__":
     parser.add_argument("--bert_path", default="pretrained_models/chinese-roberta-wwm-ext-large")
     parser.add_argument("--sv_path", default=None, help="Path to SV model (default: pretrained_models/sv/pretrained_eres2netv2w24s4ep4.ckpt)")
     parser.add_argument("--max_len", type=int, default=2000, help="Pre-allocated KV cache length")
+    parser.add_argument(
+        "--stream_overlap_frames",
+        type=int,
+        default=32,
+        help="Static latent overlap exported into the V2ProPlus streaming decoder",
+    )
     parser.add_argument("--output_dir", default="onnx_export", help="Output directory for ONNX models")
     parser.add_argument("--validate", action="store_true", help="Enable ONNX export accuracy validation")
     parser.add_argument("--validation_device", default="cpu", choices=["cpu", "cuda"], help="Device for ONNX validation (default: cpu)")
@@ -755,6 +853,9 @@ if __name__ == "__main__":
     )
 
     args = parser.parse_args()
+
+    if args.stream_overlap_frames <= 0 or args.stream_overlap_frames % 2:
+        parser.error("--stream_overlap_frames must be a positive even integer")
 
     # Set SV model path if provided
     if args.sv_path:

@@ -13,6 +13,12 @@ import wave
 from pathlib import Path
 from typing import Any
 
+from benchmark_audio import (
+    AUDIBLE_FRAME_MS,
+    AUDIBLE_THRESHOLD_DBFS,
+    analyze_pcm16_stream,
+)
+
 
 def percentile(values: list[float], fraction: float) -> float:
     ordered = sorted(values)
@@ -73,9 +79,16 @@ def request(host: str, port: int, body: bytes, *, stream: bool) -> dict[str, Any
         {"Content-Type": "application/json; charset=utf-8"},
     )
     response = connection.getresponse()
-    first = response.read1(64 * 1024) if stream else b""
-    first_audio = time.perf_counter()
-    payload = first + response.read()
+    stream_chunks: list[tuple[float, bytes]] = []
+    if stream:
+        while True:
+            chunk = response.read1(64 * 1024)
+            if not chunk:
+                break
+            stream_chunks.append((time.perf_counter() - started, chunk))
+        payload = b"".join(chunk for _, chunk in stream_chunks)
+    else:
+        payload = response.read()
     completed = time.perf_counter()
     headers = {key.lower(): value for key, value in response.getheaders()}
     connection.close()
@@ -84,12 +97,12 @@ def request(host: str, port: int, body: bytes, *, stream: bool) -> dict[str, Any
     if stream:
         sample_rate = int(headers["x-tts-sample-rate"])
         audio_duration = len(payload) / 2 / sample_rate
-        ttfa = first_audio - started
+        audibility = analyze_pcm16_stream(stream_chunks, sample_rate)
     else:
         with wave.open(io.BytesIO(payload), "rb") as wav:
             sample_rate = wav.getframerate()
             audio_duration = wav.getnframes() / sample_rate
-        ttfa = None
+        audibility = None
     stage_headers = {
         "text_processing": "x-tts-stage-text-seconds",
         "gpt_encoder": "x-tts-stage-gpt-encoder-seconds",
@@ -105,11 +118,18 @@ def request(host: str, port: int, body: bytes, *, stream: bool) -> dict[str, Any
     )
     return {
         "wall_seconds": wall_seconds,
-        "ttfa_seconds": ttfa,
-        "first_audio_bytes": len(first) if stream else None,
-        "first_audio_samples": len(first) // 2 if stream else None,
-        "first_audio_duration_seconds": (
-            len(first) / 2 / sample_rate if stream else None
+        "ttfp_seconds": audibility.ttfp_seconds if audibility else None,
+        "audible_ttfa_seconds": (
+            audibility.audible_ttfa_seconds if audibility else None
+        ),
+        "leading_silence_seconds": (
+            audibility.leading_silence_seconds if audibility else None
+        ),
+        "first_active_sample": (
+            audibility.first_active_sample if audibility else None
+        ),
+        "first_active_chunk_index": (
+            audibility.first_active_chunk_index if audibility else None
         ),
         "audio_duration_seconds": audio_duration,
         "wall_rtf": wall_seconds / audio_duration,
@@ -160,12 +180,9 @@ def main() -> int:
     full_server = [row["server_inference_seconds"] for row in full]
     full_wall_rtf = [row["wall_rtf"] for row in full]
     full_server_rtf = [row["server_rtf"] for row in full if row["server_rtf"] is not None]
-    ttfa = [row["ttfa_seconds"] for row in streaming]
-    first_audio_bytes = [row["first_audio_bytes"] for row in streaming]
-    first_audio_samples = [row["first_audio_samples"] for row in streaming]
-    first_audio_duration = [
-        row["first_audio_duration_seconds"] for row in streaming
-    ]
+    ttfp = [row["ttfp_seconds"] for row in streaming]
+    audible_ttfa = [row["audible_ttfa_seconds"] for row in streaming]
+    leading_silence = [row["leading_silence_seconds"] for row in streaming]
     stream_wall = [row["wall_seconds"] for row in streaming]
     stage_names = sorted(
         set().union(*(row["stage_seconds"].keys() for row in full))
@@ -189,10 +206,14 @@ def main() -> int:
         "semantic_tokens": full[-1]["semantic_tokens"],
         "full_wall_rtf": summary(full_wall_rtf),
         "full_server_rtf": summary(full_server_rtf),
-        "stream_ttfa_seconds": summary(ttfa),
-        "stream_first_audio_bytes": summary(first_audio_bytes),
-        "stream_first_audio_samples": summary(first_audio_samples),
-        "stream_first_audio_duration_seconds": summary(first_audio_duration),
+        "stream_ttfp_seconds": summary(ttfp),
+        "stream_audible_ttfa_seconds": summary(audible_ttfa),
+        "stream_leading_silence_seconds": summary(leading_silence),
+        "audibility": {
+            "threshold_dbfs": AUDIBLE_THRESHOLD_DBFS,
+            "frame_ms": AUDIBLE_FRAME_MS,
+            "device_output_latency_included": False,
+        },
         "stream_full_wall_seconds": summary(stream_wall),
         "audio_duration_seconds": full[-1]["audio_duration_seconds"],
         "tensorrt_execution_proof": {

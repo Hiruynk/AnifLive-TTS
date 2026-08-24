@@ -17,7 +17,7 @@
 - Portable ONNX files move between supported hosts; TensorRT engines do not. Rebuild engines and run `validate --enqueue` inside the target Linux container and GPU before serving.
 - The API request path performs no dependency installation, engine building, checkpoint loading, or network download.
 - CUDA 12.1 engines pass build and load validation. RTX 5070 Ti requires CUDA 12.8, so CUDA 12.1 GPU end-to-end inference is not claimed on this machine.
-- Original AnifLive-TTS code is licensed under PolyForm Noncommercial 1.0.0. Commercial use requires a separate written Commercial License from AnifEngine. Upstream and third-party components retain their respective licenses; see `LICENSING.md`, `THIRD_PARTY_NOTICES.md`, and the attached SBOMs.
+- Original AnifLive-TTS code is licensed under PolyForm Noncommercial 1.0.0. Commercial use requires a separate written Commercial License from Hiruynk. Upstream and third-party components retain their respective licenses; see `LICENSING.md`, `THIRD_PARTY_NOTICES.md`, and the attached SBOMs.
 
 ## 繁體中文
 
@@ -36,4 +36,4 @@
 - 可攜 ONNX 檔案可移至受支援主機，但 TensorRT 引擎不可跨環境通用。提供服務前，必須在目標 Linux 容器與 GPU 內重建引擎，並執行 `validate --enqueue`。
 - API 請求期間不會安裝依賴、建立引擎、載入 checkpoint 或從網絡下載檔案。
 - CUDA 12.1 引擎已通過建置與載入驗證。RTX 5070 Ti 最低需要 CUDA 12.8，因此本機不宣稱已完成 CUDA 12.1 GPU 端到端推理驗證。
-- AnifLive-TTS 原創程式碼採用 PolyForm Noncommercial 1.0.0；商業使用須另行取得 AnifEngine 的書面商業授權。上游及第三方組件維持各自授權，詳見 `LICENSING.md`、`THIRD_PARTY_NOTICES.md` 與 release 附件中的 SBOM。
+- AnifLive-TTS 原創程式碼採用 PolyForm Noncommercial 1.0.0；商業使用須另行取得 Hiruynk 的書面商業授權。上游及第三方組件維持各自授權，詳見 `LICENSING.md`、`THIRD_PARTY_NOTICES.md` 與 release 附件中的 SBOM。

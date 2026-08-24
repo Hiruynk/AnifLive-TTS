@@ -33,7 +33,7 @@ def test_container_release_records_source_and_evidence() -> None:
     assert "VCS_REF=${{ github.sha }}" in workflow
     assert "BUILD_DATE=${{ steps.build_date.outputs.value }}" in workflow
     assert "index:org.opencontainers.image.revision=${{ github.sha }}" in workflow
-    assert "RELEASE-METADATA-AnifLive-TTS-v1.0.0-" in workflow
+    assert "RELEASE-METADATA-AnifLive-TTS-v1.1.0-" in workflow
     assert "provenance: mode=max" in workflow
     assert "pyspdxtools -i" in workflow
     assert workflow.count('python scripts/normalize_spdx_sbom.py "${output}"') == 2
@@ -45,6 +45,6 @@ def test_release_checksums_cover_all_image_evidence() -> None:
         encoding="utf-8"
     )
     assert "RELEASE-METADATA-AnifLive-TTS-v$Version-cu128.json" in script
-    assert "RELEASE-METADATA-AnifLive-TTS-v$Version-cu121.json" in script
+    assert "RELEASE-METADATA-AnifLive-TTS-v$Version-cu126.json" in script
     assert "TRIVY-AnifLive-TTS-v$Version-cu128.json" in script
-    assert "TRIVY-AnifLive-TTS-v$Version-cu121.json" in script
+    assert "TRIVY-AnifLive-TTS-v$Version-cu126.json" in script

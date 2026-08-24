@@ -19,6 +19,7 @@ unknown-length stream is a valid RIFF/WAV file.
 from __future__ import annotations
 
 import argparse
+import gc
 import importlib
 import io
 import json
@@ -27,6 +28,7 @@ import math
 import os
 import queue
 import re
+import secrets
 import sys
 import threading
 import time
@@ -42,6 +44,8 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 
+from aniflive_tts.runtime_control import WarmRetentionController
+
 
 LOGGER = logging.getLogger("aniflive_tts.service")
 logging.basicConfig(
@@ -50,6 +54,7 @@ logging.basicConfig(
 )
 
 SERVICE_NAME = "AnifLive-TTS"
+SERVICE_VERSION = "1.1.0"
 MODEL_ID = os.environ.get("ANIFLIVE_TTS_MODEL_ID", "unconfigured")
 VOICE_ID = os.environ.get("ANIFLIVE_TTS_VOICE_PROFILE", "default")
 REFERENCE_TEXT = os.environ.get("ANIFLIVE_TTS_REFERENCE_TEXT", "")
@@ -63,34 +68,51 @@ REQUIRED_ENGINES = (
     "sovits",
     "spectrogram",
     "sv_embedding",
+    "sovits_stream",
 )
 DEFAULTS = {
     "top_k": 15,
     "top_p": 1.0,
     "temperature": 1.0,
     "speed": 1.0,
-    "pause_length": 0.3,
+    "pause_length": 0.440,
     "noise_scale": 0.5,
     "seed": -1,
 }
 MAX_TEXT_CHARS = 1000
 MAX_JSON_BODY_BYTES = 64 * 1024
-ALLOWED_CUT_PUNCTUATION = frozenset(",.;?!、，。？！；：…")
+SAFE_INFERENCE_BOUNDARIES = frozenset(",.;?!、，。？！；")
+ALLOWED_CUT_PUNCTUATION = SAFE_INFERENCE_BOUNDARIES
+BOUNDARY_CLOSERS = frozenset("\"'”’」』）》】〕〉")
+STREAM_CALIBRATION_TEXT = {
+    "zh": "你好，今天天氣很好。",
+    "yue": "你好，今日天氣好好。",
+    "en": "Hello, the weather is nice today.",
+    "ja": "今日はいい天気ですね。",
+    "ko": "안녕하세요, 오늘 날씨가 좋네요.",
+}
+NON_TERMINAL_ABBREVIATIONS = frozenset(
+    {"mr", "mrs", "ms", "dr", "prof", "sr", "jr", "st", "vs", "etc", "e.g", "i.e"}
+)
 # A TensorRT profile bounds the length of one model invocation, not the total
 # HTTP request.  Keep every internal invocation comfortably inside the profile
 # selected by the per-GPU builder.  Long requests are split at sentence
 # boundaries (or, as a final safeguard, at a character boundary).
 PROFILE_SEGMENT_CHAR_LIMITS = {
     "small": 32,
-    # The fitted profile has a 100-phoneme SoVITS text maximum.  A conservative
-    # 24-character input bound keeps multilingual Japanese/Cantonese text in
-    # range; the reference features are cached, so segmentation no longer
-    # repeats expensive SSL/VQ/spec/SV work.
-    "fitted": 24,
+    # The fitted profile has a 100-phoneme text maximum and a 250-token
+    # semantic maximum. Thirty-two characters avoids unnecessarily resetting
+    # prosody inside ordinary punctuation-free clauses. The runtime still
+    # validates the actual phoneme count before every TensorRT enqueue.
+    "fitted": 32,
     "medium": 72,
     "large": 160,
 }
-DEFAULT_SAFE_CUT_PUNCTUATION = "。！？.!?、，；："
+DEFAULT_SAFE_CUT_PUNCTUATION = ",.;?!、，。？！；"
+STREAM_RECOMMENDED_PREBUFFER_MS = 32
+STREAM_LONG_RECOMMENDED_PREBUFFER_MS = 64
+STREAM_LONG_SEGMENT_CHAR_THRESHOLD = 16
+MIN_NATURAL_SEGMENT_CONTENT_CHARS = 8
 
 LANGUAGE_MAP = {
     "中文": "all_zh",
@@ -129,6 +151,18 @@ class RequestBodyTooLarge(RequestError):
     """The JSON request exceeds the public API's fixed memory budget."""
 
     status_code = 413
+
+
+class ServiceBusy(RequestError):
+    """The single active voice is already serving another request."""
+
+    status_code = 429
+
+
+class ModelSwitchConflict(RequestError):
+    """The active voice cannot be replaced while inference is running."""
+
+    status_code = 409
 
 
 class TensorRTRuntimeError(RuntimeError):
@@ -195,7 +229,12 @@ class SynthesisResult:
 
 
 def _json_response(message: str, status_code: int = 400) -> JSONResponse:
-    return JSONResponse({"code": status_code, "message": message}, status_code=status_code)
+    headers = {"Retry-After": "1"} if status_code == 429 else None
+    return JSONResponse(
+        {"code": status_code, "message": message},
+        status_code=status_code,
+        headers=headers,
+    )
 
 
 def _normalise_language(value: Any, field: str) -> str:
@@ -294,24 +333,62 @@ def _boolean(value: Any, field: str, default: bool) -> bool:
     raise RequestError(f"{field} must be a boolean")
 
 
-def _cut_segments(text: str, cut_punc: str) -> list[str]:
-    """Apply the GPT-SoVITS ``cut_punc`` convention before native segmentation."""
+def _is_safe_inference_boundary(text: str, index: int, selected: set[str]) -> bool:
+    character = text[index]
+    if character not in selected:
+        return False
+    previous = text[index - 1] if index else ""
+    following = text[index + 1] if index + 1 < len(text) else ""
+    if character in {",", "，"} and previous.isdigit() and following.isdigit():
+        return False
+    if character != ".":
+        return True
+    if previous == "." or following == ".":
+        return False
+    if previous.isdigit() and following.isdigit():
+        return False
+    token_match = re.search(r"([^\s]+)$", text[:index])
+    token = token_match.group(1) if token_match else ""
+    lowered = token.lower().rstrip(".")
+    if "://" in token or "@" in token or token.lower().startswith("www"):
+        return False
+    if lowered in NON_TERMINAL_ABBREVIATIONS:
+        return False
+    if len(token) == 1 and token.isalpha() and following:
+        return False
+    return True
 
-    if not cut_punc:
-        return [text]
-    selected = "".join(character for character in cut_punc if character in ALLOWED_CUT_PUNCTUATION)
-    if not selected:
-        return [text]
-    pieces = re.split(f"([{re.escape(selected)}])", text)
+
+def _cut_segments(text: str, cut_punc: str) -> list[str]:
+    """Split only at speech-safe punctuation, preserving punctuation and quotes."""
+
+    selected = set(DEFAULT_SAFE_CUT_PUNCTUATION)
+    selected.update(character for character in cut_punc if character in ALLOWED_CUT_PUNCTUATION)
     segments: list[str] = []
-    for index in range(0, len(pieces) - 1, 2):
-        segment = (pieces[index] + pieces[index + 1]).strip()
-        if segment:
+    start = 0
+    index = 0
+    while index < len(text):
+        paragraph_break = text[index] == "\n" and index + 1 < len(text) and text[index + 1] == "\n"
+        if not paragraph_break and not _is_safe_inference_boundary(text, index, selected):
+            index += 1
+            continue
+        end = index + (2 if paragraph_break else 1)
+        if paragraph_break:
+            while end < len(text) and text[end] == "\n":
+                end += 1
+        else:
+            while end < len(text) and _is_safe_inference_boundary(text, end, selected):
+                end += 1
+            while end < len(text) and text[end] in BOUNDARY_CLOSERS:
+                end += 1
+        segment = text[start:end].lstrip(" \t")
+        if segment.strip():
             segments.append(segment)
-    if len(pieces) % 2:
-        tail = pieces[-1].strip()
-        if tail:
-            segments.append(tail)
+        start = end
+        index = end
+    tail = text[start:].strip()
+    if tail:
+        segments.append(tail)
     return segments or [text]
 
 
@@ -320,11 +397,11 @@ def _bounded_segments(text: str, cut_punc: str, maximum_characters: int) -> list
 
     if maximum_characters < 1:
         raise TensorRTRuntimeError("TensorRT engine has an invalid text segment limit")
-    initial = _cut_segments(text, cut_punc or DEFAULT_SAFE_CUT_PUNCTUATION)
-    boundary_characters = set(cut_punc or DEFAULT_SAFE_CUT_PUNCTUATION)
+    initial = _cut_segments(text, cut_punc)
+    boundary_characters = set(DEFAULT_SAFE_CUT_PUNCTUATION)
     result: list[str] = []
     for segment in initial:
-        remaining = segment.strip()
+        remaining = segment.lstrip(" \t")
         while len(remaining) > maximum_characters:
             window = remaining[: maximum_characters + 1]
             split_at = max((window.rfind(character) + 1 for character in boundary_characters), default=0)
@@ -336,10 +413,76 @@ def _bounded_segments(text: str, cut_punc: str, maximum_characters: int) -> list
             chunk = remaining[:split_at].strip()
             if chunk:
                 result.append(chunk)
-            remaining = remaining[split_at:].strip()
-        if remaining:
+            remaining = remaining[split_at:].lstrip(" \t")
+        if remaining.strip():
             result.append(remaining)
     return result or [text]
+
+
+def _natural_segment_content_length(segment: str) -> int:
+    return sum(
+        1
+        for character in segment
+        if not character.isspace()
+        and character not in SAFE_INFERENCE_BOUNDARIES
+        and character not in BOUNDARY_CLOSERS
+    )
+
+
+def _has_natural_inference_boundary(segment: str) -> bool:
+    if segment.endswith(("\n\n", "\r\n\r\n")):
+        return True
+    ending = segment.rstrip().rstrip("".join(BOUNDARY_CLOSERS))
+    return bool(ending) and ending[-1] in SAFE_INFERENCE_BOUNDARIES
+
+
+def _merge_short_natural_segments(
+    segments: list[str],
+    maximum_characters: int,
+    minimum_content_characters: int = MIN_NATURAL_SEGMENT_CONTENT_CHARS,
+) -> list[str]:
+    """Keep short interjections from becoming empty early-EOS model calls."""
+
+    if maximum_characters < 1:
+        raise TensorRTRuntimeError("TensorRT engine has an invalid text segment limit")
+    if minimum_content_characters < 1:
+        return list(segments)
+
+    pending = [segment for segment in segments if segment.strip()]
+    merged: list[str] = []
+    index = 0
+    while index < len(pending):
+        segment = pending[index]
+        is_short_natural = (
+            _has_natural_inference_boundary(segment)
+            and _natural_segment_content_length(segment) < minimum_content_characters
+        )
+        if is_short_natural and index + 1 < len(pending):
+            combined = segment.rstrip(" \t") + pending[index + 1].lstrip(" \t")
+            if len(combined) <= maximum_characters:
+                pending[index + 1] = combined
+                index += 1
+                continue
+        if is_short_natural and merged:
+            combined = merged[-1].rstrip(" \t") + segment.lstrip(" \t")
+            if len(combined) <= maximum_characters:
+                merged[-1] = combined
+                index += 1
+                continue
+        merged.append(segment)
+        index += 1
+    return merged
+
+
+def _recommended_stream_prebuffer_ms(segments: list[str]) -> int:
+    long_stream = len(segments) > 1 or any(
+        len(segment) > STREAM_LONG_SEGMENT_CHAR_THRESHOLD for segment in segments
+    )
+    return (
+        STREAM_LONG_RECOMMENDED_PREBUFFER_MS
+        if long_stream
+        else STREAM_RECOMMENDED_PREBUFFER_MS
+    )
 
 
 def _pcm16_wav(sample_rate: int, audio: np.ndarray) -> bytes:
@@ -395,10 +538,14 @@ class TensorRTService:
         self._sample_rate: int | None = None
         self._engine_manifest: dict[str, Any] = {}
         self._warmup: dict[str, Any] | None = None
+        self._warm_retention: WarmRetentionController | None = None
         self._segment_char_limit = PROFILE_SEGMENT_CHAR_LIMITS["small"]
-        # The minimal inference runtime owns one CUDA stream/context.  Concurrent
-        # execution against it is not safe, so HTTP requests queue here.
+        # TensorRT execution contexts remain serialized per active voice.  The
+        # admission semaphore rejects hidden queueing before HTTP 200 is sent.
         self._inference_lock = threading.RLock()
+        self._request_slot = threading.BoundedSemaphore(1)
+        self._active_guard = threading.Lock()
+        self._active_requests = 0
 
     @property
     def ready(self) -> bool:
@@ -481,7 +628,33 @@ class TensorRTService:
                 logger=LOGGER,
             )
             self._streamer.prepare_reference()
+            self._streamer.warm_frontends()
             self._run_strict_warmup()
+            self._warm_retention = WarmRetentionController(
+                pulse=self._streamer.keepwarm_pulse,
+                inference_lock=self._inference_lock,
+                is_busy=self._is_busy,
+                retention_seconds=float(
+                    os.environ.get("ANIFLIVE_TTS_WARM_RETENTION_SECONDS", "25")
+                ),
+                pulse_interval_seconds=float(
+                    os.environ.get("ANIFLIVE_TTS_WARM_PULSE_INTERVAL_SECONDS", "6")
+                ),
+                maximum_temperature_c=int(
+                    os.environ.get("ANIFLIVE_TTS_WARM_MAX_TEMP_C", "70")
+                ),
+                resume_temperature_c=int(
+                    os.environ.get("ANIFLIVE_TTS_WARM_RESUME_TEMP_C", "65")
+                ),
+                maximum_utilization_percent=int(
+                    os.environ.get("ANIFLIVE_TTS_WARM_MAX_GPU_UTILIZATION", "20")
+                ),
+                maximum_pulse_seconds=float(
+                    os.environ.get("ANIFLIVE_TTS_WARM_MAX_PULSE_SECONDS", "0.020")
+                ),
+            )
+            self._warm_retention.start()
+            self._warm_retention.notify_real_activity()
         except Exception as error:
             self.unload()
             if isinstance(error, TensorRTRuntimeError):
@@ -491,6 +664,14 @@ class TensorRTService:
             ) from error
 
     def unload(self) -> None:
+        if self._warm_retention is not None:
+            self._warm_retention.stop()
+            self._warm_retention = None
+        if self._streamer is not None:
+            try:
+                self._streamer.close()
+            except Exception:
+                LOGGER.debug("Streaming runtime cleanup failed", exc_info=True)
         self._engine = None
         self._streamer = None
         self._sample_rate = None
@@ -499,7 +680,10 @@ class TensorRTService:
         if self._torch is not None:
             try:
                 if self._torch.cuda.is_available():
+                    self._torch.cuda.synchronize()
+                    gc.collect()
                     self._torch.cuda.empty_cache()
+                    self._torch.cuda.synchronize()
             except Exception:  # pragma: no cover - best-effort CUDA cleanup
                 LOGGER.debug("CUDA cache cleanup failed", exc_info=True)
         self._torch = None
@@ -509,26 +693,29 @@ class TensorRTService:
         if self._engine is None or self._streamer is None or self._sample_rate is None:
             raise TensorRTRuntimeError("TensorRT pipeline is not loaded")
 
+        self._begin_request()
         started = time.perf_counter()
-        with self._inference_lock:
-            if options.seed >= 0:
-                self._torch.manual_seed(options.seed)
-                self._torch.cuda.manual_seed_all(options.seed)
-            segments = self._segments(options)
-            outputs = list(self._streamer.iter_audio(
-                segments=segments,
-                text_language=options.text_language,
-                top_k=options.top_k,
-                top_p=options.top_p,
-                temperature=options.temperature,
-                noise_scale=options.noise_scale,
-                speed=options.speed,
-                pause_length=options.pause_length,
-                # Full WAV downloads have no first-audio advantage from the
-                # low-latency PCM preview. Decode as much of a
-                # profile-safe sentence as the per-GPU engine permits.
-                chunk_length=self._streamer.complete_wav_chunk_length(),
-            ))
+        request_seed = self._effective_seed(options.seed)
+        try:
+            with self._inference_lock:
+                segments = self._segments(options)
+                outputs = list(self._streamer.iter_audio(
+                    segments=segments,
+                    text_language=options.text_language,
+                    top_k=options.top_k,
+                    top_p=options.top_p,
+                    temperature=options.temperature,
+                    noise_scale=options.noise_scale,
+                    speed=options.speed,
+                    pause_length=options.pause_length,
+                    request_seed=request_seed,
+                    # Full WAV downloads have no first-audio advantage from the
+                    # low-latency PCM preview. Decode as much of a
+                    # profile-safe sentence as the per-GPU engine permits.
+                    chunk_length=self._streamer.complete_wav_chunk_length(),
+                ))
+        finally:
+            self._end_request()
         if not outputs:
             raise TensorRTRuntimeError("TensorRT produced no audio chunks")
         postprocess_started = time.perf_counter()
@@ -555,8 +742,10 @@ class TensorRTService:
         if self._engine is None or self._streamer is None or self._sample_rate is None:
             raise TensorRTRuntimeError("TensorRT pipeline is not loaded")
 
+        self._begin_request()
         chunks: queue.Queue[bytes | BaseException | None] = queue.Queue(maxsize=3)
         cancelled = threading.Event()
+        request_seed = self._effective_seed(options.seed)
 
         def put(item: bytes | BaseException | None) -> bool:
             while not cancelled.is_set():
@@ -570,9 +759,6 @@ class TensorRTService:
         def produce() -> None:
             try:
                 with self._inference_lock:
-                    if options.seed >= 0:
-                        self._torch.manual_seed(options.seed)
-                        self._torch.cuda.manual_seed_all(options.seed)
                     segments = self._segments(options)
                     for audio in self._streamer.iter_audio(
                         segments=segments,
@@ -583,6 +769,8 @@ class TensorRTService:
                         noise_scale=options.noise_scale,
                         speed=options.speed,
                         pause_length=options.pause_length,
+                        request_seed=request_seed,
+                        cancelled=cancelled,
                         chunk_length=self._streamer.streaming_chunk_length(),
                     ):
                         payload = _pcm16_bytes(audio)
@@ -592,9 +780,14 @@ class TensorRTService:
                 put(error)
             finally:
                 put(None)
+                self._end_request()
 
         worker = threading.Thread(target=produce, name="aniflive-tts-trt-stream", daemon=True)
-        worker.start()
+        try:
+            worker.start()
+        except BaseException:
+            self._end_request()
+            raise
 
         def consume() -> Iterator[bytes]:
             try:
@@ -614,10 +807,34 @@ class TensorRTService:
 
         return consume()
 
+    @staticmethod
+    def _effective_seed(seed: int) -> int:
+        return int(seed) if seed >= 0 else secrets.randbelow((1 << 63) - 1)
+
+    def _begin_request(self) -> None:
+        if not self._request_slot.acquire(blocking=False):
+            raise ServiceBusy("AnifLive-TTS is already processing a synthesis request")
+        with self._active_guard:
+            self._active_requests += 1
+
+    def _end_request(self) -> None:
+        with self._active_guard:
+            self._active_requests = max(0, self._active_requests - 1)
+        self._request_slot.release()
+        if self._warm_retention is not None:
+            self._warm_retention.notify_real_activity()
+
+    def _is_busy(self) -> bool:
+        with self._active_guard:
+            return self._active_requests > 0
+
     def _segments(self, options: SynthesisOptions) -> list[str]:
-        return _bounded_segments(
-            options.text,
-            options.cut_punc,
+        return _merge_short_natural_segments(
+            _bounded_segments(
+                options.text,
+                options.cut_punc,
+                self._segment_char_limit,
+            ),
             self._segment_char_limit,
         )
 
@@ -642,6 +859,7 @@ class TensorRTService:
         )
         return {
             "service": SERVICE_NAME,
+            "version": SERVICE_VERSION,
             "status": "ok" if self.ready else "not_ready",
             "ready": self.ready,
             "backend": "TensorRT-11",
@@ -664,6 +882,10 @@ class TensorRTService:
                 "complete_wav": "request stream=false",
             },
             "startup_warmup": self._warmup,
+            "active_requests": self._active_requests,
+            "warm_retention": (
+                self._warm_retention.status() if self._warm_retention is not None else None
+            ),
         }
 
     def _resolve_segment_char_limit(self) -> int:
@@ -718,7 +940,7 @@ class TensorRTService:
                 del sys.modules["run_trt_inference"]
 
     def _run_strict_warmup(self) -> None:
-        # This goes through all eight engines using the actual bundled reference
+        # This goes through the complete engine bundle using the actual reference
         # audio.  A model constructor's dummy warmup is intentionally not enough
         # evidence that a per-GPU TensorRT build can synthesize speech.
         options = SynthesisOptions(
@@ -734,19 +956,258 @@ class TensorRTService:
             seed=1234,
         )
         result = self.synthesize(options)
+        calibration_options = SynthesisOptions(
+            text=STREAM_CALIBRATION_TEXT.get(REFERENCE_LANGUAGE, REFERENCE_TEXT),
+            text_language=REFERENCE_LANGUAGE,
+            top_k=options.top_k,
+            top_p=options.top_p,
+            temperature=options.temperature,
+            speed=options.speed,
+            pause_length=0.0,
+            noise_scale=options.noise_scale,
+            cut_punc="",
+            seed=options.seed,
+        )
+        calibration_started = time.perf_counter()
+        calibration_bytes = sum(len(chunk) for chunk in self.stream_pcm(calibration_options))
+        calibration_elapsed = time.perf_counter() - calibration_started
+        if calibration_bytes <= 0:
+            raise TensorRTRuntimeError("TensorRT streaming calibration produced no PCM")
         self._warmup = {
             "completed": True,
             "sample_rate": result.sample_rate,
             "output_samples": result.output_samples,
             "elapsed_seconds": round(result.elapsed_seconds, 6),
+            "stream_calibration": {
+                "completed": True,
+                "pcm_bytes": calibration_bytes,
+                "elapsed_seconds": round(calibration_elapsed, 6),
+            },
         }
         LOGGER.info(
-            "TensorRT warmup completed in %.3fs (%d samples)",
+            "TensorRT warmup completed in %.3fs (%d samples); stream calibration %.3fs",
             result.elapsed_seconds,
             result.output_samples,
+            calibration_elapsed,
         )
 
-SERVICE = TensorRTService(RuntimeSettings.from_env())
+def _sync_runtime_identity_from_env() -> None:
+    global MODEL_ID, VOICE_ID, REFERENCE_TEXT, REFERENCE_LANGUAGE
+
+    MODEL_ID = os.environ.get("ANIFLIVE_TTS_MODEL_ID", "unconfigured")
+    VOICE_ID = os.environ.get("ANIFLIVE_TTS_VOICE_PROFILE", "default")
+    REFERENCE_TEXT = os.environ.get("ANIFLIVE_TTS_REFERENCE_TEXT", "")
+    REFERENCE_LANGUAGE = os.environ.get("ANIFLIVE_TTS_REFERENCE_LANGUAGE", "ja")
+
+
+class RuntimeServiceManager:
+    """Own one TensorRT voice at a time and switch packages transactionally."""
+
+    def __init__(self, service: TensorRTService) -> None:
+        self._service = service
+        self._switch_lock = threading.RLock()
+        self._switching = False
+        self._package_dir = Path(
+            os.environ.get("ANIFLIVE_TTS_MODEL_PACKAGE", "/data/models/active")
+        ).expanduser().resolve()
+
+    @property
+    def settings(self) -> RuntimeSettings:
+        return self._service.settings
+
+    @property
+    def ready(self) -> bool:
+        return self._service.ready and not self._switching
+
+    @property
+    def switching(self) -> bool:
+        return self._switching
+
+    @property
+    def sample_rate(self) -> int:
+        return self._service.sample_rate
+
+    @property
+    def _sample_rate(self) -> int | None:
+        return self._service._sample_rate
+
+    @_sample_rate.setter
+    def _sample_rate(self, value: int | None) -> None:
+        self._service._sample_rate = value
+
+    def load(self) -> None:
+        with self._switch_lock:
+            self._service.load()
+
+    def unload(self) -> None:
+        with self._switch_lock:
+            self._service.unload()
+
+    def synthesize(self, options: SynthesisOptions) -> SynthesisResult:
+        with self._switch_lock:
+            if self._switching:
+                raise ServiceBusy("AnifLive-TTS is switching the active model")
+            return self._service.synthesize(options)
+
+    def synthesize_request(
+        self, options: SynthesisOptions, requested_model: str | None
+    ) -> tuple[SynthesisResult, str]:
+        with self._switch_lock:
+            self._assert_active_model(requested_model)
+            active_model = MODEL_ID
+            return self._service.synthesize(options), active_model
+
+    def stream_pcm(self, options: SynthesisOptions) -> Iterator[bytes]:
+        with self._switch_lock:
+            if self._switching:
+                raise ServiceBusy("AnifLive-TTS is switching the active model")
+            # stream_pcm reserves the one request slot before returning, so a
+            # later activation observes the active producer and is rejected.
+            return self._service.stream_pcm(options)
+
+    def prepare_stream(
+        self, options: SynthesisOptions, requested_model: str | None
+    ) -> tuple[list[str], Iterator[bytes], int, str]:
+        with self._switch_lock:
+            self._assert_active_model(requested_model)
+            active_model = MODEL_ID
+            segments = self._service._segments(options)
+            pcm = self.stream_pcm(options)
+            return segments, pcm, self._service.sample_rate, active_model
+
+    def _segments(self, options: SynthesisOptions) -> list[str]:
+        with self._switch_lock:
+            return self._service._segments(options)
+
+    def health(self) -> dict[str, Any]:
+        payload = self._service.health()
+        payload["ready"] = self.ready
+        payload["status"] = "switching" if self._switching else payload["status"]
+        payload["switching"] = self._switching
+        payload["available_model_count"] = len(self.list_models())
+        return payload
+
+    def list_models(self) -> list[dict[str, Any]]:
+        packages = self._discover_packages()
+        return [
+            {
+                "id": model_id,
+                "object": "model",
+                "owned_by": "aniflive-tts-local",
+                "description": "GPT-SoVITS V2 Pro Plus, TensorRT 11 only",
+                "model_family": str(record["manifest"]["model_family"]),
+                "voice_profiles": list(record["manifest"].get("voice_profiles", [])),
+                "active": model_id == MODEL_ID,
+            }
+            for model_id, record in sorted(packages.items())
+        ]
+
+    def activate(self, model_id: str) -> dict[str, Any]:
+        from .model_package import validate_safe_identifier
+
+        try:
+            requested = validate_safe_identifier(model_id, "model")
+        except Exception as error:
+            raise RequestError("model must be a safe local model identifier") from error
+        with self._switch_lock:
+            if requested == MODEL_ID and self._service.ready:
+                return {"changed": False, "model": MODEL_ID, "voice": VOICE_ID}
+            if self._service._is_busy():
+                raise ModelSwitchConflict(
+                    "Cannot switch models while a synthesis request is active"
+                )
+            packages = self._discover_packages()
+            if requested not in packages:
+                raise RequestError(f"Unknown local model: {requested!r}")
+
+            previous_package = self._package_dir
+            previous_voice = VOICE_ID
+            target_package = Path(packages[requested]["path"])
+            target_voice = validate_safe_identifier(
+                packages[requested]["manifest"].get("default_voice_profile", "default"),
+                "voice_profile",
+            )
+            self._switching = True
+            self._service.unload()
+            try:
+                replacement = self._load_package(target_package, target_voice)
+            except Exception as switch_error:
+                LOGGER.exception("Unable to activate model %s; restoring %s", requested, MODEL_ID)
+                try:
+                    self._service = self._load_package(previous_package, previous_voice)
+                    self._package_dir = previous_package
+                except Exception as rollback_error:
+                    LOGGER.critical("Unable to restore the previous TensorRT model", exc_info=True)
+                    raise TensorRTRuntimeError(
+                        "Model activation failed and the previous model could not be restored"
+                    ) from rollback_error
+                raise TensorRTRuntimeError(
+                    "Model activation failed; the previous model was restored"
+                ) from switch_error
+            finally:
+                self._switching = False
+
+            self._service = replacement
+            self._package_dir = target_package
+            return {"changed": True, "model": MODEL_ID, "voice": VOICE_ID}
+
+    def _load_package(
+        self, package_dir: Path, voice_profile: str = "default"
+    ) -> TensorRTService:
+        from .api import configure_runtime
+        from .settings import RuntimeSettings as PackageRuntimeSettings
+
+        os.environ["ANIFLIVE_TTS_MODEL_PACKAGE"] = str(package_dir)
+        os.environ["ANIFLIVE_TTS_VOICE_PROFILE"] = voice_profile
+        configure_runtime(PackageRuntimeSettings.from_env())
+        _sync_runtime_identity_from_env()
+        service = TensorRTService(RuntimeSettings.from_env())
+        service.load()
+        return service
+
+    @staticmethod
+    def _assert_active_model(requested_model: str | None) -> None:
+        if requested_model is not None and requested_model != MODEL_ID:
+            raise RequestError(f"model must match the active model {MODEL_ID!r}")
+
+    def _discover_packages(self) -> dict[str, dict[str, Any]]:
+        from .model_package import validate_safe_identifier
+
+        registry_root = Path(
+            os.environ.get("ANIFLIVE_TTS_MODEL_REGISTRY", str(self._package_dir.parent))
+        ).expanduser().resolve()
+        candidates = [self._package_dir]
+        if registry_root.is_dir():
+            candidates.extend(
+                child.resolve()
+                for child in registry_root.iterdir()
+                if child.is_dir() and not child.is_symlink()
+            )
+
+        packages: dict[str, dict[str, Any]] = {}
+        for candidate in candidates:
+            manifest_path = candidate / "manifest.json"
+            if not manifest_path.is_file():
+                continue
+            try:
+                manifest = _read_json(manifest_path, "model package manifest")
+                if (
+                    manifest.get("format") != "aniflive-tts-model-package"
+                    or manifest.get("model_family") != "gsv-v2proplus"
+                    or manifest.get("precision") != "FP16"
+                ):
+                    continue
+                model_id = validate_safe_identifier(manifest.get("model_id"), "model_id")
+            except Exception:
+                LOGGER.warning("Ignoring invalid model package metadata in %s", candidate)
+                continue
+            existing = packages.get(model_id)
+            if existing is None or candidate == self._package_dir:
+                packages[model_id] = {"path": candidate, "manifest": manifest}
+        return packages
+
+
+SERVICE = RuntimeServiceManager(TensorRTService(RuntimeSettings.from_env()))
 
 
 def _assert_fixed_reference(values: Mapping[str, Any]) -> None:
@@ -853,7 +1314,11 @@ def _options_from_values(
 
 
 async def _tts_response(
-    values: Mapping[str, Any], *, text_field: str, language_field: str
+    request: Request,
+    values: Mapping[str, Any],
+    *,
+    text_field: str,
+    language_field: str,
 ) -> Response:
     try:
         options = _options_from_values(
@@ -869,26 +1334,39 @@ async def _tts_response(
                 raise RequestError(
                     "stream=true requires response_format='pcm'. A valid RIFF/WAV file needs its final data length; use stream=false for a downloadable WAV."
                 )
-            pcm = SERVICE.stream_pcm(options)
+            requested_model = _optional_string(values.get("model"), "model")
+            request_segments, pcm, sample_rate, response_model = SERVICE.prepare_stream(
+                options, requested_model
+            )
+            recommended_prebuffer_ms = _recommended_stream_prebuffer_ms(request_segments)
             return StreamingResponse(
                 pcm,
                 media_type="application/octet-stream",
                 headers={
                     "X-TTS-Service": SERVICE_NAME,
+                    "X-TTS-Version": SERVICE_VERSION,
                     "X-TensorRT-Backend": "TensorRT-11",
                     "X-TensorRT-Engine-Count": str(len(REQUIRED_ENGINES)),
                     "X-PyTorch-Fallback": "false",
-                    "X-TTS-Model": MODEL_ID,
+                    "X-TTS-Model": response_model,
                     "X-TTS-Stream": "pcm_s16le",
                     "X-TTS-Sample-Format": "s16le",
-                    "X-TTS-Sample-Rate": str(SERVICE.sample_rate),
+                    "X-TTS-Sample-Rate": str(sample_rate),
                     "X-TTS-Channels": "1",
+                    "X-TTS-Recommended-Prebuffer-Ms": str(
+                        recommended_prebuffer_ms
+                    ),
+                    "X-TTS-Queue-Ms": "0.000",
+                    "X-TTS-Pause-Mode": "adaptive",
                     "Cache-Control": "no-store",
                 },
             )
         if response_format != "wav":
             raise RequestError("response_format must be 'wav' when stream=false")
-        result = await run_in_threadpool(SERVICE.synthesize, options)
+        requested_model = _optional_string(values.get("model"), "model")
+        result, response_model = await run_in_threadpool(
+            SERVICE.synthesize_request, options, requested_model
+        )
     except RequestError as error:
         return _json_response(str(error), error.status_code)
     except Exception:
@@ -904,15 +1382,18 @@ async def _tts_response(
         media_type="audio/wav",
         headers={
             "X-TTS-Service": SERVICE_NAME,
+            "X-TTS-Version": SERVICE_VERSION,
             "X-TensorRT-Backend": "TensorRT-11",
             "X-TensorRT-Engine-Count": str(len(REQUIRED_ENGINES)),
             "X-PyTorch-Fallback": "false",
-            "X-TTS-Model": MODEL_ID,
+            "X-TTS-Model": response_model,
             "X-TTS-Sample-Rate": str(result.sample_rate),
             "X-TTS-Output-Samples": str(result.output_samples),
             "X-TTS-Segments": str(result.segments),
             "X-TTS-Inference-Seconds": f"{result.elapsed_seconds:.6f}",
             "X-TTS-Seed": str(options.seed),
+            "X-TTS-Queue-Ms": "0.000",
+            "X-TTS-Pause-Mode": "adaptive",
             "X-TTS-Stage-Text-Seconds": f"{float(result.profile.get('text_processing_seconds', 0.0)):.6f}",
             "X-TTS-Stage-GPT-Encoder-Seconds": f"{float(result.profile.get('gpt_encoder_seconds', 0.0)):.6f}",
             "X-TTS-Stage-GPT-Decode-Seconds": f"{float(result.profile.get('gpt_decode_seconds', 0.0)):.6f}",
@@ -969,8 +1450,8 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(
     title="AnifLive-TTS API",
-    version="1.0.0",
-    description="Low-latency multilingual AnifLive-TTS v1 service backed by TensorRT 11.",
+    version=SERVICE_VERSION,
+    description="Low-latency multilingual AnifLive-TTS v1.1 service backed by TensorRT 11.",
     lifespan=lifespan,
 )
 
@@ -983,6 +1464,7 @@ async def request_validation_error(_: Request, error: RequestValidationError) ->
 
 @app.get("/", response_class=Response)
 async def legacy_tts_get(
+    request: Request,
     text: str | None = None,
     text_language: str | None = None,
     refer_wav_path: str | None = None,
@@ -1001,6 +1483,7 @@ async def legacy_tts_get(
     inp_refs: list[str] = Query(default=[]),
 ) -> Response:
     return await _tts_response(
+        request,
         {
             "text": text,
             "text_language": text_language,
@@ -1030,7 +1513,9 @@ async def legacy_tts_post(request: Request) -> Response:
         body = await _read_json_body(request)
     except RequestError as error:
         return _json_response(str(error), error.status_code)
-    return await _tts_response(body, text_field="text", language_field="text_language")
+    return await _tts_response(
+        request, body, text_field="text", language_field="text_language"
+    )
 
 
 @app.post("/v1/audio/speech", response_class=Response)
@@ -1064,7 +1549,9 @@ async def openai_speech(request: Request) -> Response:
                 if key in generation:
                     body[key] = generation[key]
             body["language"] = _canonical_language(body.get("language"), "language")
-            return await _tts_response(body, text_field="text", language_field="language")
+            return await _tts_response(
+                request, body, text_field="text", language_field="language"
+            )
         voice = _optional_string(body.get("voice"), "voice") or "default"
         if voice not in {"default", VOICE_ID}:
             raise RequestError(f"voice must be 'default' or {VOICE_ID!r}")
@@ -1079,14 +1566,16 @@ async def openai_speech(request: Request) -> Response:
             body["text_lang"] = "auto"
     except RequestError as error:
         return _json_response(str(error), error.status_code)
-    return await _tts_response(body, text_field="input", language_field="text_lang")
+    return await _tts_response(
+        request, body, text_field="input", language_field="text_lang"
+    )
 
 
 @app.get("/v1/capabilities")
 async def capabilities() -> dict[str, Any]:
     return {
         "service": SERVICE_NAME,
-        "version": "1.0.0",
+        "version": SERVICE_VERSION,
         "model_family": "gsv-v2proplus",
         "backend": "TensorRT-11",
         "precision": "FP16",
@@ -1098,6 +1587,8 @@ async def capabilities() -> dict[str, Any]:
             "continuous_vector": False,
         },
         "pytorch_fallback": False,
+        "adaptive_punctuation_segments": True,
+        "warm_retention_seconds": 25,
     }
 
 
@@ -1119,6 +1610,8 @@ async def model_config() -> dict[str, Any]:
         "sample_rate": SERVICE.sample_rate,
         "engine_count": len(REQUIRED_ENGINES),
         "pytorch_fallback": False,
+        "service_version": SERVICE_VERSION,
+        "adaptive_punctuation_segments": True,
     }
 
 
@@ -1179,15 +1672,35 @@ async def set_model_get(
 async def list_models() -> dict[str, Any]:
     return {
         "object": "list",
-        "data": [
-            {
-                "id": MODEL_ID,
-                "object": "model",
-                "owned_by": "aniflive-tts-local",
-                "description": "GPT-SoVITS V2 Pro Plus, TensorRT 11 only",
-            }
-        ],
+        "data": SERVICE.list_models(),
     }
+
+
+@app.post("/v1/models/activate")
+async def activate_model(request: Request) -> JSONResponse:
+    try:
+        body = await _read_json_body(request)
+        model_id = _optional_string(body.get("model"), "model")
+        if model_id is None:
+            raise RequestError("Missing required parameter: model")
+        result = await run_in_threadpool(SERVICE.activate, model_id)
+        return JSONResponse(
+            {
+                "code": 0,
+                "message": "Success",
+                **result,
+                "backend": "TensorRT-11",
+                "pytorch_fallback": False,
+            }
+        )
+    except RequestError as error:
+        return _json_response(str(error), error.status_code)
+    except Exception:
+        LOGGER.exception("TensorRT model activation failed")
+        return _json_response(
+            "TensorRT model activation failed; inspect the AnifLive-TTS container logs",
+            500,
+        )
 
 
 @app.get("/v1/voices")

@@ -1,9 +1,18 @@
 param(
-    [string]$Version = "1.0.0"
+    [string]$Version = "1.1.0",
+    [string]$Python = ""
 )
 
 $ErrorActionPreference = "Stop"
 $Project = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+$Python = if ([string]::IsNullOrWhiteSpace($Python)) {
+    Join-Path $Project ".venv\Scripts\python.exe"
+} else {
+    (Resolve-Path -LiteralPath $Python).Path
+}
+if (-not (Test-Path -LiteralPath $Python -PathType Leaf)) {
+    throw "Python executable not found: $Python"
+}
 $Dist = Join-Path $Project "dist"
 New-Item -ItemType Directory -Path $Dist -Force | Out-Null
 $Stage = Join-Path $Dist (".release-stage-" + [guid]::NewGuid().ToString("N"))
@@ -17,7 +26,7 @@ try {
         throw "Release packaging requires a completely clean Git working tree."
     }
 
-    & (Join-Path $Project ".venv\Scripts\python.exe") `
+    & $Python `
         (Join-Path $Project "scripts\check_release_security.py") `
         --expected-version $Version
     if ($LASTEXITCODE -ne 0) {

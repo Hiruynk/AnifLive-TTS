@@ -1,5 +1,5 @@
 param(
-    [ValidateSet("cu128", "cu121")][string]$CudaProfile = "cu128",
+    [ValidateSet("cu128", "cu126")][string]$CudaProfile = "cu128",
     [switch]$Pull,
     [switch]$Build
 )
@@ -7,7 +7,7 @@ $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root
 $compose = @("compose", "-f", "docker-compose.yml")
-if ($CudaProfile -eq "cu121") { $compose += @("-f", "docker-compose.cu121.yml") }
+if ($CudaProfile -eq "cu126") { $compose += @("-f", "docker-compose.cu126.yml") }
 $compose += @("up", "-d")
 if (-not $Pull) { $compose += @("--pull", "never") }
 if ($Build) {

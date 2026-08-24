@@ -10,7 +10,6 @@ from torch.nn import functional as F
 from GPT_SoVITS.module import commons
 from GPT_SoVITS.module import modules
 from GPT_SoVITS.module import attentions
-from GPT_SoVITS.f5_tts.model import DiT
 from torch.nn import Conv1d, ConvTranspose1d, Conv2d
 from torch.nn.utils import weight_norm, remove_weight_norm, spectral_norm
 from GPT_SoVITS.module.commons import init_weights, get_padding
@@ -211,7 +210,7 @@ class TextEncoder(nn.Module):
 
         self.proj = nn.Conv1d(hidden_channels, out_channels * 2, 1)
 
-    def forward(self, y, y_lengths, text, text_lengths, ge, speed=1, test=None, result_length:int=None, overlap_frames:torch.Tensor=None, padding_length:int=None):
+    def forward(self, y, y_lengths, text, text_lengths, ge, speed=1, test=None, result_length:int=None, overlap_frames:torch.Tensor=None, padding_length:int=None, overlap_enabled:torch.Tensor=None):
         y_mask = torch.unsqueeze(commons.sequence_mask(y_lengths, y.size(2)), 1).to(y.dtype)
 
         y = self.ssl_proj(y * y_mask) * y_mask
@@ -242,10 +241,18 @@ class TextEncoder(nn.Module):
             t = torch.arange(overlap_len * 2, device=y.device, dtype=y.dtype)
             window = torch.sin(t * (math.pi / (overlap_len * 2)))
 
-            y[:,:,:overlap_len] = (
+            blended_overlap = (
                 window[:overlap_len].view(1, 1, -1) * y[:,:,:overlap_len]
                 + window[overlap_len:].view(1, 1, -1) * overlap_frames
             )
+            if overlap_enabled is None:
+                y[:,:,:overlap_len] = blended_overlap
+            else:
+                enabled = overlap_enabled.reshape(1, 1, 1).to(y.dtype)
+                y[:,:,:overlap_len] = (
+                    enabled * blended_overlap
+                    + (1.0 - enabled) * y[:,:,:overlap_len]
+                )
             
         y_ = y
         y_mask_ = y_mask
@@ -1041,7 +1048,7 @@ class SynthesizerTrn(nn.Module):
 
 
     @torch.no_grad()
-    def decode_streaming(self, codes, text, refer, noise_scale=0.5, speed=1, sv_emb=None, result_length:int=None, overlap_frames:torch.Tensor=None, padding_length:int=None):
+    def decode_streaming(self, codes, text, refer, noise_scale=0.5, speed=1, sv_emb=None, result_length:int=None, overlap_frames:torch.Tensor=None, padding_length:int=None, overlap_enabled:torch.Tensor=None, acoustic_noise:torch.Tensor=None):
         def get_ge(refer, sv_emb):
             ge = None
             if refer is not None:
@@ -1086,9 +1093,11 @@ class SynthesizerTrn(nn.Module):
             speed,
             result_length=result_length, 
             overlap_frames=overlap_frames, 
-            padding_length=padding_length
+            padding_length=padding_length,
+            overlap_enabled=overlap_enabled,
             )
-        z_p = m_p + torch.randn_like(m_p) * torch.exp(logs_p) * noise_scale
+        noise = torch.randn_like(m_p) if acoustic_noise is None else acoustic_noise
+        z_p = m_p + noise * torch.exp(logs_p) * noise_scale
 
         z = self.flow(z_p, y_mask, g=ge, reverse=True)
 
@@ -1293,6 +1302,8 @@ class SynthesizerTrnV3(nn.Module):
         self.bridge = nn.Sequential(nn.Conv1d(inter_channels, inter_channels2, 1, stride=1), nn.LeakyReLU())
         self.wns1 = Encoder(inter_channels2, inter_channels2, inter_channels2, 5, 1, 8, gin_channels=gin_channels)
         self.linear_mel = nn.Conv1d(inter_channels2, 100, 1, stride=1)
+        from GPT_SoVITS.f5_tts.model import DiT
+
         self.cfm = CFM(
             100,
             DiT(**dict(dim=1024, depth=22, heads=16, ff_mult=2, text_dim=inter_channels2, conv_layers=4)),
@@ -1449,6 +1460,8 @@ class SynthesizerTrnV3b(nn.Module):
         self.bridge = nn.Sequential(nn.Conv1d(inter_channels, inter_channels2, 1, stride=1), nn.LeakyReLU())
         self.wns1 = Encoder(inter_channels2, inter_channels2, inter_channels2, 5, 1, 8, gin_channels=gin_channels)
         self.linear_mel = nn.Conv1d(inter_channels2, 100, 1, stride=1)
+        from GPT_SoVITS.f5_tts.model import DiT
+
         self.cfm = CFM(
             100,
             DiT(**dict(dim=1024, depth=22, heads=16, ff_mult=2, text_dim=inter_channels2, conv_layers=4)),

@@ -1,5 +1,5 @@
 param(
-    [string]$Version = "1.0.0"
+    [string]$Version = "1.1.0"
 )
 
 $ErrorActionPreference = "Stop"
@@ -8,11 +8,11 @@ $Dist = Join-Path $Project "dist"
 $Artifacts = @(
     (Join-Path $Dist "AnifLive-TTS-v$Version-docker-source-bundle.zip"),
     (Join-Path $Dist "SBOM-AnifLive-TTS-v$Version-cu128.spdx.json"),
-    (Join-Path $Dist "SBOM-AnifLive-TTS-v$Version-cu121.spdx.json"),
+    (Join-Path $Dist "SBOM-AnifLive-TTS-v$Version-cu126.spdx.json"),
     (Join-Path $Dist "RELEASE-METADATA-AnifLive-TTS-v$Version-cu128.json"),
-    (Join-Path $Dist "RELEASE-METADATA-AnifLive-TTS-v$Version-cu121.json"),
+    (Join-Path $Dist "RELEASE-METADATA-AnifLive-TTS-v$Version-cu126.json"),
     (Join-Path $Dist "TRIVY-AnifLive-TTS-v$Version-cu128.json"),
-    (Join-Path $Dist "TRIVY-AnifLive-TTS-v$Version-cu121.json"),
+    (Join-Path $Dist "TRIVY-AnifLive-TTS-v$Version-cu126.json"),
     (Join-Path $Dist "RELEASE_NOTES_v$Version.md")
 )
 

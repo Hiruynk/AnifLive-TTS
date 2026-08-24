@@ -14,13 +14,13 @@ the portions they identify.
 | Dependencies | Each dependency remains subject to its own license; see [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) and the release SBOM |
 
 The PolyForm license applies only to copyrights in original AnifLive-TTS code
-that AnifEngine is entitled to license. It does not replace, restrict, or
+owned or controlled by Hiruynk. It does not replace, restrict, or
 relicense upstream MIT, Apache-2.0, model, data, or dependency terms.
 
 ## Commercial Licensing
 
 The PolyForm Noncommercial License 1.0.0 does not grant commercial-use rights
 for original AnifLive-TTS code. Commercial AnifLive-TTS usage requires a
-separate written Commercial License from AnifEngine. Any commercial license can
-cover only rights controlled by AnifEngine; all upstream and third-party terms
-continue to apply.
+separate written Commercial License from Hiruynk. Any commercial license can
+cover only original rights owned or controlled by Hiruynk; all upstream and
+third-party terms continue to apply.

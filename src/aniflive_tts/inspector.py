@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from io import BytesIO
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -32,8 +33,15 @@ class CheckpointInspection:
 def _load(path: Path, *, allow_unsafe_pickle: bool) -> Any:
     import torch
 
+    def source() -> Path | BytesIO:
+        with path.open("rb") as stream:
+            header = stream.read(2)
+            if header in {b"03", b"04", b"05", b"06"}:
+                return BytesIO(b"PK" + stream.read())
+        return path
+
     try:
-        return torch.load(path, map_location="cpu", weights_only=True)
+        return torch.load(source(), map_location="cpu", weights_only=True)
     except Exception as safe_error:
         if not allow_unsafe_pickle:
             raise ModelInspectionError(
@@ -42,7 +50,7 @@ def _load(path: Path, *, allow_unsafe_pickle: bool) -> Any:
                 f"Original error: {safe_error}"
             ) from safe_error
         try:
-            return torch.load(path, map_location="cpu", weights_only=False)
+            return torch.load(source(), map_location="cpu", weights_only=False)
         except Exception as unsafe_error:
             raise ModelInspectionError(f"Checkpoint load failed for {path}: {unsafe_error}") from unsafe_error
 
@@ -51,7 +59,21 @@ def _config(payload: Any) -> dict[str, Any]:
     if not isinstance(payload, dict):
         return {}
     value = payload.get("config") or payload.get("hps") or {}
-    return value if isinstance(value, dict) else {}
+    return _plain_mapping(value)
+
+
+def _plain_mapping(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        source = value
+    else:
+        source = getattr(value, "__dict__", None)
+        if not isinstance(source, dict):
+            return {}
+    result: dict[str, Any] = {}
+    for key, item in source.items():
+        nested = _plain_mapping(item)
+        result[str(key)] = nested if nested else item
+    return result
 
 
 def _state(payload: Any) -> dict[str, Any]:
@@ -71,7 +93,6 @@ def inspect_checkpoint(path: Path, *, kind: str, allow_unsafe_pickle: bool = Fal
     payload = _load(path, allow_unsafe_pickle=allow_unsafe_pickle)
     config = _config(payload)
     state = _state(payload)
-    keys = tuple(str(key) for key in state)
     evidence: list[str] = []
     version = str(
         config.get("version")
@@ -102,17 +123,29 @@ def inspect_checkpoint(path: Path, *, kind: str, allow_unsafe_pickle: bool = Fal
         ) == (1025, 512):
             evidence.append("GPT tensor shapes match the V2ProPlus export contract")
     elif kind == "sovits":
-        if any("cfm" in key.lower() for key in keys):
-            evidence.append("SoVITS CFM tensors found")
-        if any("sv_encoder" in key.lower() or "speaker" in key.lower() for key in keys):
-            evidence.append("SoVITS speaker-conditioning tensors found")
+        train_config = config.get("train", {}) if isinstance(config.get("train"), dict) else {}
+        model_config = config.get("model", {}) if isinstance(config.get("model"), dict) else {}
+        pretrained = str(train_config.get("pretrained_s2G", ""))
+        if "v2proplus" in pretrained.lower():
+            evidence.append("SoVITS training config declares the V2ProPlus generator family")
+        ssl_projection = state.get("enc_p.ssl_proj.weight")
+        text_embedding = state.get("enc_p.text_embedding.weight")
+        speaker_bias = state.get("sv_emb.bias")
+        if (
+            int(model_config.get("gin_channels", -1)) == 1024
+            and getattr(ssl_projection, "shape", None) == (192, 768, 1)
+            and getattr(text_embedding, "shape", None) == (732, 192)
+            and getattr(speaker_bias, "shape", None) == (1024,)
+        ):
+            evidence.append("SoVITS tensor shapes match the V2ProPlus export contract")
     else:
         raise ValueError("kind must be 'gpt' or 'sovits'")
     if not state:
         raise ModelInspectionError(f"No tensor state dictionary found in {path}")
-    # V2 Pro Plus exports in the validated upstream toolchain expose either an
-    # explicit version marker or both CFM and speaker-conditioning evidence.
-    if len(evidence) < 2 or (kind == "sovits" and not any("CFM" in item for item in evidence)):
+    # Require independent configuration and tensor-shape evidence. V2ProPlus
+    # SoVITS checkpoints use ``sv_emb`` conditioning; CFM tensors belong to a
+    # different model generation and must not be required here.
+    if len(evidence) < 2:
         raise ModelInspectionError(
             f"{path} is not a verified GPT-SoVITS V2 Pro Plus {kind} checkpoint; evidence={evidence}"
         )

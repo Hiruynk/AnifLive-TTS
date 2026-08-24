@@ -1,6 +1,6 @@
 # Docker 部署
 
-通用映像提供 `cu128` 與暫定的 `cu121` 配置。模型、共享資源、快取與報告
+通用映像提供 `cu128` 與暫定的 `cu126` 配置。模型、共享資源、快取與報告
 均使用主機綁定掛載。服務入口只會驗證及啟動 API，不會下載依賴或建立引擎。
 
 ```powershell
@@ -30,9 +30,9 @@ docker compose run --rm --entrypoint aniflive-tts aniflive-tts `
 .\scripts\run_docker.ps1 -CudaProfile cu128
 ```
 
-如使用 `cu121`，兩個 `docker compose` 命令都要加入
-`-f docker-compose.yml -f docker-compose.cu121.yml`，並以
-`-CudaProfile cu121` 啟動。
+如使用 `cu126`，兩個 `docker compose` 命令都要加入
+`-f docker-compose.yml -f docker-compose.cu126.yml`，並以
+`-CudaProfile cu126` 啟動。
 
 後續啟動會強制使用 `--pull never --no-build`。只刪除容器而保留映像及主機綁定
 掛載時，不會重新下載、安裝或建立；刪除映像後才需再次明確建立。模型套件缺失或
@@ -42,8 +42,8 @@ docker compose run --rm --entrypoint aniflive-tts aniflive-tts `
 不可變 digest、從映像擷取的 SPDX SBOM 與 BuildKit provenance 記錄。變更 Package
 可見度或部署已發佈 tag 前，請依照[發佈映像驗證](RELEASE_VERIFICATION.md)核對。
 
-CUDA 12.8 已在 RTX 5070 Ti 通過完整 GPU 端到端驗收。CUDA 12.1 引擎可建立及載入，
-但 `cu121` 無法在此 Blackwell GPU 執行 PyTorch CUDA 輔助操作；該 tag 仍需在
-相容的 Ampere／Ada 硬件另行驗收。
+CUDA 12.8 已在 RTX 5070 Ti 通過完整 GPU 端到端驗收。CUDA 12.6 相容配置採用
+同一個已修補安全問題的 PyTorch 2.10 基線，但目前只完成原始碼及建置規則驗證；
+發布或部署 `cu126` 標籤前，仍須在相容主機另行完成驗收。
 
 角色資產與外部路由設定必須放在通用映像與原始碼發行包以外的私有部署覆蓋層。

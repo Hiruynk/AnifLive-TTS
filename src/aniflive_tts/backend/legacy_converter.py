@@ -368,10 +368,14 @@ def build_engines(
     timing_cache = staging / "timing.cache"
     build_results: dict[str, Any] = {}
     try:
-        patched_sovits = staging / "source" / "sovits.trt11.onnx"
-        graph_patch = patch_sovits_myelin_broadcast(
-            paths.onnx_dir / "sovits.onnx", patched_sovits
-        )
+        patched_sovits: dict[str, Path] = {}
+        graph_patch: dict[str, Any] = {}
+        for stage in ("sovits", "sovits_stream"):
+            patched = staging / "source" / f"{stage}.trt11.onnx"
+            graph_patch[stage] = patch_sovits_myelin_broadcast(
+                paths.onnx_dir / f"{stage}.onnx", patched
+            )
+            patched_sovits[stage] = patched
         for stage in STAGE_ORDER:
             print(f"[converter] Building TensorRT 11 engine: {stage}", flush=True)
             logger = DetailedTensorRTLogger(echo=False)
@@ -382,7 +386,7 @@ def build_engines(
                 logger=logger,
             )
             result = builder.build(
-                patched_sovits if stage == "sovits" else paths.onnx_dir / f"{stage}.onnx",
+                patched_sovits.get(stage, paths.onnx_dir / f"{stage}.onnx"),
                 staging / f"{stage}.engine",
                 profiles=profiles_for(stage),
                 timing_cache_path=timing_cache,

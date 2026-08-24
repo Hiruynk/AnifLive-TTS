@@ -1,8 +1,22 @@
-ARG BASE_IMAGE=aniflive-tts:1.0.0-cu128
+ARG BASE_IMAGE=aniflive-tts:1.1.0-cu128
 FROM ${BASE_IMAGE}
+
+ARG VERSION=1.1.0
+LABEL org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.licenses="PolyForm-Noncommercial-1.0.0" \
+      org.opencontainers.image.source="https://github.com/Hiruynk/AnifLive-TTS"
 
 # Development-only source overlay. Dependencies and offline resources remain
 # inherited from the immutable release image while GPU hot-path iterations
-# replace only the installed AnifLive-TTS package.
-COPY src/aniflive_tts /opt/venv/lib/python3.12/site-packages/aniflive_tts
+# replace only the installed AnifLive-TTS package. Build isolation and dependency
+# resolution stay disabled, so this layer cannot download anything.
+COPY pyproject.toml README.md /tmp/aniflive-tts/
+COPY src /tmp/aniflive-tts/src
+RUN python -m pip install --no-deps --no-build-isolation /tmp/aniflive-tts \
+    && rm -rf /tmp/aniflive-tts
 COPY scripts/build_gpt_step_short.py /app/scripts/build_gpt_step_short.py
+COPY minimal_inference/export_onnx.py /app/minimal_inference/export_onnx.py
+COPY minimal_inference/onnx_to_fp16.py /app/minimal_inference/onnx_to_fp16.py
+COPY minimal_inference/run_trt_inference.py /app/minimal_inference/run_trt_inference.py
+COPY minimal_inference/GPT_SoVITS/process_ckpt.py /app/minimal_inference/GPT_SoVITS/process_ckpt.py
+COPY minimal_inference/GPT_SoVITS/module/models.py /app/minimal_inference/GPT_SoVITS/module/models.py

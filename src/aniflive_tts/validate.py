@@ -6,7 +6,11 @@ import os
 from pathlib import Path
 from typing import Any
 
-from .backend.contracts import STAGE_IO_CONTRACTS, STAGE_ORDER
+from .backend.contracts import (
+    OPTIONAL_LEGACY_STAGE_INPUTS,
+    STAGE_IO_CONTRACTS,
+    STAGE_ORDER,
+)
 from .model_package import select_engine_dir, sha256_file, validate_checksums
 
 
@@ -41,7 +45,10 @@ def validate_model_package(
             target = inputs if engine.get_tensor_mode(name) == trt.TensorIOMode.INPUT else outputs
             target.append(name)
         expected_inputs, expected_outputs = STAGE_IO_CONTRACTS[stage]
-        if not set(expected_inputs).issubset(inputs) or set(outputs) != set(expected_outputs):
+        required_inputs = set(expected_inputs) - set(
+            OPTIONAL_LEGACY_STAGE_INPUTS.get(stage, ())
+        )
+        if not required_inputs.issubset(inputs) or set(outputs) != set(expected_outputs):
             raise RuntimeError(f"{stage} I/O mismatch: inputs={inputs}, outputs={outputs}")
         engines[stage] = {"sha256": sha256_file(path), "layers": engine.num_layers}
     report = {

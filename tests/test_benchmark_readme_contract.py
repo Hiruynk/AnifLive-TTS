@@ -55,15 +55,13 @@ def _tolerance(key: str) -> float:
         return 0.000000501
     if key.startswith("gpu_busy_"):
         return 0.050001
-    if key == "vram_p50_mib":
-        return 0.500001
     raise AssertionError(f"Unknown benchmark metric: {key}")
 
 
 def test_readme_tables_match_canonical_benchmark_summary_without_running_benchmark() -> None:
     canonical = SUMMARY["session_distribution"]
     assert METRIC_KEYS == tuple(canonical)[: len(METRIC_KEYS)]
-    assert len(METRIC_KEYS) == 9
+    assert len(METRIC_KEYS) == 14
     readmes = {
         "en": ROOT / "README.md",
         "zh-HK": ROOT / "README_ZH_HK.md",

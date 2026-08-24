@@ -21,14 +21,14 @@ def _report(vulnerability: dict[str, str]) -> dict[str, object]:
     }
 
 
-def test_cu121_accepts_only_the_documented_torch_loader_findings() -> None:
+def test_high_severity_torch_findings_always_block_release() -> None:
     finding = {
         "PkgName": "torch",
-        "InstalledVersion": "2.5.1+cu121",
+        "InstalledVersion": "2.10.0+cu126",
         "VulnerabilityID": "CVE-2026-24747",
         "Severity": "HIGH",
     }
-    assert POLICY["find_blockers"](_report(finding), "cu121") == []
+    assert POLICY["find_blockers"](_report(finding), "cu126")
     assert POLICY["find_blockers"](_report(finding), "cu128")
 
 
@@ -39,7 +39,7 @@ def test_other_high_or_critical_findings_block_release() -> None:
         "VulnerabilityID": "CVE-2099-0001",
         "Severity": "CRITICAL",
     }
-    assert POLICY["find_blockers"](_report(finding), "cu121")
+    assert POLICY["find_blockers"](_report(finding), "cu126")
     assert POLICY["find_blockers"](_report(finding), "cu128")
 
 

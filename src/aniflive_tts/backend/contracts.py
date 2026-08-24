@@ -12,6 +12,7 @@ STAGE_ORDER = (
     "spectrogram",
     "sv_embedding",
     "sovits",
+    "sovits_stream",
 )
 
 STAGE_IO_CONTRACTS = {
@@ -32,6 +33,28 @@ STAGE_IO_CONTRACTS = {
         ("pred_semantic", "text_seq", "refer_spec", "sv_emb", "noise_scale"),
         ("audio",),
     ),
+    "sovits_stream": (
+        (
+            "pred_semantic",
+            "text_seq",
+            "refer_spec",
+            "sv_emb",
+            "noise_scale",
+            "result_length",
+            "overlap_frames",
+            "overlap_enabled",
+            "acoustic_noise",
+        ),
+        ("audio", "latent", "latent_mask"),
+    ),
+}
+
+# v1.0 streaming engines generated acoustic noise internally. v1.1 accepts an
+# explicit buffer so full and streaming decode can share the same noise field.
+# Keep the input optional only when loading an existing v1.0 package; newly
+# converted engines are still validated against the complete contract above.
+OPTIONAL_LEGACY_STAGE_INPUTS = {
+    "sovits_stream": ("acoustic_noise",),
 }
 
 SUPPORTED_LANGUAGES = ("zh", "yue", "en", "ja", "ko")

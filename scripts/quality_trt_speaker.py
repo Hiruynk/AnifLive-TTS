@@ -12,6 +12,20 @@ import soxr
 import torch
 
 
+def trim_edge_silence(audio: np.ndarray) -> np.ndarray:
+    """Remove edge silence so transport padding cannot bias speaker identity."""
+
+    peak = float(np.max(np.abs(audio)))
+    if peak <= 1e-6:
+        return audio
+    threshold = max(1e-4, peak * 0.01)
+    active = np.flatnonzero(np.abs(audio) >= threshold)
+    if active.size < 2:
+        return audio
+    trimmed = audio[int(active[0]) : int(active[-1]) + 1]
+    return trimmed if trimmed.size >= 1600 else audio
+
+
 def load_audio(path: Path) -> np.ndarray:
     audio, sample_rate = sf.read(path, dtype="float32", always_2d=True)
     mono = audio.mean(axis=1, dtype=np.float32)
@@ -21,8 +35,10 @@ def load_audio(path: Path) -> np.ndarray:
         raise ValueError(f"Invalid audio: {path}")
     # Complete WAV output is globally peak-normalized while true streaming
     # cannot know a future peak. Speaker identity evaluation must therefore
-    # remove playback gain as a confounder before embedding both signals.
+    # remove playback gain and transport edge silence as confounders before
+    # embedding both signals.
     mono = mono - float(np.mean(mono, dtype=np.float64))
+    mono = trim_edge_silence(mono)
     peak = float(np.max(np.abs(mono)))
     if peak > 1e-6:
         mono = mono / peak * 0.9
@@ -60,7 +76,9 @@ def main() -> int:
         "reference": str(args.reference.resolve()),
         "candidate": str(args.candidate.resolve()),
         "embedding_dimensions": int(reference.size),
-        "input_normalization": "mono, DC removal, peak=0.9",
+        "input_normalization": (
+            "mono, DC removal, relative -40 dB edge-silence trim, peak=0.9"
+        ),
         "speaker_cosine_similarity": similarity,
         "gate": {"minimum": 0.98, "passed": similarity >= 0.98},
     }

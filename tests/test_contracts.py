@@ -1,12 +1,23 @@
-from aniflive_tts.backend.contracts import STAGE_IO_CONTRACTS, STAGE_ORDER
+from aniflive_tts.backend.contracts import (
+    OPTIONAL_LEGACY_STAGE_INPUTS,
+    STAGE_IO_CONTRACTS,
+    STAGE_ORDER,
+)
 from aniflive_tts.cli import build_parser
 from aniflive_tts.converter import _jsonable_profiles
 
 
-def test_eight_tensor_rt_stages_are_complete() -> None:
-    assert len(STAGE_ORDER) == 8
+def test_tensor_rt_stages_are_complete() -> None:
+    assert len(STAGE_ORDER) == 9
     assert tuple(STAGE_IO_CONTRACTS) == STAGE_ORDER
     assert all(inputs and outputs for inputs, outputs in STAGE_IO_CONTRACTS.values())
+
+
+def test_only_v1_stream_acoustic_noise_is_optional_for_package_migration() -> None:
+    assert OPTIONAL_LEGACY_STAGE_INPUTS == {
+        "sovits_stream": ("acoustic_noise",),
+    }
+    assert "acoustic_noise" in STAGE_IO_CONTRACTS["sovits_stream"][0]
 
 
 def test_rebuild_engines_cli_is_implemented(tmp_path) -> None:
@@ -15,6 +26,33 @@ def test_rebuild_engines_cli_is_implemented(tmp_path) -> None:
     )
     assert args.handler.__name__ == "_rebuild_engines"
     assert args.optimization_level == 5
+
+
+def test_convert_cli_exposes_generic_stream_overlap() -> None:
+    parser = build_parser()
+    common = [
+        "model",
+        "convert",
+        "--gpt",
+        "model.ckpt",
+        "--sovits",
+        "model.pth",
+        "--reference-audio",
+        "reference.wav",
+        "--reference-text-file",
+        "reference.txt",
+        "--reference-language",
+        "ja",
+        "--model-id",
+        "generic-v2proplus",
+        "--output",
+        "package",
+    ]
+    assert parser.parse_args(common).stream_overlap_frames == 32
+    assert (
+        parser.parse_args([*common, "--stream-overlap-frames", "12"]).stream_overlap_frames
+        == 12
+    )
 
 
 def test_enqueue_validation_accepts_runtime_paths(tmp_path) -> None:

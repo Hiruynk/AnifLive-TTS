@@ -26,6 +26,7 @@ MODEL_CONFIGS = {
     "gpt_encoder": {"fp16": True, "sensitive": ["Pow", "Exp", "Mean", "ReduceMean", "LayerNormalization"]},
     "gpt_step": {"fp16": True, "sensitive": ["Pow", "Exp", "MatMulInteger", "LayerNormalization"]},
     "sovits": {"fp16": True, "sensitive": ["InstanceNormalization", "Resize", "Mean", "Sum", "Exp"], "native_sensitive": ["Resize"]},
+    "sovits_stream": {"fp16": True, "sensitive": ["InstanceNormalization", "Resize", "Mean", "Sum", "Exp"], "native_sensitive": ["Resize"]},
     # spectrogram 和 sv_embedding 保持 FP32，因为 STFT 和后续计算需要 FP32 精度
     "spectrogram": {"fp16": False, "sensitive": []},
     "sv_embedding": {"fp16": False, "sensitive": []},
@@ -72,7 +73,8 @@ def fix_mixed_types_robust(model):
         if vi.type.HasField("tensor_type"):
             type_map[vi.name] = vi.type.tensor_type.elem_type
 
-    new_nodes = []
+    ordered_nodes = []
+    inserted_casts = 0
     ops_to_check = ["MatMul", "Gemm", "Conv"]
 
     for node in model.graph.node:
@@ -89,17 +91,20 @@ def fix_mixed_types_robust(model):
 
             if need_cast:
                 cast_name = f"{data_name}_cast_fp16_fix_{node.name}"
-                if any(n.name == cast_name for n in new_nodes): cast_name += "_dup"
                 cast_node = onnx.helper.make_node(
                     "Cast", inputs=[data_name], outputs=[cast_name],
                     to=TensorProto.FLOAT16, name=cast_name
                 )
-                new_nodes.append(cast_node)
+                ordered_nodes.append(cast_node)
+                inserted_casts += 1
                 node.input[0] = cast_name
 
-    if new_nodes:
-        model.graph.node.extend(new_nodes)
-        print(f"    [Robust Fix] Inserted {len(new_nodes)} Cast nodes.")
+        ordered_nodes.append(node)
+
+    if inserted_casts:
+        del model.graph.node[:]
+        model.graph.node.extend(ordered_nodes)
+        print(f"    [Robust Fix] Inserted {inserted_casts} Cast nodes.")
     return model
 
 

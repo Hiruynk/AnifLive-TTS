@@ -1,30 +1,37 @@
-# AnifLive-TTS v1 Acceptance
+# AnifLive-TTS v1.1 Acceptance
 
 ## Passed On CUDA 12.8 / RTX 5070 Ti
 
 | Gate | Result |
 |---|---|
-| Repeated performance | 10 sessions; each has 10 warmups + 100 complete + 100 streaming requests |
-| Complete WAV wall P50 | 252.862 ms session median; 249.456 ms best complete session |
-| RTF P50 | 0.085426 session median |
-| Streaming TTFA P50 / P95 | 78.964 / 104.440 ms session median, below 150 / 200 ms gates |
-| TensorRT execution | 8/8 deserialize and real enqueue; no PyTorch model fallback |
-| Five-language API | zh/yue/en/ja/ko passed |
+| Repeated performance | Miku and Roxy; 10 sessions per voice; 10 warmups + 100 complete + 100 new-connection stream + 100 keep-alive stream requests per session |
+| Complete WAV wall P50 | 245.769 ms across 20 model-session statistics |
+| RTF P50 | 0.110447 across 20 model-session statistics |
+| New-connection first-packet P50 / P95 | 97.081 / 121.201 ms |
+| Keep-alive first-packet P50 / P95 | 85.854 / 111.460 ms |
+| New-connection audible TTFA P50 / P95 | 127.081 / 151.201 ms |
+| Keep-alive audible TTFA P50 / P95 | 115.854 / 141.460 ms |
+| TensorRT execution | 9/9 deserialize and real enqueue; no PyTorch model fallback |
+| Five-language API | zh/yue/en/ja/ko passed on both voice packages |
 | Legacy/OpenAI adapters | Passed |
 | Expression contract | HTTP 501 `expression_not_implemented` passed |
-| Complete output parity | Same 74 tokens, 2.96 s, exact WAV SHA-256 |
-| Waveform/log-mel/speaker | 1.0 / 1.0 / 1.0 |
-| Offline container recreate | Passed with `--pull never --no-build`; no download/build |
-| Private character overlay | Local and tunneled health/TTS returned TensorRT-11, fallback false |
+| Long-form streaming | Punctuation and profile-safe technical segmentation passed |
+| Model switching | One active voice; previous model unloaded before replacement loads |
+| Miku quality | Log-mel 0.995100; speaker 0.987893; duration difference 0.000% |
+| Roxy quality | Log-mel 0.993346; speaker 0.983652; duration difference 0.629% |
+| Offline container recreate | Passed with existing local image and persistent host data |
 
-Source reports are stored outside the source tree.
+The canonical performance report is
+`benchmarks/README_BENCHMARK_SUMMARY.json`. Voice-specific model packages,
+audio, and detailed acceptance reports remain outside the source tree.
 
 ## Attempted But Not Claimed
 
-- Full GPT CUDA Graph: TensorRT internal train-station capture error, including aux0 engine and thread-local capture.
-- C++ hot path: no nvcc/headers in the runtime toolchain; native sampler/plugin remains research.
-- cu121 on RTX 5070 Ti: engines build/load, but PyTorch cu121 has no Blackwell sm_120 kernel.
-- CER/WER: no fixed, licensed offline ASR reference set was available for this run.
+- Full GPT CUDA Graph: rejected by TensorRT Myelin capture with `cudaError 900`.
+- C++ hot path: not adopted because the native ABI and deterministic CUDA sampler require a separate fully revalidated implementation.
+- cu126 compatibility image: source and build-policy validation only; GPU E2E support is not claimed before target-host validation.
+- CER/WER: not claimed without a fixed licensed multilingual ASR reference set.
 
-Any future performance change must preserve semantic tokens and pass waveform,
-log-mel, speaker, duration, five-language, stream, and no-fallback gates.
+Future performance changes must continue to pass log-mel, speaker, duration,
+five-language, streaming, and no-fallback gates on more than one V2ProPlus
+voice package.

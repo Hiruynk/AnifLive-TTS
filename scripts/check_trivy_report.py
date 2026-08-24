@@ -6,23 +6,7 @@ import json
 from pathlib import Path
 
 
-CU121_TORCH_EXCEPTIONS = {
-    "CVE-2025-32434",
-    "CVE-2026-24747",
-}
 BLOCKING_SEVERITIES = {"HIGH", "CRITICAL"}
-
-
-def _is_reviewed_exception(profile: str, vulnerability: dict[str, object]) -> bool:
-    package = str(vulnerability.get("PkgName", "")).lower()
-    installed = str(vulnerability.get("InstalledVersion", ""))
-    identifier = str(vulnerability.get("VulnerabilityID", ""))
-    return (
-        profile == "cu121"
-        and package in {"torch", "pytorch"}
-        and installed.startswith("2.5.1")
-        and identifier in CU121_TORCH_EXCEPTIONS
-    )
 
 
 def find_blockers(report: dict[str, object], profile: str) -> list[str]:
@@ -46,8 +30,6 @@ def find_blockers(report: dict[str, object], profile: str) -> list[str]:
             severity = str(vulnerability.get("Severity", "")).upper()
             if severity not in BLOCKING_SEVERITIES:
                 continue
-            if _is_reviewed_exception(profile, vulnerability):
-                continue
             blockers.append(
                 ":".join(
                     (
@@ -67,7 +49,7 @@ def main() -> int:
         description="Apply the AnifLive-TTS release policy to a Trivy image report"
     )
     parser.add_argument("--report", type=Path, required=True)
-    parser.add_argument("--profile", choices=("cu121", "cu128"), required=True)
+    parser.add_argument("--profile", choices=("cu126", "cu128"), required=True)
     args = parser.parse_args()
 
     report = json.loads(args.report.read_text(encoding="utf-8"))

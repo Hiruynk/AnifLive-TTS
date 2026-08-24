@@ -1,6 +1,6 @@
 # Docker Deployment
 
-The generic image supports `cu128` and a provisional `cu121` profile. Models,
+The generic image supports `cu128` and a provisional `cu126` profile. Models,
 shared resources, cache, and reports are host bind mounts. The serving
 entrypoint only validates and serves; it never downloads dependencies or
 builds engines.
@@ -32,8 +32,8 @@ docker compose run --rm --entrypoint aniflive-tts aniflive-tts `
 .\scripts\run_docker.ps1 -CudaProfile cu128
 ```
 
-For `cu121`, add `-f docker-compose.yml -f docker-compose.cu121.yml` to both
-`docker compose` commands and start with `-CudaProfile cu121`.
+For `cu126`, add `-f docker-compose.yml -f docker-compose.cu126.yml` to both
+`docker compose` commands and start with `-CudaProfile cu126`.
 
 Subsequent starts enforce `--pull never --no-build`: deleting only the
 container while retaining the image and host bind mounts causes no downloads,
@@ -46,9 +46,10 @@ exports an immutable digest, image-derived SPDX SBOM, and BuildKit provenance
 record for each CUDA profile. Follow [release image verification](RELEASE_VERIFICATION.md)
 before changing package visibility or deploying a published tag.
 
-CUDA 12.8 passed full GPU E2E on RTX 5070 Ti. CUDA 12.1 engines build and load,
-but cu121 cannot execute the PyTorch CUDA support operations on this Blackwell
-GPU. Validate the cu121 tag separately on compatible Ampere/Ada hardware.
+CUDA 12.8 passed full GPU E2E on RTX 5070 Ti. The CUDA 12.6 compatibility
+profile uses the same security-patched PyTorch 2.10 baseline, but currently has
+source and build-policy validation only. Validate the resulting `cu126` image
+separately on a compatible host before publishing or deploying that tag.
 
 Character assets and external routing configuration belong in private
 deployment overlays outside the generic image and source release.

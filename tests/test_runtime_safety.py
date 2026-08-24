@@ -83,6 +83,83 @@ def test_legacy_engine_manifest_without_platform_identity_requires_rebuild(
         model_package.select_engine_dir(package_dir, manifest)
 
 
+def test_explicit_engine_metadata_migration_upgrades_legacy_identity(
+    tmp_path, monkeypatch
+) -> None:
+    recorded = {
+        key: value
+        for key, value in RUNTIME_FINGERPRINT.items()
+        if key in {"tensorrt", "cuda_runtime", "compute_capability", "gpu", "platform"}
+    }
+    package_dir, manifest = _engine_package(tmp_path, recorded)
+    engine_dir = package_dir / "engines" / manifest["active_engine_fingerprint"]
+    engine_manifest_path = engine_dir / "engine-manifest.json"
+    engine_manifest = json.loads(engine_manifest_path.read_text(encoding="utf-8"))
+    engine_manifest["fingerprint_payload"] = {
+        **recorded,
+        "onnx_hash": "onnx",
+        "profiles_hash": "profiles",
+        "build_config_hash": "build",
+    }
+    engine_manifest_path.write_text(json.dumps(engine_manifest), encoding="utf-8")
+    (package_dir / "manifest.json").write_text(
+        json.dumps({"format": "aniflive-tts-model-package", **manifest}), encoding="utf-8"
+    )
+    model_package.write_checksums(package_dir)
+    monkeypatch.setattr(model_package, "runtime_fingerprint", lambda: dict(RUNTIME_FINGERPRINT))
+    validated: list[Path] = []
+
+    migrated = model_package.migrate_engine_metadata(
+        package_dir, validate_engines=validated.append
+    )
+
+    expected_payload = {
+        **RUNTIME_FINGERPRINT,
+        "onnx_hash": "onnx",
+        "profiles_hash": "profiles",
+        "build_config_hash": "build",
+    }
+    expected_fingerprint = model_package.canonical_hash(expected_payload)[:24]
+    assert migrated.name == expected_fingerprint
+    assert validated == [engine_dir]
+    updated_manifest = json.loads((package_dir / "manifest.json").read_text(encoding="utf-8"))
+    assert updated_manifest["active_engine_fingerprint"] == expected_fingerprint
+    updated_engine_manifest = json.loads(
+        (migrated / "engine-manifest.json").read_text(encoding="utf-8")
+    )
+    assert updated_engine_manifest["runtime"] == {
+        key: RUNTIME_FINGERPRINT[key] for key in model_package.ENGINE_RUNTIME_KEYS
+    }
+    model_package.validate_checksums(package_dir)
+    assert model_package.select_engine_dir(package_dir, updated_manifest) == migrated
+
+
+def test_engine_metadata_migration_rejects_different_gpu(tmp_path, monkeypatch) -> None:
+    recorded = dict(RUNTIME_FINGERPRINT)
+    recorded["gpu"] = "NVIDIA GeForce RTX 4090"
+    package_dir, manifest = _engine_package(tmp_path, recorded)
+    engine_dir = package_dir / "engines" / manifest["active_engine_fingerprint"]
+    engine_manifest_path = engine_dir / "engine-manifest.json"
+    engine_manifest = json.loads(engine_manifest_path.read_text(encoding="utf-8"))
+    engine_manifest["fingerprint_payload"] = {
+        **recorded,
+        "onnx_hash": "onnx",
+        "profiles_hash": "profiles",
+        "build_config_hash": "build",
+    }
+    engine_manifest_path.write_text(json.dumps(engine_manifest), encoding="utf-8")
+    (package_dir / "manifest.json").write_text(
+        json.dumps({"format": "aniflive-tts-model-package", **manifest}), encoding="utf-8"
+    )
+    model_package.write_checksums(package_dir)
+    monkeypatch.setattr(model_package, "runtime_fingerprint", lambda: dict(RUNTIME_FINGERPRINT))
+
+    with pytest.raises(EngineRebuildRequired, match="gpu mismatch"):
+        model_package.migrate_engine_metadata(
+            package_dir, validate_engines=lambda _: pytest.fail("must not deserialize")
+        )
+
+
 def test_engine_fingerprint_cannot_escape_engine_directory(tmp_path) -> None:
     with pytest.raises(EngineRebuildRequired, match="ENGINE_REBUILD_REQUIRED"):
         model_package.select_engine_dir(

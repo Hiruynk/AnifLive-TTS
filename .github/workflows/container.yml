@@ -59,7 +59,7 @@ jobs:
           test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"
           test -z "$(git status --porcelain)"
       - name: Run release security policy
-        run: python scripts/check_release_security.py --expected-version 1.0.0
+        run: python scripts/check_release_security.py --expected-version 1.1.0
   build:
     needs: [quality, release-security-gate]
     if: ${{ !inputs.sbom_only && !inputs.offline_only }}
@@ -70,12 +70,12 @@ jobs:
           - tag: cu128
             base: nvidia/cuda:12.8.1-cudnn-runtime-ubuntu24.04@sha256:9175fa92f96de35a8cfb9493f0dfcf9435c7a597e9d95ad41d2cae382a95e3f9
             torch: requirements/torch-cu128.txt
-          - tag: cu121
-            base: nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04@sha256:810756cab1c28ce693499a5c2ebb66f6d10a61d026998c8606bad449643a4c49
-            torch: requirements/torch-cu121.txt
+          - tag: cu126
+            base: nvidia/cuda:12.6.3-cudnn-runtime-ubuntu24.04@sha256:8aef630a54bc5c5146ae5ce68e6af5caa3df0fb690bb91544175c91f307e4356
+            torch: requirements/torch-cu126.txt
     runs-on: ubuntu-latest
     env:
-      IMAGE: ghcr.io/hiruynk/aniflive-tts:1.0.0-${{ matrix.tag }}
+      IMAGE: ghcr.io/hiruynk/aniflive-tts:1.1.0-${{ matrix.tag }}
     permissions:
       contents: read
       packages: write
@@ -118,6 +118,7 @@ jobs:
           annotations: |
             index:org.opencontainers.image.title=AnifLive-TTS
             index:org.opencontainers.image.description=First-party TTS runtime for AnifEngine-Voice
+            index:org.opencontainers.image.authors=Hiruynk
             index:org.opencontainers.image.source=https://github.com/Hiruynk/AnifLive-TTS
             index:org.opencontainers.image.revision=${{ github.sha }}
             index:org.opencontainers.image.created=${{ steps.build_date.outputs.value }}
@@ -140,7 +141,7 @@ jobs:
       - name: Export and validate the image-derived SPDX SBOM
         shell: bash
         run: |
-          output="SBOM-AnifLive-TTS-v1.0.0-${{ matrix.tag }}.spdx.json"
+          output="SBOM-AnifLive-TTS-v1.1.0-${{ matrix.tag }}.spdx.json"
           docker buildx imagetools inspect \
             "${IMAGE}@${{ steps.build.outputs.digest }}" \
             --format '{{ json .SBOM.SPDX }}' > "${output}"
@@ -163,11 +164,11 @@ jobs:
           "source_commit":os.environ["SOURCE_COMMIT"],
           "build_date":os.environ["BUILD_DATE"],
           "workflow_run":os.environ["WORKFLOW_RUN_URL"],
-          "sbom_file":f"SBOM-AnifLive-TTS-v1.0.0-{profile}.spdx.json",
-          "trivy_file":f"TRIVY-AnifLive-TTS-v1.0.0-{profile}.json",
+          "sbom_file":f"SBOM-AnifLive-TTS-v1.1.0-{profile}.spdx.json",
+          "trivy_file":f"TRIVY-AnifLive-TTS-v1.1.0-{profile}.json",
           "provenance":"BuildKit mode=max attestation attached to image digest",
           "license":"PolyForm-Noncommercial-1.0.0"};
-          pathlib.Path(f"RELEASE-METADATA-AnifLive-TTS-v1.0.0-{profile}.json").write_text(
+          pathlib.Path(f"RELEASE-METADATA-AnifLive-TTS-v1.1.0-{profile}.json").write_text(
           json.dumps(data,indent=2)+"\n",encoding="utf-8")'
       - name: Scan the built image for fixed HIGH and CRITICAL vulnerabilities
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
@@ -178,22 +179,22 @@ jobs:
           severity: HIGH,CRITICAL
           ignore-unfixed: true
           format: json
-          output: TRIVY-AnifLive-TTS-v1.0.0-${{ matrix.tag }}.json
+          output: TRIVY-AnifLive-TTS-v1.1.0-${{ matrix.tag }}.json
           exit-code: "0"
       - name: Enforce the image vulnerability policy
         run: >-
           python scripts/check_trivy_report.py
           --profile ${{ matrix.tag }}
-          --report TRIVY-AnifLive-TTS-v1.0.0-${{ matrix.tag }}.json
+          --report TRIVY-AnifLive-TTS-v1.1.0-${{ matrix.tag }}.json
       - name: Upload image-derived release evidence
         if: ${{ always() && steps.build.outcome == 'success' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: image-release-evidence-${{ matrix.tag }}
           path: |
-            SBOM-AnifLive-TTS-v1.0.0-${{ matrix.tag }}.spdx.json
-            RELEASE-METADATA-AnifLive-TTS-v1.0.0-${{ matrix.tag }}.json
-            TRIVY-AnifLive-TTS-v1.0.0-${{ matrix.tag }}.json
+            SBOM-AnifLive-TTS-v1.1.0-${{ matrix.tag }}.spdx.json
+            RELEASE-METADATA-AnifLive-TTS-v1.1.0-${{ matrix.tag }}.json
+            TRIVY-AnifLive-TTS-v1.1.0-${{ matrix.tag }}.json
           if-no-files-found: error
   export-existing-sbom:
     needs: quality
@@ -201,10 +202,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        tag: [cu121, cu128]
+        tag: [cu126, cu128]
     runs-on: ubuntu-latest
     env:
-      IMAGE: ghcr.io/hiruynk/aniflive-tts:1.0.0-${{ matrix.tag }}
+      IMAGE: ghcr.io/hiruynk/aniflive-tts:1.1.0-${{ matrix.tag }}
     permissions:
       contents: read
       packages: read
@@ -224,7 +225,7 @@ jobs:
       - name: Export and validate the image-derived SPDX SBOM
         shell: bash
         run: |
-          output="SBOM-AnifLive-TTS-v1.0.0-${{ matrix.tag }}.spdx.json"
+          output="SBOM-AnifLive-TTS-v1.1.0-${{ matrix.tag }}.spdx.json"
           docker buildx imagetools inspect \
             "${IMAGE}" \
             --format '{{ json .SBOM.SPDX }}' > "${output}"
@@ -235,7 +236,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: image-sbom-${{ matrix.tag }}
-          path: SBOM-AnifLive-TTS-v1.0.0-${{ matrix.tag }}.spdx.json
+          path: SBOM-AnifLive-TTS-v1.1.0-${{ matrix.tag }}.spdx.json
           if-no-files-found: error
   verify-existing-offline:
     needs: quality
@@ -243,10 +244,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        tag: [cu121, cu128]
+        tag: [cu126, cu128]
     runs-on: ubuntu-latest
     env:
-      IMAGE: ghcr.io/hiruynk/aniflive-tts:1.0.0-${{ matrix.tag }}
+      IMAGE: ghcr.io/hiruynk/aniflive-tts:1.1.0-${{ matrix.tag }}
     permissions:
       contents: read
       packages: read

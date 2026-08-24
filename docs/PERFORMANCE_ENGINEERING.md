@@ -1,96 +1,100 @@
-# AnifLive-TTS v1 Performance Engineering
+# AnifLive-TTS v1.1 Performance Engineering
 
-## Ten-Session Local Result
+## Local Result
 
-Only AnifLive-TTS was measured locally for this release refresh. The workload
-used a fixed external V2ProPlus test asset, short text, seed, and sampling
-configuration. Each session received 10 warmups, 100 complete-WAV requests,
-and 100 streaming requests over new local HTTP/1.1 connections.
+The release workload uses two independent V2ProPlus voice packages. Each voice
+runs ten sessions with 10 warmups, 100 complete-WAV requests, 100 new-connection
+streaming requests, and 100 keep-alive streaming requests per session. Formal
+requests use concurrency 1. The two transport modes are reported separately.
 
-| Metric | Session median | Session range |
+Audible TTFA is measured from request send until the first playable active PCM
+frame arrives. Detection uses a -45 dBFS threshold and a 10 ms analysis frame.
+Device output latency is not included.
+
+| Metric | Median across 20 model-sessions | Model-session range |
 |---|---:|---:|
-| Complete WAV wall P50 | 252.862 ms | 249.456-263.883 ms |
-| Complete WAV wall P95 | 311.778 ms | 287.871-346.559 ms |
-| Server P50 | 230.533 ms | 227.369-244.072 ms |
-| RTF P50 | 0.085426 | 0.084276-0.089150 |
-| Streaming TTFA P50 | 78.964 ms | 77.106-81.385 ms |
-| Streaming TTFA P95 | 104.440 ms | 90.404-127.497 ms |
-| GPU busy-time P50 / P95 | 47.0% / 51.5% | 46-48% / 51-53% |
-| VRAM P50 | 4554 MiB | 4543-4776 MiB |
+| Complete WAV wall P50 | 245.769 ms | 212.274-286.741 ms |
+| Complete WAV wall P95 | 289.129 ms | 246.759-356.899 ms |
+| Server P50 | 224.624 ms | 189.121-267.346 ms |
+| RTF P50 | 0.110447 | 0.090111-0.133120 |
+| New-connection first-packet P50 / P95 | 97.081 / 121.201 ms | 89.033-102.441 / 106.683-145.568 ms |
+| Keep-alive first-packet P50 / P95 | 85.854 / 111.460 ms | 78.242-93.290 / 98.316-131.664 ms |
+| New-connection audible TTFA P50 / P95 | 127.081 / 151.201 ms | 119.033-132.441 / 136.683-175.568 ms |
+| Keep-alive audible TTFA P50 / P95 | 115.854 / 141.460 ms | 108.242-123.290 / 128.316-161.664 ms |
+| GPU busy-time P50 / P95 | 43.0% / 47.0% | 41-45% / 46-49% |
+| VRAM P50 | 6810 MiB | 6700-7064 MiB |
 
-Ten sessions produced 1000 complete-WAV and 1000 streaming measurements.
-Every response reported TensorRT 11 and no PyTorch model fallback. See
-`benchmarks/README_BENCHMARK_SUMMARY.json` for the machine-readable summary.
+The run produced 2,000 complete-WAV, 2,000 new-connection streaming, and 2,000
+keep-alive streaming measurements. Every response reported TensorRT 11 with no
+PyTorch model fallback. The canonical
+machine-readable report is `benchmarks/README_BENCHMARK_SUMMARY.json`.
 
 ## Quality Gates
 
-The current output and accepted deterministic regression output produced
-waveform correlation 1.0, log-mel cosine 1.0, log-mel MAE 0, TensorRT speaker
-cosine 1.0, and zero duration difference.
-No INT8, reduced steps, changed sampler, or PyTorch model fallback is present.
+Streaming and complete-WAV paths use the same seed and sampling settings.
 
-Quality reports are retained as external acceptance artifacts and are not
-included in the source tree.
+| Voice package | Waveform correlation | Log-mel cosine | Speaker cosine | SI-SDR | Duration difference |
+|---|---:|---:|---:|---:|---:|
+| Miku V2ProPlus | 0.775697 | 0.995100 | 0.987893 | 1.792 dB | 0.000% |
+| Roxy V2ProPlus | 0.995861 | 0.993346 | 0.983652 | 20.794 dB | 0.629% |
+
+The release gates are log-mel cosine `>=0.99`, speaker cosine `>=0.98`, and
+duration difference `<=3%`. No INT8, reduced generation steps, or PyTorch
+model fallback is used. Speaker embeddings remove transport edge silence before
+comparison so the initial anti-stutter safety padding does not bias identity.
 
 ## Accepted Optimizations
 
 - Persistent TensorRT contexts, bindings, output shapes, and reference features.
-- Reused GPT destination KV buffers and one persistent index tensor.
-- One device-to-host transfer for encoder lengths.
-- CUDA-resident sampling with exact PyTorch RNG semantics.
-- Sampling-only CUDA Graph for softmax, multinomial, gather, and token storage.
-- EOS readback every two steps for one-segment requests; interval one for multiple segments.
-- HTTP/1.1 keep-alive and startup-only warmup.
-
-Intervals 1, 2, 3, 4, 5, 6, and 8 were measured. Interval 2 was the best
-validated tradeoff for the fixed 74-step workload. Larger intervals reduce
-synchronization but may execute unnecessary steps after EOS.
+- Reused GPT KV buffers, index tensors, and CUDA-resident sampling.
+- Sampling CUDA Graph for softmax, multinomial, gather, and token storage.
+- EOS readback every two steps after fixed-seed validation.
+- Native TensorRT SoVITS preview decoding with latent and acoustic-noise continuity.
+- Punctuation-delimited segments are submitted as soon as prior PCM is handed to the HTTP stream; serving never waits for client-side playback to finish.
+- Profile-safe 32-character technical segmentation with crossfade continuity.
+- Punctuation-aware natural pauses and bounded removal of excess model silence.
+- A telemetry-guarded 25-second warm-retention window.
+- Startup preparation of all five language frontends.
+- Atomic single-model switching that unloads the active voice before loading its replacement.
 
 ## GPU Utilization
 
-The ten-session median GPU busy-time was 47% P50 and 51.5% P95. VRAM was
-4554 MiB P50. This is not an SM occupancy metric. The bottleneck is the
-dependency chain of 74 one-token GPT enqueues: token N+1 cannot run before
-sampling token N. GPT decode measured 218.319 ms P50 while SoVITS measured
-7.416 ms P50.
-
-More concurrent requests could raise aggregate utilization, but would increase
-single-request latency and change the API concurrency contract. It is not used
-to inflate the release benchmark.
+The 20 model-session median GPU busy-time was 43% P50 and 47% P95. This is an
+interval sample from `nvidia-smi`, not an SM occupancy measurement. At
+concurrency 1, the dependency chain of one-token GPT autoregressive enqueues
+remains the main utilization limit. More concurrent requests could improve
+aggregate utilization but would change the interactive single-request latency
+contract, so it is not used for the release measurement.
 
 ## Rejected Experiments
 
 ### Full GPT-Step CUDA Graph
 
-Capture was tested with the original seven TensorRT auxiliary streams,
-explicitly supplied auxiliary streams, thread-local capture mode, and a separately built engine with
-`max_aux_streams=0`. All variants failed inside TensorRT's Myelin
-`executeTrainStation` with `cudaError 900: operation not permitted when stream
-is capturing`. A failed capture also invalidates the process capture state, so
-the release hard-disables this path and keeps sampling-only capture.
+Capture was tested with TensorRT auxiliary streams, explicit auxiliary streams,
+thread-local capture, and an engine built with `max_aux_streams=0`. TensorRT's
+Myelin execution rejected capture with `cudaError 900`. The release retains the
+validated sampling-only graph path.
 
 ### Short KV Engine
 
-An engine with a 256-token KV capacity reduced memory traffic but changed the
-fixed-seed semantic sequence. TF32-disabled and TF32-enabled variants both
-failed the exact-output gate and were rejected.
+A 256-token KV engine reduced memory traffic but changed the fixed-seed
+semantic sequence. TF32-disabled and TF32-enabled variants were rejected by the
+quality gate.
 
 ### C++ Hot Path
 
-The host and runtime image do not contain `nvcc`; the TensorRT Python wheel does
-not contain C++ headers. A real native loop additionally needs a deterministic
-CUDA sampler/plugin, a CUDA devel build stage, a new package ABI, and full
-quality validation. A C++ wrapper around the same per-token enqueue would not
-remove the TensorRT/Myelin capture limitation. v1 therefore records this as
-an attempted research path, not a completed feature.
+A native loop requires a CUDA development stage, TensorRT headers, a
+deterministic CUDA sampler or plugin, a package ABI, and full quality
+revalidation. A wrapper around the same per-token enqueue would not remove the
+TensorRT/Myelin capture limitation, so v1.1 keeps the validated Python control
+plane and TensorRT hot path.
 
-### CUDA 12.1 On Blackwell
+### CUDA 12.6 Compatibility Profile
 
-The cu121 image built all eight TensorRT 11 engines and deserialized them.
-Startup then failed at the first PyTorch CUDA tensor transfer because the
-PyTorch 2.5.1+cu121 wheel has no `sm_120` kernel. NVIDIA lists CUDA 12.8 as the
-first toolkit support for Blackwell. cu121 is not claimed as GPU-E2E verified
-on RTX 5070 Ti.
+The `cu126` profile uses PyTorch 2.10 and removes the vulnerable PyTorch 2.5.1
+compatibility stack. CUDA 12.8 remains the locally GPU-validated Blackwell
+profile. The `cu126` tag is not a release artifact until its image passes the
+same build, vulnerability, offline-startup, and target-host validation gates.
 
 ## References
 

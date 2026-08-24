@@ -51,8 +51,11 @@ def export_onnx(
     source_dir: Path,
     output_dir: Path,
     max_len: int,
+    stream_overlap_frames: int = 32,
     allow_unsafe_pickle: bool = False,
 ) -> dict[str, str]:
+    if stream_overlap_frames <= 0 or stream_overlap_frames % 2:
+        raise ConversionError("stream_overlap_frames must be a positive even integer")
     hubert = _require(shared_dir / "chinese-hubert-base" / "pytorch_model.bin", "HuBERT weights").parent
     bert = _require(
         shared_dir / "chinese-roberta-wwm-ext-large" / "pytorch_model.bin", "BERT weights"
@@ -87,6 +90,8 @@ def export_onnx(
             str(sv),
             "--max_len",
             str(max_len),
+            "--stream_overlap_frames",
+            str(stream_overlap_frames),
             "--output_dir",
             str(fp32),
         ]
@@ -224,6 +229,7 @@ def convert_model(
     source_dir: Path,
     allow_unsafe_pickle: bool = False,
     max_len: int = 1000,
+    stream_overlap_frames: int = 32,
     workspace_mib: int = 4096,
     optimization_level: int = 5,
 ) -> Path:
@@ -240,6 +246,14 @@ def convert_model(
     reference_text_file = _require(reference_text_file, "reference text")
     source_dir = source_dir.resolve()
     shared_dir = shared_dir.resolve()
+    if allow_unsafe_pickle:
+        # Legacy GPT-SoVITS checkpoints may pickle the bundled ``utils.HParams``
+        # class. The caller already opted into unsafe loading and the same
+        # source tree is executed by the exporter immediately afterwards.
+        for import_root in reversed((source_dir, source_dir / "GPT_SoVITS")):
+            value = str(import_root)
+            if value not in sys.path:
+                sys.path.insert(0, value)
     inspection = inspect_pair(gpt, sovits, allow_unsafe_pickle=allow_unsafe_pickle)
     reference_text = reference_text_file.read_text(encoding="utf-8-sig").strip()
     if not reference_text:
@@ -257,6 +271,7 @@ def convert_model(
             source_dir=source_dir,
             output_dir=onnx_dir,
             max_len=max_len,
+            stream_overlap_frames=stream_overlap_frames,
             allow_unsafe_pickle=allow_unsafe_pickle,
         )
         build_config = {
@@ -264,6 +279,7 @@ def convert_model(
             "workspace_mib": workspace_mib,
             "optimization_level": optimization_level,
             "tf32": False,
+            "stream_overlap_frames": int(stream_overlap_frames),
         }
         fingerprint, fingerprint_payload = engine_fingerprint(
             onnx_hashes=onnx_hashes,
@@ -343,6 +359,9 @@ def convert_model(
             "languages": ["zh", "yue", "en", "ja", "ko"],
             "created_at": dt.datetime.now(dt.timezone.utc).isoformat(),
             "build_config": build_config,
+            "streaming": {
+                "overlap_frames": int(stream_overlap_frames),
+            },
             "reference_conditioning_cached": False,
         }
         (staging / "manifest.json").write_text(

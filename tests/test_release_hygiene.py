@@ -35,6 +35,12 @@ def test_license_metadata_is_consistent() -> None:
         assert "PolyForm_Noncommercial_1.0.0" in _read(readme)
 
 
+def test_original_code_author_is_hiruynk() -> None:
+    assert "Required Notice: Copyright 2026 Hiruynk." in _read("LICENSE")
+    assert 'authors = [{ name = "Hiruynk" }]' in _read("pyproject.toml")
+    assert "owned or controlled by Hiruynk" in _read("LICENSING.md")
+
+
 def test_image_data_licenses_and_attribution_are_present() -> None:
     notices = _read("THIRD_PARTY_NOTICES.md")
     required = (
@@ -67,6 +73,7 @@ def test_docker_context_excludes_private_and_generated_assets() -> None:
         "*.onnx",
         "*.onnx.data",
         "*.wav",
+        "*.mp4",
         ".cloudflared-token",
         "cloudflare-token*",
         "tunnel-token*",

@@ -29,6 +29,8 @@ def test_apache_provenance_is_pinned_and_complete():
     assert (ROOT / "minimal_inference" / upstream["license_file"]).is_file()
 
     expected = {
+        "requirements.txt",
+        "docker/requirements-cpu.txt",
         "export_onnx.py",
         "config/voices.json",
         "onnx_to_fp16.py",

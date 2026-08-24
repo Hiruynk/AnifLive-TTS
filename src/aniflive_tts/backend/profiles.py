@@ -30,6 +30,13 @@ FITTED_PROFILE: dict[str, dict[str, ShapeRange]] = {
         "text_seq": ShapeRange((1, 1), (1, 50), (1, 100)),
         "refer_spec": ShapeRange((1, 1025, 1), (1, 1025, 280), (1, 1025, 512)),
     },
+    "sovits_stream": {
+        "pred_semantic": ShapeRange((1, 1, 1), (1, 1, 120), (1, 1, 250)),
+        "text_seq": ShapeRange((1, 1), (1, 50), (1, 100)),
+        "refer_spec": ShapeRange((1, 1025, 1), (1, 1025, 280), (1, 1025, 512)),
+        "result_length": ShapeRange((1,), (1,), (1,)),
+        "acoustic_noise": ShapeRange((1, 192, 2), (1, 192, 240), (1, 192, 500)),
+    },
     "ssl": {"audio": ShapeRange((1, 16000), (1, 96000), (1, 200000))},
     "vq_encoder": {
         "ssl_content": ShapeRange((1, 768, 50), (1, 768, 300), (1, 768, 700))

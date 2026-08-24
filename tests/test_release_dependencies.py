@@ -19,11 +19,13 @@ def test_production_requirements_exclude_unused_copyleft_packages() -> None:
 def test_security_patched_dependency_floors_are_pinned() -> None:
     requirements = (ROOT / "requirements" / "base.txt").read_text(encoding="utf-8")
     cu128 = (ROOT / "requirements" / "torch-cu128.txt").read_text(encoding="utf-8")
+    cu126 = (ROOT / "requirements" / "torch-cu126.txt").read_text(encoding="utf-8")
     assert "onnx==1.22.0" in requirements
     assert "fastapi==0.141.1" in requirements
     assert "starlette==1.3.1" in requirements
     assert "transformers==5.5.0" in requirements
     assert "torch==2.10.0+cu128" in cu128
+    assert "torch==2.10.0+cu126" in cu126
 
 
 def test_canonical_transformer_loads_are_local_only() -> None:
@@ -45,12 +47,12 @@ def test_canonical_transformer_loads_are_local_only() -> None:
 def test_container_base_images_and_fasttext_asset_are_immutable() -> None:
     dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
     compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
-    compose_cu121 = (ROOT / "docker-compose.cu121.yml").read_text(encoding="utf-8")
+    compose_cu126 = (ROOT / "docker-compose.cu126.yml").read_text(encoding="utf-8")
     workflow = (ROOT / ".github" / "workflows" / "container.yml").read_text(
         encoding="utf-8"
     )
     cu128_digest = "sha256:9175fa92f96de35a8cfb9493f0dfcf9435c7a597e9d95ad41d2cae382a95e3f9"
-    cu121_digest = "sha256:810756cab1c28ce693499a5c2ebb66f6d10a61d026998c8606bad449643a4c49"
+    cu126_digest = "sha256:8aef630a54bc5c5146ae5ce68e6af5caa3df0fb690bb91544175c91f307e4356"
     asset_lock = json.loads(
         (ROOT / "scripts" / "shared_assets_lock.json").read_text(encoding="utf-8")
     )
@@ -60,8 +62,8 @@ def test_container_base_images_and_fasttext_asset_are_immutable() -> None:
     assert cu128_digest in dockerfile
     assert cu128_digest in compose
     assert cu128_digest in workflow
-    assert cu121_digest in compose_cu121
-    assert cu121_digest in workflow
+    assert cu126_digest in compose_cu126
+    assert cu126_digest in workflow
     assert asset_lock["fasttext"]["sha256"] == fasttext_sha256
     assert "shared_assets_lock.json" in dockerfile
     assert "python -m nltk.downloader" not in dockerfile
@@ -71,7 +73,7 @@ def test_known_checkpoint_loader_risk_is_documented() -> None:
     policy = (ROOT / "SECURITY.md").read_text(encoding="utf-8")
     assert "GHSA-53q9-r3pm-6pq6" in policy
     assert "GHSA-63cw-57p8-fm3p" in policy
-    assert "cu121" in policy
+    assert "cu126" in policy
     assert "trusted-administrator operation" in policy
 
 
@@ -95,7 +97,7 @@ def test_container_workflow_scans_built_image_digest() -> None:
     assert "aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25" in workflow
     assert "${{ env.IMAGE }}@${{ steps.build.outputs.digest }}" in workflow
     assert "scripts/check_trivy_report.py" in workflow
-    assert "TRIVY-AnifLive-TTS-v1.0.0-${{ matrix.tag }}.json" in workflow
+    assert "TRIVY-AnifLive-TTS-v1.1.0-${{ matrix.tag }}.json" in workflow
     assert "spdx-tools==0.8.3" in workflow
     assert 'pyspdxtools -i "${output}"' in workflow
 

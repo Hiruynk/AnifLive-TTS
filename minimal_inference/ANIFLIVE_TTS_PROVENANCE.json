@@ -12,6 +12,20 @@
   "scope": "Upstream files changed in the AnifLive-TTS vendored distribution, including predecessor integration changes retained by AnifLive-TTS. Each record retains its stated upstream license.",
   "modified_files": [
     {
+      "path": "requirements.txt",
+      "upstream_sha256": "bd62347b8345f19a66bb28e920f473994eb4e7ee7e3122d0330a219b466aa22f",
+      "changes": [
+        "removed the unused ModelScope dependency from the vendored development requirements"
+      ]
+    },
+    {
+      "path": "docker/requirements-cpu.txt",
+      "upstream_sha256": "f9144b12229d6024277e553fff08efac4951b45a66b56821c1dc998ab70f69b7",
+      "changes": [
+        "removed the unused ModelScope dependency from the vendored CPU requirements"
+      ]
+    },
+    {
       "path": "export_onnx.py",
       "upstream_sha256": "ce34e4a3d1a1b8a7dcd7fac4e21d094397f98112c7901f9953e0db8692cf7d00",
       "changes": [

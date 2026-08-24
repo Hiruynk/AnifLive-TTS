@@ -1,15 +1,15 @@
 # Release Image Verification
 
-AnifLive-TTS publishes separate `cu121` and `cu128` images. A tag is a
+AnifLive-TTS publishes separate `cu126` and `cu128` images. A tag is a
 convenient name, not an immutable identity. Production deployments should pin
 the digest recorded by the release workflow.
 
 For each profile, download the matching
-`RELEASE-METADATA-AnifLive-TTS-v1.0.0-<profile>.json` and
-`SBOM-AnifLive-TTS-v1.0.0-<profile>.spdx.json` and
-`TRIVY-AnifLive-TTS-v1.0.0-<profile>.json` release assets, then verify:
+`RELEASE-METADATA-AnifLive-TTS-v1.1.0-<profile>.json` and
+`SBOM-AnifLive-TTS-v1.1.0-<profile>.spdx.json` and
+`TRIVY-AnifLive-TTS-v1.1.0-<profile>.json` release assets, then verify:
 
-1. `source_commit` equals the v1.0.0 release commit.
+1. `source_commit` equals the v1.1.0 release commit.
 2. `image_digest` matches the digest reported by GHCR.
 3. The OCI `org.opencontainers.image.revision` label and index annotation
    equal `source_commit`.
@@ -32,5 +32,5 @@ docker pull ghcr.io/hiruynk/aniflive-tts@sha256:<digest>
 ```
 
 Digest and provenance fields remain pending until the image is rebuilt by the
-release workflow from the final v1.0.0 commit. Evidence from an older workflow
+release workflow from the final v1.1.0 commit. Evidence from an older workflow
 run must not be presented as evidence for a newer source revision.

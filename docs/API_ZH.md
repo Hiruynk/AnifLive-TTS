@@ -31,6 +31,10 @@
 - `GET /v1/models`
 - `GET /v1/voices`
 
+`POST /v1/models/activate` 接受 `{"model":"my-v2proplus"}`，用於切換至
+已存在本機模型登錄目錄中的相容套件。進行語音推理時不允許切換；執行時會先卸載目前
+套件，再載入替代套件。切換後原有語音合成 API 與網址保持不變。
+
 ## Compatibility adapters
 
 舊 GPT-SoVITS `GET /`、`POST /` flat schema 保留。OpenAI-style
