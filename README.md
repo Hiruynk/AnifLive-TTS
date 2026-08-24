@@ -37,9 +37,9 @@ v1 launches with complete V2ProPlus support; future releases will extend the sam
 
 <div align="center">
 
-<video src="assets/roxy-v2proplus-cantonese-demo.mp4" controls width="960"></video>
+<p><a href="assets/roxy-v2proplus-cantonese-demo.mp4"><img src="assets/roxy-v2proplus-cantonese-demo-preview.gif" alt="Play the Roxy Migurdia V2ProPlus Cantonese demo" width="960"></a></p>
 
-<p>The WebUI is still in testing and is not available in this release. Stay tuned for a future release.</p>
+<p>Click the preview to play the demo with sound. The WebUI is still in testing and is not available in this release. Stay tuned for a future release.</p>
 
 </div>
 
@@ -101,6 +101,15 @@ Defaults are 10 sessions per model, 10 warm-up requests per session, 100 complet
 
 ### GPT-SoVITS Performance Comparison
 
+#### First-output latency (lower is faster)
+
+| Repository / system | Metric | Latency | Test conditions | Source |
+|---|---|---:|---|---|
+| **AnifLive-TTS v1.1** | **Audible TTFA P50** | **89.296 ms** 🚀 | **RTX 5070 Ti; persistent HTTP/1.1; 10 Roxy sessions** | **[Local measurement](benchmarks/README_BENCHMARK_SUMMARY.json)** |
+| GPT-SoVITS C++ TRT Stream | First packet | 460 ms | RTX 2080 Ti 22 GB | [GPT-SoVITS C++](https://github.com/GPT-SoVITS-Devel/GPT-SoVITS-cpp#-performance-benchmarks) |
+| GPT-SoVITS Minimal Inference ONNX Stream | First token | 1,000 ms | RTX 2080 Ti 22 GB; FP16 | [Minimal Inference](https://github.com/GPT-SoVITS-Devel/GPT-SoVITS_minimal_inference#-performance-benchmarks) |
+| GPT-SoVITS Minimal Inference TRT fitted | First token | 2,022 ms | RTX 2080 Ti 22 GB; FP16 | [Minimal Inference](https://github.com/GPT-SoVITS-Devel/GPT-SoVITS_minimal_inference#-performance-benchmarks) |
+
 #### RTF (lower is faster)
 
 | Repository / system | RTF | Backend | Test conditions | Source |
@@ -111,18 +120,22 @@ Defaults are 10 sessions per model, 10 warm-up requests per session, 100 complet
 | **AnifLive-TTS v1.1** | **0.128717** | **TensorRT 11 FP16** | **RTX 5070 Ti; 10 Roxy sessions** | **[Local measurement](benchmarks/README_BENCHMARK_SUMMARY.json)** |
 | GPT-SoVITS Minimal Inference TRT fitted | 0.2096 | TensorRT fitted | RTX 2080 Ti 22 GB; FP16 | [Minimal Inference](https://github.com/GPT-SoVITS-Devel/GPT-SoVITS_minimal_inference#-performance-benchmarks) |
 
-#### First-output latency (lower is faster)
-
-| Repository / system | Metric | Latency | Test conditions | Source |
-|---|---|---:|---|---|
-| **AnifLive-TTS v1.1** | **Audible TTFA P50** | **89.296 ms** 🚀 | **RTX 5070 Ti; persistent HTTP/1.1; 10 Roxy sessions** | **[Local measurement](benchmarks/README_BENCHMARK_SUMMARY.json)** |
-| GPT-SoVITS C++ TRT Stream | First packet | 460 ms | RTX 2080 Ti 22 GB | [GPT-SoVITS C++](https://github.com/GPT-SoVITS-Devel/GPT-SoVITS-cpp#-performance-benchmarks) |
-| GPT-SoVITS Minimal Inference ONNX Stream | First token | 1,000 ms | RTX 2080 Ti 22 GB; FP16 | [Minimal Inference](https://github.com/GPT-SoVITS-Devel/GPT-SoVITS_minimal_inference#-performance-benchmarks) |
-| GPT-SoVITS Minimal Inference TRT fitted | First token | 2,022 ms | RTX 2080 Ti 22 GB; FP16 | [Minimal Inference](https://github.com/GPT-SoVITS-Devel/GPT-SoVITS_minimal_inference#-performance-benchmarks) |
-
 ### Public Performance Data from Other Open-Source TTS Systems
 
 This is not a controlled benchmark. Except for AnifLive-TTS, every value is reported by its cited source. GPU, model capabilities, input, first-packet size, concurrency, and measurement protocol differ. The tables index public values for matching metrics and do not represent a same-condition ranking.
+
+#### First-audio latency (lower is faster)
+
+| System | Metric | Latency | Statistic | Test conditions | Source |
+|---|---|---:|---|---|---|
+| **AnifLive-TTS v1.1** | **Audible TTFA** | **89.296 ms** 🚀 | **P50** | **RTX 5070 Ti; persistent HTTP/1.1; 10 Roxy sessions** | **[Local measurement](benchmarks/README_BENCHMARK_SUMMARY.json)** |
+| Qwen3-TTS-12Hz-0.6B | First-packet latency | 97 ms | Concurrency 1 | Single accelerator; 320 ms speech packet | [Qwen3-TTS Technical Report](https://arxiv.org/abs/2601.15621) |
+| Fish Audio S2 | TTFA | About 100 ms | Project-published value | H200; single GPU | [Fish Audio S2](https://github.com/fishaudio/fish-speech#performance) |
+| Chatterbox-Flash (D=32, α=0.75) | TTFP | 103 ms | Concurrency 1; 50 utterances | H100 | [Chatterbox-Flash paper](https://arxiv.org/abs/2605.30748) |
+| Chatterbox-Flash (default D=16, α=0.5) | TTFP | 118 ms | Concurrency 1; 50 utterances | H100 | [Chatterbox-Flash paper](https://arxiv.org/abs/2605.30748) |
+| CosyVoice2 | First chunk | 196.13 ms | P50 | L20; concurrency 1; client-server | [QwenAudio/CosyVoice](https://github.com/QwenAudio/CosyVoice/blob/main/runtime/triton_trtllm/README.Cosyvoice2.DiT.md#benchmark-with-client-server-mode) |
+
+IndexTTS 2.0/2.5 and VoxCPM2 do not publish first-audio latency under a comparable protocol.
 
 #### RTF (lower is faster)
 
@@ -138,19 +151,6 @@ This is not a controlled benchmark. Except for AnifLive-TTS, every value is repo
 | IndexTTS 2.5 | 0.2065 | 2.5 BF16; KV cache | RTX 4090; overall | [index-tts/index-tts](https://github.com/index-tts/index-tts#-inference-speed) |
 | Qwen3-TTS-12Hz-0.6B | 0.288 | vLLM V0; concurrency 1 | Single accelerator; CUDA Graph | [Qwen3-TTS Technical Report](https://arxiv.org/abs/2601.15621) |
 | IndexTTS 2.0 | 0.3257 | 2.0 FP16; KV cache | RTX 4090; overall | [index-tts/index-tts](https://github.com/index-tts/index-tts#-inference-speed) |
-
-#### First-audio latency (lower is faster)
-
-| System | Metric | Latency | Statistic | Test conditions | Source |
-|---|---|---:|---|---|---|
-| **AnifLive-TTS v1.1** | **Audible TTFA** | **89.296 ms** 🚀 | **P50** | **RTX 5070 Ti; persistent HTTP/1.1; 10 Roxy sessions** | **[Local measurement](benchmarks/README_BENCHMARK_SUMMARY.json)** |
-| Qwen3-TTS-12Hz-0.6B | First-packet latency | 97 ms | Concurrency 1 | Single accelerator; 320 ms speech packet | [Qwen3-TTS Technical Report](https://arxiv.org/abs/2601.15621) |
-| Fish Audio S2 | TTFA | About 100 ms | Project-published value | H200; single GPU | [Fish Audio S2](https://github.com/fishaudio/fish-speech#performance) |
-| Chatterbox-Flash (D=32, α=0.75) | TTFP | 103 ms | Concurrency 1; 50 utterances | H100 | [Chatterbox-Flash paper](https://arxiv.org/abs/2605.30748) |
-| Chatterbox-Flash (default D=16, α=0.5) | TTFP | 118 ms | Concurrency 1; 50 utterances | H100 | [Chatterbox-Flash paper](https://arxiv.org/abs/2605.30748) |
-| CosyVoice2 | First chunk | 196.13 ms | P50 | L20; concurrency 1; client-server | [QwenAudio/CosyVoice](https://github.com/QwenAudio/CosyVoice/blob/main/runtime/triton_trtllm/README.Cosyvoice2.DiT.md#benchmark-with-client-server-mode) |
-
-IndexTTS 2.0/2.5 and VoxCPM2 do not publish first-audio latency under a comparable protocol.
 
 AnifLive-TTS pre-packages voice profiles and reference conditioning for persistent local voice-cloning services. Users can rebuild TensorRT engines on the target GPU and verify quality through reproducible tests.
 

@@ -37,9 +37,9 @@ v1 首發完整支援 V2ProPlus；未來版本將沿用相同 API 與模型封�
 
 <div align="center">
 
-<video src="assets/roxy-v2proplus-cantonese-demo.mp4" controls width="960"></video>
+<p><a href="assets/roxy-v2proplus-cantonese-demo.mp4"><img src="assets/roxy-v2proplus-cantonese-demo-preview.gif" alt="播放洛琪希·米格路迪亞 V2ProPlus 粵語／廣東話演示" width="960"></a></p>
 
-<p>WebUI 介面仍處於測試階段，尚未於此版本開放，敬請期待未來版本。</p>
+<p>點擊畫面即可播放有聲演示。WebUI 介面仍處於測試階段，尚未於此版本開放，敬請期待未來版本。</p>
 
 </div>
 
@@ -101,6 +101,15 @@ docker exec aniflive-tts /app/scripts/entrypoint.sh benchmark `
 
 ### GPT-SoVITS 性能數據對比
 
+#### 首輸出延遲（越低越快）
+
+| 專案／系統 | 指標 | 延遲 | 測試條件 | 來源 |
+|---|---|---:|---|---|
+| **AnifLive-TTS v1.1** | **可聽 TTFA P50** | **89.296 ms** 🚀 | **RTX 5070 Ti；HTTP/1.1 持續連線；10 輪 Roxy 測試** | **[本機實測](benchmarks/README_BENCHMARK_SUMMARY.json)** |
+| GPT-SoVITS C++ TRT 串流 | 首包 | 460 ms | RTX 2080 Ti 22 GB | [GPT-SoVITS C++](https://github.com/GPT-SoVITS-Devel/GPT-SoVITS-cpp#-performance-benchmarks) |
+| GPT-SoVITS Minimal Inference ONNX 串流 | 首個 token | 1,000 ms | RTX 2080 Ti 22 GB；FP16 | [Minimal Inference](https://github.com/GPT-SoVITS-Devel/GPT-SoVITS_minimal_inference#-performance-benchmarks) |
+| GPT-SoVITS Minimal Inference TRT 固定尺寸最佳化版 | 首個語意標記 | 2,022 ms | RTX 2080 Ti 22 GB；FP16 | [Minimal Inference](https://github.com/GPT-SoVITS-Devel/GPT-SoVITS_minimal_inference#-performance-benchmarks) |
+
 #### RTF（越低越快）
 
 | 專案／系統 | RTF | 後端 | 測試條件 | 來源 |
@@ -111,18 +120,22 @@ docker exec aniflive-tts /app/scripts/entrypoint.sh benchmark `
 | **AnifLive-TTS v1.1** | **0.128717** | **TensorRT 11 FP16** | **RTX 5070 Ti；10 輪 Roxy 測試** | **[本機實測](benchmarks/README_BENCHMARK_SUMMARY.json)** |
 | GPT-SoVITS Minimal Inference TRT 固定尺寸最佳化版 | 0.2096 | TensorRT；針對固定尺寸最佳化 | RTX 2080 Ti 22 GB；FP16 | [Minimal Inference](https://github.com/GPT-SoVITS-Devel/GPT-SoVITS_minimal_inference#-performance-benchmarks) |
 
-#### 首輸出延遲（越低越快）
-
-| 專案／系統 | 指標 | 延遲 | 測試條件 | 來源 |
-|---|---|---:|---|---|
-| **AnifLive-TTS v1.1** | **可聽 TTFA P50** | **89.296 ms** 🚀 | **RTX 5070 Ti；HTTP/1.1 持續連線；10 輪 Roxy 測試** | **[本機實測](benchmarks/README_BENCHMARK_SUMMARY.json)** |
-| GPT-SoVITS C++ TRT 串流 | 首包 | 460 ms | RTX 2080 Ti 22 GB | [GPT-SoVITS C++](https://github.com/GPT-SoVITS-Devel/GPT-SoVITS-cpp#-performance-benchmarks) |
-| GPT-SoVITS Minimal Inference ONNX 串流 | 首個 token | 1,000 ms | RTX 2080 Ti 22 GB；FP16 | [Minimal Inference](https://github.com/GPT-SoVITS-Devel/GPT-SoVITS_minimal_inference#-performance-benchmarks) |
-| GPT-SoVITS Minimal Inference TRT 固定尺寸最佳化版 | 首個語意標記 | 2,022 ms | RTX 2080 Ti 22 GB；FP16 | [Minimal Inference](https://github.com/GPT-SoVITS-Devel/GPT-SoVITS_minimal_inference#-performance-benchmarks) |
-
 ### 其他開源 TTS 的公開性能數據
 
 以下並非同條件的受控基準測試。除 AnifLive-TTS 外，數據均由各來源自行公布；GPU、模型能力、輸入內容、首包大小、併發度及測量方法並不相同。表格只整理相同指標的公開數據，不代表同條件排名。
+
+#### 首音訊延遲（越低越快）
+
+| 系統 | 指標 | 延遲 | 統計口徑 | 測試條件 | 來源 |
+|---|---|---:|---|---|---|
+| **AnifLive-TTS v1.1** | **可聽 TTFA** | **89.296 ms** 🚀 | **P50** | **RTX 5070 Ti；HTTP/1.1 持續連線；10 輪 Roxy 測試** | **[本機實測](benchmarks/README_BENCHMARK_SUMMARY.json)** |
+| Qwen3-TTS-12Hz-0.6B | 首包延遲 | 97 ms | 單併發 | 單加速器；320 ms 語音包 | [Qwen3-TTS 技術報告](https://arxiv.org/abs/2601.15621) |
+| Fish Audio S2 | TTFA | 約 100 ms | 專案發布值 | H200；單卡 | [Fish Audio S2](https://github.com/fishaudio/fish-speech#performance) |
+| Chatterbox-Flash（D=32，α=0.75） | TTFP | 103 ms | 單併發；50 句 | H100 | [Chatterbox-Flash 論文](https://arxiv.org/abs/2605.30748) |
+| Chatterbox-Flash（預設 D=16，α=0.5） | TTFP | 118 ms | 單併發；50 句 | H100 | [Chatterbox-Flash 論文](https://arxiv.org/abs/2605.30748) |
+| CosyVoice2 | 首個區塊 | 196.13 ms | P50 | L20；單併發；用戶端／伺服器 | [QwenAudio/CosyVoice](https://github.com/QwenAudio/CosyVoice/blob/main/runtime/triton_trtllm/README.Cosyvoice2.DiT.md#benchmark-with-client-server-mode) |
+
+IndexTTS 2.0／2.5 與 VoxCPM2 未提供同口徑的首音訊延遲數值。
 
 #### RTF（越低越快）
 
@@ -138,19 +151,6 @@ docker exec aniflive-tts /app/scripts/entrypoint.sh benchmark `
 | IndexTTS 2.5 | 0.2065 | 2.5 BF16；KV 快取 | RTX 4090；整體 | [index-tts/index-tts](https://github.com/index-tts/index-tts#-inference-speed) |
 | Qwen3-TTS-12Hz-0.6B | 0.288 | vLLM V0；單併發 | 單加速器；CUDA Graph | [Qwen3-TTS 技術報告](https://arxiv.org/abs/2601.15621) |
 | IndexTTS 2.0 | 0.3257 | 2.0 FP16；KV 快取 | RTX 4090；整體 | [index-tts/index-tts](https://github.com/index-tts/index-tts#-inference-speed) |
-
-#### 首音訊延遲（越低越快）
-
-| 系統 | 指標 | 延遲 | 統計口徑 | 測試條件 | 來源 |
-|---|---|---:|---|---|---|
-| **AnifLive-TTS v1.1** | **可聽 TTFA** | **89.296 ms** 🚀 | **P50** | **RTX 5070 Ti；HTTP/1.1 持續連線；10 輪 Roxy 測試** | **[本機實測](benchmarks/README_BENCHMARK_SUMMARY.json)** |
-| Qwen3-TTS-12Hz-0.6B | 首包延遲 | 97 ms | 單併發 | 單加速器；320 ms 語音包 | [Qwen3-TTS 技術報告](https://arxiv.org/abs/2601.15621) |
-| Fish Audio S2 | TTFA | 約 100 ms | 專案發布值 | H200；單卡 | [Fish Audio S2](https://github.com/fishaudio/fish-speech#performance) |
-| Chatterbox-Flash（D=32，α=0.75） | TTFP | 103 ms | 單併發；50 句 | H100 | [Chatterbox-Flash 論文](https://arxiv.org/abs/2605.30748) |
-| Chatterbox-Flash（預設 D=16，α=0.5） | TTFP | 118 ms | 單併發；50 句 | H100 | [Chatterbox-Flash 論文](https://arxiv.org/abs/2605.30748) |
-| CosyVoice2 | 首個區塊 | 196.13 ms | P50 | L20；單併發；用戶端／伺服器 | [QwenAudio/CosyVoice](https://github.com/QwenAudio/CosyVoice/blob/main/runtime/triton_trtllm/README.Cosyvoice2.DiT.md#benchmark-with-client-server-mode) |
-
-IndexTTS 2.0／2.5 與 VoxCPM2 未提供同口徑的首音訊延遲數值。
 
 AnifLive-TTS 會預先封裝音色設定並載入參考音訊特徵，適合長時間運行的本機聲音複製服務。使用者可在目標 GPU 上重建 TensorRT 引擎，並透過可重現的測試驗證音質。
 
