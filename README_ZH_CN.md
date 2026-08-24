@@ -35,13 +35,9 @@ v1 首发完整支持 V2ProPlus；未来版本将沿用相同 API 与模型封�
 
 ## 《无职转生》洛琪希·米格路迪亚：V2ProPlus 粤语／广东话演示
 
-<div align="center">
+https://github.com/user-attachments/assets/a471c2d5-9382-407a-82ab-ab57b2ea35c1
 
-<p><a href="assets/roxy-v2proplus-cantonese-demo.mp4"><img src="assets/roxy-v2proplus-cantonese-demo-preview.gif" alt="播放洛琪希·米格路迪亚 V2ProPlus 粤语／广东话演示" width="960"></a></p>
-
-<p>点击画面即可播放有声演示。WebUI 界面仍处于测试阶段，尚未在此版本开放，敬请期待后续版本。</p>
-
-</div>
+WebUI 界面仍处于测试阶段，尚未在此版本开放，敬请期待后续版本。
 
 ## 实测性能
 

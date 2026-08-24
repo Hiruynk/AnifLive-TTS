@@ -35,13 +35,9 @@ v1 launches with complete V2ProPlus support; future releases will extend the sam
 
 ## Roxy Migurdia from *Mushoku Tensei: Jobless Reincarnation*: V2ProPlus Cantonese Demo
 
-<div align="center">
+https://github.com/user-attachments/assets/a471c2d5-9382-407a-82ab-ab57b2ea35c1
 
-<p><a href="assets/roxy-v2proplus-cantonese-demo.mp4"><img src="assets/roxy-v2proplus-cantonese-demo-preview.gif" alt="Play the Roxy Migurdia V2ProPlus Cantonese demo" width="960"></a></p>
-
-<p>Click the preview to play the demo with sound. The WebUI is still in testing and is not available in this release. Stay tuned for a future release.</p>
-
-</div>
+The WebUI is still in testing and is not available in this release. Stay tuned for a future release.
 
 ## Performance Benchmarks
 
