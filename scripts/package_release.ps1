@@ -45,10 +45,18 @@ try {
     }
     Compress-Archive -LiteralPath $Bundle -DestinationPath $Zip -CompressionLevel Optimal
     $ReleaseNotesName = "RELEASE_NOTES_v$Version.md"
+    $ReleaseNotesPath = Join-Path $Dist $ReleaseNotesName
     Copy-Item -LiteralPath (Join-Path $Bundle $ReleaseNotesName) `
-        -Destination (Join-Path $Dist $ReleaseNotesName) -Force
+        -Destination $ReleaseNotesPath -Force
 
-    Get-Item -LiteralPath $Zip, (Join-Path $Dist $ReleaseNotesName) |
+    $ChecksumPath = Join-Path $Dist "SHA256SUMS-v$Version-source"
+    $ChecksumLines = Get-Item -LiteralPath $Zip, $ReleaseNotesPath | ForEach-Object {
+        $Hash = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+        "$Hash  $($_.Name)"
+    }
+    Set-Content -LiteralPath $ChecksumPath -Value $ChecksumLines -Encoding ascii
+
+    Get-Item -LiteralPath $Zip, $ReleaseNotesPath, $ChecksumPath |
         Select-Object Name, Length
 }
 finally {
