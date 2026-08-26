@@ -270,6 +270,69 @@ class T2SBlock:
         )
         return x, k_cache, v_cache
 
+    def decode_token_block(
+        self,
+        x: torch.Tensor,
+        k_cache: torch.Tensor,
+        v_cache: torch.Tensor,
+        idx: torch.Tensor,
+        torch_sdpa: bool = True,
+    ):
+        """Decode a teacher-forced causal token block in one layer call."""
+        qkv = F.linear(x, self.qkv_w, self.qkv_b)
+        q = qkv[:, :, :self.hidden_dim]
+        k = qkv[:, :, self.hidden_dim:self.hidden_dim * 2]
+        v = qkv[:, :, self.hidden_dim * 2:]
+
+        idx_s = idx.reshape(-1)[0]
+        block_size = x.shape[1]
+        offsets = torch.arange(block_size, dtype=idx_s.dtype, device=x.device)
+        cache_positions = idx_s + offsets
+        index = cache_positions.view(1, -1, 1).expand(
+            k.shape[0], block_size, k.shape[2]
+        )
+        k_cache = k_cache.scatter(1, index, k)
+        v_cache = v_cache.scatter(1, index, v)
+
+        batch_size = q.shape[0]
+        cache_end = idx_s + block_size
+        q = q.view(
+            batch_size, block_size, self.num_heads, self.head_dim
+        ).transpose(1, 2)
+        k_att = k_cache.narrow(1, 0, cache_end).view(
+            batch_size, -1, self.num_heads, self.head_dim
+        ).transpose(1, 2)
+        v_att = v_cache.narrow(1, 0, cache_end).view(
+            batch_size, -1, self.num_heads, self.head_dim
+        ).transpose(1, 2)
+
+        key_positions = torch.arange(cache_end, dtype=idx_s.dtype, device=x.device)
+        allowed = key_positions.unsqueeze(0) <= cache_positions.unsqueeze(1)
+        if torch_sdpa:
+            attn = F.scaled_dot_product_attention(q, k_att, v_att, allowed)
+        else:
+            attn = scaled_dot_product_attention(q, k_att, v_att, ~allowed)
+
+        attn = attn.transpose(1, 2).reshape(batch_size, block_size, self.hidden_dim)
+        attn = F.linear(attn, self.out_w, self.out_b)
+        x = x + attn
+        x = F.layer_norm(
+            x,
+            [self.hidden_dim],
+            self.norm_w1,
+            self.norm_b1,
+            self.norm_eps1,
+        )
+        x = x + self.mlp.forward(x)
+        x = F.layer_norm(
+            x,
+            [self.hidden_dim],
+            self.norm_w2,
+            self.norm_b2,
+            self.norm_eps2,
+        )
+        return x, k_cache, v_cache
+
 
 class T2STransformer(nn.Module):
     def __init__(self, num_blocks: int, blocks: List[T2SBlock]):
@@ -305,6 +368,20 @@ class T2STransformer(nn.Module):
         for i in range(self.num_blocks):
             x, k_cache[i], v_cache[i] = self.blocks[i].decode_next_token(
                 x, k_cache[i], v_cache[i], attn_mask, torch_sdpa, idx
+            )
+        return x, k_cache, v_cache
+
+    def decode_token_block(
+        self,
+        x: torch.Tensor,
+        k_cache: List[torch.Tensor],
+        v_cache: List[torch.Tensor],
+        idx: torch.Tensor,
+        torch_sdpa: bool = True,
+    ):
+        for i in range(self.num_blocks):
+            x, k_cache[i], v_cache[i] = self.blocks[i].decode_token_block(
+                x, k_cache[i], v_cache[i], idx, torch_sdpa
             )
         return x, k_cache, v_cache
 
@@ -1096,4 +1173,36 @@ class Text2SemanticDecoder(nn.Module):
         xy_dec, k_cache, v_cache = self.t2s_transformer.decode_next_token(xy_pos, k_cache, v_cache, idx=cache_idx)
         logits = self.ar_predict_layer(xy_dec[:, -1])
         
+        return logits, k_cache, v_cache
+
+    @torch.no_grad()
+    def infer_next_stage_block(
+        self,
+        samples: torch.Tensor,
+        k_cache: List[torch.Tensor],
+        v_cache: List[torch.Tensor],
+        x_len: int,
+        y_len: int,
+        idx: int,
+    ):
+        """Decode known semantic tokens as one causal block.
+
+        This is the exact cache-update primitive required by MTP. It does not
+        speculate or sample tokens by itself.
+        """
+        y_emb = self.ar_audio_embedding(samples)
+        block_size = samples.shape[1]
+        offsets = torch.arange(block_size, dtype=idx.dtype, device=samples.device)
+        positions = y_len + idx + offsets
+        cache_idx = x_len + y_len + idx
+        pe_slice = self.ar_audio_position.pe.index_select(1, positions.reshape(-1))
+        xy_pos = (
+            y_emb * self.ar_audio_position.x_scale
+            + self.ar_audio_position.alpha
+            * pe_slice.to(dtype=y_emb.dtype, device=y_emb.device)
+        )
+        xy_dec, k_cache, v_cache = self.t2s_transformer.decode_token_block(
+            xy_pos, k_cache, v_cache, idx=cache_idx
+        )
+        logits = self.ar_predict_layer(xy_dec)
         return logits, k_cache, v_cache

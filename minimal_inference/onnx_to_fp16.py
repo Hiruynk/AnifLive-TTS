@@ -25,6 +25,7 @@ MODEL_CONFIGS = {
     "ssl": {"fp16": True, "sensitive": ["LayerNormalization", "Mean"]},
     "gpt_encoder": {"fp16": True, "sensitive": ["Pow", "Exp", "Mean", "ReduceMean", "LayerNormalization"]},
     "gpt_step": {"fp16": True, "sensitive": ["Pow", "Exp", "MatMulInteger", "LayerNormalization"]},
+    "gpt_block": {"fp16": True, "sensitive": ["Pow", "Exp", "MatMulInteger", "LayerNormalization"]},
     "sovits": {"fp16": True, "sensitive": ["InstanceNormalization", "Resize", "Mean", "Sum", "Exp"], "native_sensitive": ["Resize"]},
     "sovits_stream": {"fp16": True, "sensitive": ["InstanceNormalization", "Resize", "Mean", "Sum", "Exp"], "native_sensitive": ["Resize"]},
     # spectrogram 和 sv_embedding 保持 FP32，因为 STFT 和后续计算需要 FP32 精度
@@ -254,7 +255,9 @@ def process_directory(input_dir, output_dir, native_fp16=False):
             if os.path.exists(dfile):
 
                 shutil.copy(dfile, os.path.join(output_dir, filename + ".data"))
-    shutil.copy(os.path.join(input_dir, "config.json"),os.path.join(output_dir, "config.json"))
+    config_path = os.path.join(input_dir, "config.json")
+    if os.path.isfile(config_path):
+        shutil.copy(config_path, os.path.join(output_dir, "config.json"))
     print(f"\nOptimization complete: {output_dir}")
 
 
