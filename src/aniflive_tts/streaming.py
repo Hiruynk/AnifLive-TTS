@@ -24,6 +24,8 @@ import numpy as np
 import soundfile as sf
 import soxr
 
+from aniflive_tts.backend.semantic_runtime import TransformerSemanticRuntime
+
 
 INITIAL_LEADING_SILENCE_RETAIN_SECONDS = 0.007
 FOLLOWING_LEADING_SILENCE_RETAIN_SECONDS = 0.005
@@ -266,6 +268,13 @@ class TensorRTFixedReferenceStreamer:
         self.trt = importlib.import_module("tensorrt")
         source = importlib.import_module("run_trt_inference")
         self.sample_topk = getattr(source, "sample_topk")
+        self.semantic_runtime = TransformerSemanticRuntime(
+            engine=self.engine,
+            sample_topk=self.sample_topk,
+            torch=self.torch,
+            trt=self.trt,
+            logger=self.logger,
+        )
         self.reference: PreparedReference | None = None
         self._mute_matrix: Any | None = None
         self._mute_matrix_checked = False
@@ -316,6 +325,7 @@ class TensorRTFixedReferenceStreamer:
         self._tail_sovits = None
         self._tail_stream = None
         self._sample_graphs.clear()
+        self.semantic_runtime.close()
 
     @property
     def sample_rate(self) -> int:
@@ -1113,6 +1123,17 @@ class TensorRTFixedReferenceStreamer:
             "sovits_seconds": 0.0,
             "semantic_tokens": 0,
             "gpt_steps": 0,
+            "semantic_backend": self.semantic_runtime.backend_name,
+            "semantic_nfe": 0,
+            "semantic_tokens_per_nfe": 0.0,
+            "first_preview_semantic_seconds": 0.0,
+            "host_sync_count": 0,
+            "host_sync_seconds": 0.0,
+            "attention_kv_bytes": 0,
+            "mamba_state_bytes": 0,
+            "mtp_proposed_tokens": 0,
+            "mtp_accepted_tokens": 0,
+            "mtp_acceptance_rate": 0.0,
             "sovits_invocations": 0,
             "segments": len(segments),
             "request_seed": int(request_seed),
@@ -1126,6 +1147,10 @@ class TensorRTFixedReferenceStreamer:
         self.last_profile = None
 
         torch = self.torch
+        detailed_profile = (
+            os.environ.get("ANIFLIVE_TTS_DETAILED_PROFILE", "0").strip().lower()
+            not in {"0", "false", "no", "off"}
+        )
         mute_matrix = self._load_mute_matrix()
         history_tokens, lookahead_tokens, fade_samples = 32, 16, 256
         pending_tail: _PendingTail | None = None
@@ -1371,46 +1396,23 @@ class TensorRTFixedReferenceStreamer:
                     int(history_semantic.shape[-1]) if history_semantic is not None else 0
                 )
 
-                encoder_started = time.perf_counter()
-                encoded = self.engine.model_gpt_enc(
+                semantic_state = self.semantic_runtime.prepare(
                     {
                         "phoneme_ids": phoneme_ids,
                         "phoneme_ids_len": phoneme_length,
                         "prompts": prompt_semantic,
                         "bert_feature": merged_bert,
-                    }
-                )
-                encoder_elapsed = time.perf_counter() - encoder_started
-                profile["gpt_encoder_seconds"] += encoder_elapsed
-                segment_profile["gpt_encoder_seconds"] = encoder_elapsed
-                # TensorRT exposes these tensors on CUDA.  Keep the complete
-                # sampling operation there: forcing a GPU -> CPU -> GPU round
-                # trip for every autoregressive token serializes the stream
-                # and was the largest avoidable throughput loss versus the
-                # older TensorRT 11 implementation.
-                current = self.sample_topk(
-                    encoded["topk_values"].detach(),
-                    encoded["topk_indices"].detach(),
+                    },
                     temperature=temperature,
                     top_k=top_k,
                     top_p=top_p,
-                ).to(self.engine.device)
-
-                k_cache = encoded["k_cache"]
-                v_cache = encoded["v_cache"]
-                encoded_lengths = torch.stack(
-                    (encoded["x_len"].reshape(-1)[0], encoded["y_len"].reshape(-1)[0])
-                ).detach().cpu().tolist()
-                maximum_steps = max(
-                    1,
-                    min(
-                        1000,
-                        int(k_cache.shape[2])
-                        - int(encoded_lengths[0])
-                        - int(encoded_lengths[1])
-                        - 1,
-                    ),
+                    detailed_profile=detailed_profile,
                 )
+                encoder_elapsed = semantic_state.encoder_seconds
+                profile["gpt_encoder_seconds"] += encoder_elapsed
+                segment_profile["gpt_encoder_seconds"] = encoder_elapsed
+                current = semantic_state.first_token
+                maximum_steps = semantic_state.maximum_steps
                 stream_overlap_frames = int(
                     self.engine.model_sovits_stream.engine.get_tensor_shape(
                         "overlap_frames"
@@ -1426,95 +1428,7 @@ class TensorRTFixedReferenceStreamer:
                     device=self.engine.device,
                     generator=acoustic_generator,
                 )
-                x_length = self._prepare_step_input("x_len", encoded["x_len"])
-                y_length = self._prepare_step_input("y_len", encoded["y_len"])
-                step_cache_shape = tuple(
-                    int(value)
-                    for value in self.engine.model_gpt_step.engine.get_tensor_shape(
-                        "k_cache"
-                    )
-                )
-                step_cache_capacity = int(step_cache_shape[2])
-                required_cache = int(encoded_lengths[0]) + int(encoded_lengths[1]) + 2
-                if required_cache > step_cache_capacity:
-                    raise RuntimeError(
-                        "GPT step cache profile is too short for this segment: "
-                        f"requires {required_cache}, engine capacity {step_cache_capacity}"
-                    )
-                if int(k_cache.shape[2]) != step_cache_capacity:
-                    # A fitted short-step engine avoids rewriting the unused
-                    # tail of the 1000-token encoder cache at every AR step.
-                    # Materialize the compact layout once per request because
-                    # a sliced view retains the original 1000-token stride.
-                    k_cache = k_cache[:, :, :step_cache_capacity, :].contiguous()
-                    v_cache = v_cache[:, :, :step_cache_capacity, :].contiguous()
-                # ``model_gpt_step`` writes both cache outputs in full.  The
-                # encoder cache can therefore be used directly, and the
-                # alternating destination cache need not be zero-filled.  It
-                # avoids two large device-to-device copies plus a memset per
-                # request without changing TensorRT I/O ownership.
-                if (
-                    self._gpt_destination_cache is None
-                    or self._gpt_destination_cache[0].shape != k_cache.shape
-                    or self._gpt_destination_cache[0].dtype != k_cache.dtype
-                ):
-                    self._gpt_destination_cache = (
-                        torch.empty_like(k_cache),
-                        torch.empty_like(v_cache),
-                    )
-                cache_pair = [(k_cache, v_cache), self._gpt_destination_cache]
-                index_location = self.engine.model_gpt_step.tensor_location.get(
-                    "idx", self.trt.TensorLocation.DEVICE
-                )
-                index_device = "cpu" if index_location == self.trt.TensorLocation.HOST else self.engine.device
-                cuda_graphs: _GPTStepCudaGraphs | None = None
-                full_graph_configured = (
-                    os.environ.get("ANIFLIVE_TTS_CUDA_GRAPH", "0").strip().lower()
-                    not in {"0", "false", "no", "off"}
-                )
-                if full_graph_configured and not self._gpt_graph_notice_emitted:
-                    self.logger.warning(
-                        "Full GPT TensorRT CUDA Graph is disabled: TensorRT's internal "
-                        "train-station operation rejects stream capture even when the engine "
-                        "is built with max_aux_streams=0; sampling-only CUDA Graph remains active"
-                    )
-                    self._gpt_graph_notice_emitted = True
-                cuda_graph_requested = False
-                if cuda_graph_requested and not self._gpt_graph_disabled:
-                    try:
-                        if (
-                            self._gpt_step_graphs is None
-                            or not self._gpt_step_graphs.matches(cache_pair)
-                        ):
-                            self._gpt_step_graphs = _GPTStepCudaGraphs(
-                                torch=torch,
-                                model=self.engine.model_gpt_step,
-                                stream=self.engine.stream,
-                                cache_pair=cache_pair,
-                                sample=current.to(torch.int64),
-                                x_length=x_length,
-                                y_length=y_length,
-                            )
-                        else:
-                            self._gpt_step_graphs.prepare(
-                                sample=current.to(torch.int64),
-                                x_length=x_length,
-                                y_length=y_length,
-                            )
-                        cuda_graphs = self._gpt_step_graphs
-                    except Exception as exc:
-                        self._gpt_step_graphs = None
-                        self._gpt_graph_disabled = True
-                        self.logger.warning(
-                            "GPT step CUDA Graph disabled after capture failure: %s", exc
-                        )
-                indices = (
-                    None
-                    if cuda_graphs is not None
-                    else torch.arange(maximum_steps, dtype=torch.int64, device=index_device)
-                )
-                profile["cuda_graph_enabled"] = int(cuda_graphs is not None)
-                outputs = {"k_cache_new": None, "v_cache_new": None}
+                profile["cuda_graph_enabled"] = 0
                 queue: list[Any] = []
                 token_buffer: list[Any] = [current]
                 segment_token_parts: list[Any] = [current]
@@ -1658,132 +1572,32 @@ class TensorRTFixedReferenceStreamer:
                 )
                 segment_profile["eos_sync_interval"] = steady_eos_sync_interval
                 segment_profile["preview_eos_sync_interval"] = preview_eos_sync_interval
-                pending_tokens: list[Any] = []
-                pending_storage_start: int | None = None
-                sample_graph: _SampleCudaGraph | None = None
-                for step in range(maximum_steps):
-                    if cancelled is not None and cancelled.is_set():
-                        if pending_tail is not None:
-                            pending_tail.future.result()
-                        return
-                    if cuda_graphs is not None:
-                        decoded = cuda_graphs.replay(step)
-                    else:
-                        source_cache = cache_pair[step % 2]
-                        destination_cache = cache_pair[(step + 1) % 2]
-                        outputs["k_cache_new"], outputs["v_cache_new"] = destination_cache
-                        decoded = self.engine.model_gpt_step(
-                            {
-                                "samples": current.to(torch.int64),
-                                "k_cache": source_cache[0],
-                                "v_cache": source_cache[1],
-                                "idx": indices[step : step + 1],
-                                "x_len": x_length,
-                                "y_len": y_length,
-                            },
-                            outputs=outputs,
-                            sync=False,
-                        )
-                    sample_graph_requested = (
-                        os.environ.get("ANIFLIVE_TTS_SAMPLE_CUDA_GRAPH", "1")
-                        .strip()
-                        .lower()
-                        not in {"0", "false", "no", "off"}
-                    )
-                    if sample_graph_requested and not self._sample_graph_disabled:
-                        try:
-                            if sample_graph is None:
-                                graph_key = (
-                                    int(decoded["topk_values"].data_ptr()),
-                                    int(decoded["topk_indices"].data_ptr()),
-                                    float(temperature),
-                                    int(top_k),
-                                    float(top_p),
-                                )
-                                sample_graph = self._sample_graphs.get(graph_key)
-                                if sample_graph is not None and sample_graph.matches(
-                                    topk_values=decoded["topk_values"],
-                                    topk_indices=decoded["topk_indices"],
-                                    temperature=temperature,
-                                    top_k=top_k,
-                                    top_p=top_p,
-                                ):
-                                    self._sample_graphs.move_to_end(graph_key)
-                                    profile["sample_cuda_graph_cache_hits"] += 1
-                                else:
-                                    sample_graph = _SampleCudaGraph(
-                                        torch=torch,
-                                        sample_topk=self.sample_topk,
-                                        stream=self.engine.stream,
-                                        topk_values=decoded["topk_values"],
-                                        topk_indices=decoded["topk_indices"],
-                                        token_capacity=1000,
-                                        temperature=temperature,
-                                        top_k=top_k,
-                                        top_p=top_p,
-                                    )
-                                    self._sample_graphs[graph_key] = sample_graph
-                                    profile["sample_cuda_graph_captures"] += 1
-                                    while len(self._sample_graphs) > 4:
-                                        self._sample_graphs.popitem(last=False)
-                            current, stored_current = sample_graph.replay(step)
-                            if not pending_tokens:
-                                pending_storage_start = step
-                        except Exception as exc:
-                            sample_graph = None
-                            self._sample_graphs.clear()
-                            self._sample_graph_disabled = True
-                            self.logger.warning(
-                                "Sampling CUDA Graph disabled after capture failure: %s", exc
-                            )
-                    if (
-                        not sample_graph_requested
-                        or sample_graph is None
-                        or self._sample_graph_disabled
-                    ):
-                        pending_storage_start = None
-                        current = self.sample_topk(
-                            decoded["topk_values"].detach(),
-                            decoded["topk_indices"].detach(),
-                            temperature=temperature,
-                            top_k=top_k,
-                            top_p=top_p,
-                        ).to(self.engine.device)
-                        stored_current = current
-                    if cuda_graphs is not None:
-                        cuda_graphs.update_sample(current.to(torch.int64))
-                    segment_steps += 1
-                    pending_tokens.append(stored_current)
+
+                def semantic_sync_policy(
+                    pending_count: int, step: int, maximum: int
+                ) -> bool:
                     active_eos_sync_interval = (
                         preview_eos_sync_interval
                         if emitted_chunks == 0
                         else steady_eos_sync_interval
                     )
                     preview_ready = emitted_chunks == 0 and (
-                        buffered_count + len(pending_tokens) >= preview_target_tokens
+                        buffered_count + pending_count >= preview_target_tokens
                     )
-                    if (
-                        not preview_ready
-                        and len(pending_tokens) < active_eos_sync_interval
-                        and step + 1 < maximum_steps
-                    ):
-                        continue
+                    return bool(
+                        preview_ready
+                        or pending_count >= active_eos_sync_interval
+                        or step + 1 >= maximum
+                    )
 
-                    if pending_storage_start is not None and sample_graph is not None:
-                        pending_batch = sample_graph.token_storage[
-                            pending_storage_start : step + 1
-                        ].reshape(1, -1)
-                    else:
-                        pending_batch = torch.cat(pending_tokens, dim=1)
-                    pending_values = pending_batch.detach().cpu().reshape(-1).tolist()
-                    eos_offset = next(
-                        (offset for offset, value in enumerate(pending_values) if int(value) == 1024),
-                        None,
-                    )
-                    accepted_tokens = (
-                        pending_tokens if eos_offset is None else pending_tokens[:eos_offset]
-                    )
-                    for accepted in accepted_tokens:
+                semantic_batches = self.semantic_runtime.iter_batches(
+                    semantic_state,
+                    sync_policy=semantic_sync_policy,
+                    cancelled=cancelled,
+                )
+                for semantic_batch in semantic_batches:
+                    for offset in range(semantic_batch.accepted_tokens):
+                        accepted = semantic_batch.tokens[:, offset : offset + 1]
                         token_buffer.append(accepted)
                         segment_token_parts.append(accepted)
                         buffered_count += 1
@@ -1892,21 +1706,42 @@ class TensorRTFixedReferenceStreamer:
                                 for ready in hold_natural_trailing_silence(emitted):
                                     yield note_audio(ready, segment_index)
 
-                    pending_tokens.clear()
-                    pending_storage_start = None
-                    if eos_offset is not None:
-                        break
-
+                if cancelled is not None and cancelled.is_set():
+                    if pending_tail is not None:
+                        pending_tail.future.result()
+                    return
                 decode_elapsed = time.perf_counter() - decode_started
+                segment_steps = semantic_state.steps
                 profile["gpt_decode_seconds"] += decode_elapsed
                 segment_profile["gpt_decode_seconds"] = decode_elapsed
                 profile["sample_cuda_graph_enabled"] = int(
-                    sample_graph is not None and not self._sample_graph_disabled
+                    semantic_state.sample_cuda_graph_enabled
+                )
+                profile["sample_cuda_graph_cache_hits"] += int(
+                    semantic_state.sample_cuda_graph_cache_hits
+                )
+                profile["sample_cuda_graph_captures"] += int(
+                    semantic_state.sample_cuda_graph_captures
                 )
                 profile["semantic_tokens"] += segment_tokens
                 profile["gpt_steps"] += segment_steps
+                profile["semantic_nfe"] += segment_steps
+                profile["host_sync_count"] += semantic_state.host_sync_count
+                profile["host_sync_seconds"] += semantic_state.host_sync_seconds
+                profile["attention_kv_bytes"] = max(
+                    int(profile["attention_kv_bytes"]),
+                    semantic_state.attention_kv_bytes,
+                )
+                if profile["first_preview_semantic_seconds"] == 0.0:
+                    profile["first_preview_semantic_seconds"] = (
+                        semantic_state.first_batch_seconds
+                    )
                 segment_profile["semantic_tokens"] = segment_tokens
                 segment_profile["gpt_steps"] = segment_steps
+                segment_profile["semantic_nfe"] = segment_steps
+                segment_profile["host_sync_count"] = semantic_state.host_sync_count
+                segment_profile["host_sync_seconds"] = semantic_state.host_sync_seconds
+                segment_profile["attention_kv_bytes"] = semantic_state.attention_kv_bytes
 
                 use_full_context_refill = (
                     low_latency_stream
@@ -2048,6 +1883,16 @@ class TensorRTFixedReferenceStreamer:
                 yield note_audio(pending, max(0, len(segments) - 1))
             if pending_technical_tail is not None:
                 yield note_audio(pending_technical_tail, max(0, len(segments) - 1))
+        semantic_nfe = int(profile["semantic_nfe"])
+        if semantic_nfe > 0:
+            profile["semantic_tokens_per_nfe"] = float(profile["semantic_tokens"]) / float(
+                semantic_nfe
+            )
+        mtp_proposed = int(profile["mtp_proposed_tokens"])
+        if mtp_proposed > 0:
+            profile["mtp_acceptance_rate"] = float(
+                profile["mtp_accepted_tokens"]
+            ) / float(mtp_proposed)
         profile["total_pipeline_seconds"] = time.perf_counter() - request_started
         self.last_profile = profile
         self.logger.info(
