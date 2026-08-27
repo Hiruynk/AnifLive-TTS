@@ -184,6 +184,20 @@ compares each v1.2 streaming path with its corresponding complete-WAV output.
 Full GPT-step CUDA Graph capture is currently limited by TensorRT capture
 compatibility. See the [performance engineering record](docs/PERFORMANCE_ENGINEERING.md).
 
+## Architectures Evaluated for v1.2
+
+| Candidate | Result | Decision |
+|---|---|---|
+| Transformer + TensorRT runtime optimization | Passed end-to-end latency and quality gates | Adopted |
+| MTP-4 | Future-token accuracy did not meet the semantic quality gate | Not adopted |
+| Mamba-2 hybrid | End-to-end benefit did not justify the quality and complexity tradeoff | Not adopted |
+| Mamba-2 hybrid + MTP | Combined quality/performance gate was not met | Not adopted |
+
+AnifLive-TTS does not adopt architectural changes solely for theoretical
+efficiency. Experimental semantic backends are promoted only when they
+outperform the production baseline without compromising speech quality. See
+the [v1.2 semantic experiment record](docs/research/v1.2-semantic-experiments.md).
+
 ## Architecture And API
 
 AnifLive-TTS is the first-party FP16 TensorRT 11 speech inference platform for

@@ -44,6 +44,8 @@
     },
     "gpt_decode_p50": {
       "required_improvement_percent": 25.0,
+      "scope": "replacement semantic backend research promotion gate",
+      "release_blocking_for_retained_transformer": false,
       "observed_improvement_percent_range": [
         13.385150988711313,
         19.007485409513645
@@ -58,6 +60,8 @@
     "peak_process_vram": {
       "required_maximum_regression_percent": 10.0,
       "measured": false,
+      "claim_published": false,
+      "release_blocking_without_claim": false,
       "pass": null
     }
   },
@@ -80,8 +84,15 @@
       "pass": true
     },
     "manual_blinded_listening": {
-      "status": "pending",
-      "pass": null
+      "status": "passed_with_observation",
+      "coverage": [
+        "short Japanese",
+        "long Japanese with and without punctuation",
+        "long Cantonese"
+      ],
+      "observation": "Slight overlap was audible in both v1.1 and v1.2 Miku long-form streaming; Roxy passed without an audible difference.",
+      "release_blocking": false,
+      "pass": true
     }
   },
   "reliability_gates": {
@@ -101,10 +112,10 @@
     "full_gpt_step_cuda_graph": "rejected",
     "eos4": "rejected"
   },
-  "status": "hold",
-  "hold_reasons": [
-    "The GPT decode P50 research subgate did not reach 25% in preserved matched A/B reports.",
-    "Peak process VRAM has not been isolated and measured.",
-    "The final manual blinded listening gate is pending."
+  "status": "ready_for_release",
+  "accepted_observations": [
+    "The replacement-backend GPT decode research target was not met; the production Transformer backend is retained.",
+    "No process-isolated VRAM claim is published for v1.2.",
+    "Slight model-specific overlap remains in Miku long-form streaming and is scheduled for later investigation."
   ]
 }

@@ -40,4 +40,4 @@ jobs:
           tests/test_shared_assets_integrity.py
           tests/test_upstream_provenance.py
       - name: Release security gate
-        run: python scripts/check_release_security.py --expected-version 1.1.0
+        run: python scripts/check_release_security.py --expected-version 1.2.0

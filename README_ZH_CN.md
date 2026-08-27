@@ -181,6 +181,19 @@ AnifLive-TTS 会预先封装音色配置并加载参考音频特征，适合长�
 
 完整 GPT 步骤 CUDA Graph 目前受 TensorRT 图捕获兼容性限制，详见[性能工程记录](docs/PERFORMANCE_ENGINEERING.md)。
 
+## v1.2 评估过的架构
+
+| 候选方案 | 结果 | 决定 |
+|---|---|---|
+| Transformer + TensorRT 运行优化 | 通过端到端延迟及音质门槛 | 采用 |
+| MTP-4 | 未来标记预测准确度未通过语义音质门槛 | 不采用 |
+| Mamba-2 混合架构 | 端到端收益不足以抵消音质与复杂度代价 | 不采用 |
+| Mamba-2 混合架构 + MTP | 未通过综合音质与性能门槛 | 不采用 |
+
+AnifLive-TTS 不会只凭理论计算量采用新架构。实验语义后端必须在不牺牲
+语音音质的前提下优于正式运行基线，才会进入正式运行路径。详见
+[v1.2 语义架构实验记录](docs/research/v1.2-semantic-experiments.md)。
+
 ## 架构
 
 AnifLive-TTS 是 AnifEngine-Voice 的第一方 FP16 TensorRT 11 语音推理平台；

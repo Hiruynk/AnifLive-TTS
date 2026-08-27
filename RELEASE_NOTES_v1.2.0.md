@@ -18,9 +18,27 @@ while preserving the established FP16 TensorRT 11 acoustic path and v1 API.
   than reporting a result from one voice package.
 - Restores the default repetition penalty to `1.0`; the fixed Miku complete-WAV
   regression case is byte-identical to v1.1 at the same seed and settings.
-- Keeps the Transformer semantic runtime as the production backend. MTP,
-  Viterbi, Mamba-2, full GPT-step CUDA Graph, and EOS4 experiments did not pass
-  their combined performance and quality gates and are not enabled at runtime.
+
+### Architecture decision
+
+v1.2 evaluated MTP-4, a 1:1 Transformer/Mamba-2 hybrid, and a combined
+Mamba-2 + MTP path. None met AnifLive-TTS's joint latency-and-quality
+acceptance criteria, so the production runtime deliberately retains the
+1-token/NFE Transformer decoder and focuses on TensorRT runtime optimization.
+This reduced keep-alive audible TTFA P50 from `89.296 ms` to `77.717 ms`
+without replacing the validated production architecture.
+
+The standalone TensorRT 11 Mamba-2 `IPluginV3` feasibility gate passed; the
+rejected result applies to the trained hybrid semantic backend on this
+workload, not to Mamba-2 or TensorRT plugin feasibility in general. Detailed
+findings are in
+[`docs/research/v1.2-semantic-experiments.md`](docs/research/v1.2-semantic-experiments.md).
+
+### Known observation
+
+- Blind long-form listening found slight overlap in both v1.1 and v1.2 Miku
+  streaming output. It was not observed with Roxy and is scheduled for
+  model-specific investigation after v1.2.
 
 The machine-readable benchmark and gate reports are available in
 [`benchmarks/README_BENCHMARK_SUMMARY.json`](benchmarks/README_BENCHMARK_SUMMARY.json)
@@ -59,9 +77,24 @@ AnifLive-TTS v1.2 在維持既有 FP16 TensorRT 11 聲學路徑及 v1 API 的同
 - 正式數據採用 Miku 與 Roxy 交錯模型輪次，不再只以單一音色套件作為代表。
 - 將預設重複懲罰恢復為 `1.0`；固定 Miku 完整 WAV 回歸案例在相同隨機種子及
   設定下，與 v1.1 完全一致。
-- production 繼續使用穩定的 Transformer 語意後端。MTP、Viterbi、Mamba-2、
-  完整 GPT 步驟 CUDA Graph 及 EOS4 實驗未同時通過性能與音質門檻，因此不會在
-  執行環境啟用。
+
+### 架構決定
+
+v1.2 實際評估了 MTP-4、1:1 Transformer／Mamba-2 混合架構，以及
+Mamba-2 + MTP 組合路徑。這些方案都未同時通過 AnifLive-TTS 的延遲與音質
+驗收門檻，因此正式執行環境刻意保留 1 token/NFE Transformer 解碼器，並集中
+最佳化 TensorRT 執行路徑。最終在不更換已驗證正式架構的情況下，將持續連線
+可聽 TTFA P50 由 `89.296 ms` 降至 `77.717 ms`。
+
+獨立 TensorRT 11 Mamba-2 `IPluginV3` 可行性驗證已通過；被否決的是目前
+測試工作負載下完成訓練的混合語意後端，而不是 Mamba-2 或 TensorRT 外掛本身。
+詳細結果見
+[`docs/research/v1.2-semantic-experiments.md`](docs/research/v1.2-semantic-experiments.md)。
+
+### 已知觀察
+
+- 長句盲聽在 v1.1 與 v1.2 的 Miku 串流輸出均發現少量疊音；Roxy 未出現同類
+  問題。這項音色特定問題將於 v1.2 之後繼續調查。
 
 可機讀性能與驗收結果見
 [`benchmarks/README_BENCHMARK_SUMMARY.json`](benchmarks/README_BENCHMARK_SUMMARY.json)
