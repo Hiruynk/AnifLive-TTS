@@ -12,7 +12,11 @@ from pathlib import Path
 from typing import Any
 
 from .backend.contracts import ModelPaths, STAGE_ORDER
-from .backend.legacy_converter import build_engines, validate_onnx_bundle
+from .backend.legacy_converter import (
+    STAGE_MAX_AUX_STREAMS,
+    build_engines,
+    validate_onnx_bundle,
+)
 from .backend.profiles import FITTED_PROFILE
 from .errors import PackageValidationError
 from .inspector import inspect_pair
@@ -157,6 +161,7 @@ def rebuild_engines(
         "workspace_mib": int(workspace_mib),
         "optimization_level": int(optimization_level),
         "tf32": False,
+        "max_aux_streams_by_stage": STAGE_MAX_AUX_STREAMS,
     }
     fingerprint, fingerprint_payload = engine_fingerprint(
         onnx_hashes=onnx_hashes,
@@ -279,6 +284,7 @@ def convert_model(
             "workspace_mib": workspace_mib,
             "optimization_level": optimization_level,
             "tf32": False,
+            "max_aux_streams_by_stage": STAGE_MAX_AUX_STREAMS,
             "stream_overlap_frames": int(stream_overlap_frames),
         }
         fingerprint, fingerprint_payload = engine_fingerprint(

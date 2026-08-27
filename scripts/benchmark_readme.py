@@ -469,6 +469,7 @@ def build_report(
     health: dict[str, Any],
     aggregates: dict[str, Aggregate],
     per_model: dict[str, dict[str, Aggregate]],
+    session_records: list[dict[str, Any]],
     gpu_samples: int,
 ) -> dict[str, Any]:
     models = list(per_model)
@@ -476,7 +477,7 @@ def build_report(
         "schema": 3,
         "measured_at": date.today().isoformat(),
         "project": "AnifLive-TTS",
-        "release": "1.1.0",
+        "release": args.release,
         "models": models,
         "voice_profile": args.voice_profile,
         "workload": {
@@ -505,6 +506,10 @@ def build_report(
             "session_idle_barrier": (
                 "health active_requests=0 and switching=false before each session; "
                 "barrier time is outside every measured request"
+            ),
+            "model_session_order": (
+                "session-major; multiple models are alternated within each session "
+                "index and activation time is outside measured requests"
             ),
             "ttfp_definition": (
                 "client wall-clock time from sending the HTTP request until reading "
@@ -553,6 +558,7 @@ def build_report(
             }
             for key in METRIC_KEYS
         },
+        "session_records": session_records,
         "per_model": {
             model: {
                 key: {
@@ -590,6 +596,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--gpu-sample-interval", type=float, default=0.1)
     parser.add_argument("--timeout", type=float, default=180)
     parser.add_argument("--locale", choices=tuple(METRIC_LABELS), default="en")
+    parser.add_argument("--release", default="1.2.0")
     parser.add_argument("--report", type=Path, default=Path("reports/benchmark.json"))
     parser.add_argument("--markdown", type=Path, default=Path("reports/benchmark.md"))
     args = parser.parse_args()
@@ -611,12 +618,13 @@ def main() -> int:
         raise RuntimeError("Model id is missing; pass --model explicitly")
 
     sessions: list[dict[str, float]] = []
-    per_model: dict[str, dict[str, Aggregate]] = {}
+    session_records: list[dict[str, Any]] = []
+    model_sessions: dict[str, list[dict[str, float]]] = {
+        model: [] for model in models
+    }
+    request_bodies: dict[str, tuple[bytes, bytes]] = {}
     gpu_samples = 0
     for model in models:
-        if health.get("model") != model:
-            print(f"[benchmark] activating model {model}", file=sys.stderr, flush=True)
-            health = activate_model(args.host, args.port, model, args.timeout)
         base = {
             "model": model,
             "voice_profile": args.voice_profile,
@@ -629,14 +637,25 @@ def main() -> int:
                 "seed": 1234,
             },
         }
-        full_body = json.dumps(
-            {**base, "stream": False}, ensure_ascii=False
-        ).encode("utf-8")
-        stream_body = json.dumps(
-            {**base, "stream": True}, ensure_ascii=False
-        ).encode("utf-8")
-        model_sessions: list[dict[str, float]] = []
-        for index in range(args.sessions):
+        request_bodies[model] = (
+            json.dumps({**base, "stream": False}, ensure_ascii=False).encode(
+                "utf-8"
+            ),
+            json.dumps({**base, "stream": True}, ensure_ascii=False).encode(
+                "utf-8"
+            ),
+        )
+
+    for index in range(args.sessions):
+        for model in models:
+            if health.get("model") != model:
+                print(
+                    f"[benchmark] activating model {model}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                health = activate_model(args.host, args.port, model, args.timeout)
+            full_body, stream_body = request_bodies[model]
             print(
                 f"[benchmark] {model} session {index + 1}/{args.sessions}: "
                 f"warmup={args.warmup}, full={args.runs}, stream={args.runs}, "
@@ -646,15 +665,32 @@ def main() -> int:
             )
             health = wait_until_idle(args.host, args.port, args.timeout)
             metrics, samples = run_session(args, full_body, stream_body)
-            model_sessions.append(metrics)
+            model_sessions[model].append(metrics)
             sessions.append(metrics)
+            session_records.append(
+                {
+                    "model": model,
+                    "session": index + 1,
+                    "metrics": metrics,
+                }
+            )
             gpu_samples += samples
-        per_model[model] = aggregate_sessions(model_sessions)
+
+    per_model = {
+        model: aggregate_sessions(values) for model, values in model_sessions.items()
+    }
 
     aggregates = aggregate_sessions(sessions)
     total_sessions = args.sessions * len(models)
     markdown = render_markdown(aggregates, locale=args.locale, sessions=total_sessions)
-    report = build_report(args, health, aggregates, per_model, gpu_samples)
+    report = build_report(
+        args,
+        health,
+        aggregates,
+        per_model,
+        session_records,
+        gpu_samples,
+    )
     args.report.parent.mkdir(parents=True, exist_ok=True)
     args.markdown.parent.mkdir(parents=True, exist_ok=True)
     args.report.write_text(

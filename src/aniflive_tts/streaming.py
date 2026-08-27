@@ -268,13 +268,35 @@ class TensorRTFixedReferenceStreamer:
         self.trt = importlib.import_module("tensorrt")
         source = importlib.import_module("run_trt_inference")
         self.sample_topk = getattr(source, "sample_topk")
-        self.semantic_runtime = TransformerSemanticRuntime(
+        semantic_backend = os.environ.get(
+            "ANIFLIVE_TTS_SEMANTIC_BACKEND", "transformer"
+        ).strip().lower()
+        if semantic_backend == "short-step":
+            step_path = os.environ.get("ANIFLIVE_TTS_GPT_STEP_ENGINE", "").strip()
+            if not step_path:
+                raise RuntimeError(
+                    "Short GPT step was selected but ANIFLIVE_TTS_GPT_STEP_ENGINE "
+                    "was not configured"
+                )
+            self.engine.model_gpt_step = source.TRTModule(
+                Path(step_path),
+                device=self.engine.device,
+                stream=self.engine.stream,
+            )
+        transformer_runtime = TransformerSemanticRuntime(
             engine=self.engine,
             sample_topk=self.sample_topk,
             torch=self.torch,
             trt=self.trt,
             logger=self.logger,
         )
+        if semantic_backend in {"transformer", "short-step"}:
+            if semantic_backend == "short-step":
+                transformer_runtime.backend_name = "transformer-short-step"
+                self.logger.info("Short-cache GPT step semantic runtime is active")
+            self.semantic_runtime = transformer_runtime
+        else:
+            raise ValueError(f"Unsupported semantic backend: {semantic_backend}")
         self.reference: PreparedReference | None = None
         self._mute_matrix: Any | None = None
         self._mute_matrix_checked = False
@@ -447,7 +469,6 @@ class TensorRTFixedReferenceStreamer:
             "token_type_ids": self._warm_input_ids,
         }
         with self.torch.cuda.stream(self.engine.stream):
-            self.engine.model_bert(inputs, sync=False)
             self.engine.model_bert(inputs, sync=False)
         self.engine.stream.synchronize()
         return time.perf_counter() - started
@@ -1133,6 +1154,7 @@ class TensorRTFixedReferenceStreamer:
             "mamba_state_bytes": 0,
             "mtp_proposed_tokens": 0,
             "mtp_accepted_tokens": 0,
+            "mtp_rejected_tokens": 0,
             "mtp_acceptance_rate": 0.0,
             "sovits_invocations": 0,
             "segments": len(segments),
@@ -1151,6 +1173,32 @@ class TensorRTFixedReferenceStreamer:
             os.environ.get("ANIFLIVE_TTS_DETAILED_PROFILE", "0").strip().lower()
             not in {"0", "false", "no", "off"}
         )
+        full_context_refill_enabled = (
+            os.environ.get("ANIFLIVE_TTS_FULL_CONTEXT_REFILL", "1").strip().lower()
+            not in {"0", "false", "no", "off"}
+        )
+        preview_publish_seconds = max(
+            0.0,
+            min(
+                1.0,
+                float(os.environ.get("ANIFLIVE_TTS_PREVIEW_PUBLISH_SECONDS", "0")),
+            ),
+        )
+        native_stream_enabled = (
+            os.environ.get("ANIFLIVE_TTS_NATIVE_SOVITS_STREAM", "1").strip().lower()
+            not in {"0", "false", "no", "off"}
+        )
+        first_segment_preview_only = (
+            os.environ.get("ANIFLIVE_TTS_FIRST_SEGMENT_PREVIEW_ONLY", "1")
+            .strip()
+            .lower()
+            not in {"0", "false", "no", "off"}
+        )
+        profile["full_context_refill_enabled"] = int(full_context_refill_enabled)
+        profile["full_context_refill_decoder"] = "native"
+        profile["preview_publish_seconds"] = preview_publish_seconds
+        profile["native_sovits_stream_enabled"] = int(native_stream_enabled)
+        profile["first_segment_preview_only"] = int(first_segment_preview_only)
         mute_matrix = self._load_mute_matrix()
         history_tokens, lookahead_tokens, fade_samples = 32, 16, 256
         pending_tail: _PendingTail | None = None
@@ -1436,14 +1484,26 @@ class TensorRTFixedReferenceStreamer:
                 native_semantic_history: Any | None = None
                 native_previous_latent: Any | None = None
                 native_previous_audio_tail: np.ndarray | None = None
+                native_refill_match_tail: np.ndarray | None = None
+                native_refill_expected_start: int | None = None
                 native_preview_audio_samples = 0
                 native_acoustic_frame_cursor = 0
                 emitted_chunks = 0
-                low_latency_stream = chunk_length <= self.streaming_chunk_length()
+                segment_chunk_length = int(chunk_length)
+                if first_segment_preview_only and segment_index > 0:
+                    segment_chunk_length = max(
+                        segment_chunk_length,
+                        self.complete_wav_chunk_length(),
+                    )
+                low_latency_stream = (
+                    segment_chunk_length <= self.streaming_chunk_length()
+                )
+                segment_profile["chunk_length"] = segment_chunk_length
+                segment_profile["low_latency_preview"] = int(low_latency_stream)
                 first_chunk_tokens = (
                     int(os.environ.get("ANIFLIVE_TTS_FIRST_CHUNK_TOKENS", "9"))
                     if low_latency_stream
-                    else chunk_length
+                    else segment_chunk_length
                 )
                 first_lookahead_tokens = (
                     int(os.environ.get("ANIFLIVE_TTS_FIRST_LOOKAHEAD_TOKENS", "8"))
@@ -1483,7 +1543,7 @@ class TensorRTFixedReferenceStreamer:
                     noise_end = native_acoustic_frame_cursor + new_frames
                     chunk_noise = acoustic_noise[:, :, noise_start:noise_end].contiguous()
                     new_token_count = int(tokens.shape[-1])
-                    if self._native_stream_shape_is_safe(
+                    if native_stream_enabled and self._native_stream_shape_is_safe(
                         new_token_count=new_token_count,
                         overlap_frames=stream_overlap_frames,
                         has_overlap=native_previous_latent is not None,
@@ -1578,10 +1638,10 @@ class TensorRTFixedReferenceStreamer:
                 ) -> bool:
                     active_eos_sync_interval = (
                         preview_eos_sync_interval
-                        if emitted_chunks == 0
+                        if low_latency_stream and emitted_chunks == 0
                         else steady_eos_sync_interval
                     )
-                    preview_ready = emitted_chunks == 0 and (
+                    preview_ready = low_latency_stream and emitted_chunks == 0 and (
                         buffered_count + pending_count >= preview_target_tokens
                     )
                     return bool(
@@ -1604,7 +1664,10 @@ class TensorRTFixedReferenceStreamer:
                         segment_tokens += 1
 
                         split = False
-                        if mute_matrix is not None and buffered_count >= chunk_length + 2:
+                        if (
+                            mute_matrix is not None
+                            and buffered_count >= segment_chunk_length + 2
+                        ):
                             recent = torch.cat(token_buffer, dim=1).flatten()
                             scores = mute_matrix[recent].clone() - 0.3
                             if scores.numel() > 1:
@@ -1612,7 +1675,7 @@ class TensorRTFixedReferenceStreamer:
                             split_index = int(torch.argmax(scores).item())
                             if (
                                 float(scores[split_index].item()) >= 0.0
-                                and split_index + 1 >= chunk_length
+                                and split_index + 1 >= segment_chunk_length
                             ):
                                 split_at = split_index + 1
                                 queue.append(torch.cat(token_buffer[:split_at], dim=1))
@@ -1623,7 +1686,7 @@ class TensorRTFixedReferenceStreamer:
                             target = (
                                 preview_target_tokens
                                 if emitted_chunks == 0
-                                else chunk_length
+                                else segment_chunk_length
                             )
                             if buffered_count >= target:
                                 current_chunk = torch.cat(token_buffer[:target], dim=1)
@@ -1635,6 +1698,51 @@ class TensorRTFixedReferenceStreamer:
                                 )
                                 if emitted.size:
                                     emitted = prepare_segment_head(emitted)
+                                if (
+                                    emitted.size
+                                    and emitted_chunks == 0
+                                    and full_context_refill_enabled
+                                    and preview_publish_seconds > 0.0
+                                    and native_previous_audio_tail is not None
+                                ):
+                                    publish_samples = int(
+                                        round(self.sample_rate * preview_publish_seconds)
+                                    )
+                                    match_samples = min(
+                                        int(native_previous_audio_tail.size),
+                                        max(0, int(emitted.size) - publish_samples),
+                                    )
+                                    if publish_samples > 0 and match_samples >= 128:
+                                        trimmed_after_preview = float(
+                                            profile.get(
+                                                "trimmed_natural_leading_silence_seconds",
+                                                0.0,
+                                            )
+                                        )
+                                        preview_trim_samples = int(
+                                            round(
+                                                self.sample_rate
+                                                * max(
+                                                    0.0,
+                                                    trimmed_after_preview
+                                                    - trimmed_before_preview,
+                                                )
+                                            )
+                                        )
+                                        native_refill_match_tail = emitted[
+                                            publish_samples : publish_samples
+                                            + match_samples
+                                        ].copy()
+                                        native_refill_expected_start = (
+                                            preview_trim_samples + publish_samples
+                                        )
+                                        emitted = emitted[:publish_samples]
+                                        profile["preview_publish_cap_samples"] = int(
+                                            publish_samples
+                                        )
+                                        profile["preview_refill_match_samples"] = int(
+                                            match_samples
+                                        )
                                 short_initial_preview = bool(
                                     emitted.size
                                     and segment_index == 0
@@ -1732,6 +1840,15 @@ class TensorRTFixedReferenceStreamer:
                     int(profile["attention_kv_bytes"]),
                     semantic_state.attention_kv_bytes,
                 )
+                profile["mtp_proposed_tokens"] += int(
+                    getattr(semantic_state, "mtp_proposed_tokens", 0)
+                )
+                profile["mtp_accepted_tokens"] += int(
+                    getattr(semantic_state, "mtp_accepted_tokens", 0)
+                )
+                profile["mtp_rejected_tokens"] += int(
+                    getattr(semantic_state, "mtp_rejected_tokens", 0)
+                )
                 if profile["first_preview_semantic_seconds"] == 0.0:
                     profile["first_preview_semantic_seconds"] = (
                         semantic_state.first_batch_seconds
@@ -1742,9 +1859,22 @@ class TensorRTFixedReferenceStreamer:
                 segment_profile["host_sync_count"] = semantic_state.host_sync_count
                 segment_profile["host_sync_seconds"] = semantic_state.host_sync_seconds
                 segment_profile["attention_kv_bytes"] = semantic_state.attention_kv_bytes
+                segment_profile["mtp_proposed_tokens"] = int(
+                    getattr(semantic_state, "mtp_proposed_tokens", 0)
+                )
+                segment_profile["mtp_accepted_tokens"] = int(
+                    getattr(semantic_state, "mtp_accepted_tokens", 0)
+                )
+                segment_profile["mtp_rejected_tokens"] = int(
+                    getattr(semantic_state, "mtp_rejected_tokens", 0)
+                )
+                mtp_trace = getattr(semantic_state, "mtp_trace", None)
+                if mtp_trace is not None:
+                    segment_profile["mtp_trace"] = mtp_trace
 
                 use_full_context_refill = (
-                    low_latency_stream
+                    full_context_refill_enabled
+                    and low_latency_stream
                     and emitted_chunks == 1
                     and native_previous_audio_tail is not None
                     and bool(segment_token_parts)
@@ -1774,14 +1904,23 @@ class TensorRTFixedReferenceStreamer:
                             time.perf_counter() - refill_started
                         )
                         profile["sovits_invocations"] += 1
-                        expected_start = max(
-                            0,
-                            native_preview_audio_samples
-                            - int(native_previous_audio_tail.size),
+                        refill_match_tail = (
+                            native_refill_match_tail
+                            if native_refill_match_tail is not None
+                            else native_previous_audio_tail
+                        )
+                        expected_start = (
+                            int(native_refill_expected_start)
+                            if native_refill_expected_start is not None
+                            else max(
+                                0,
+                                native_preview_audio_samples
+                                - int(native_previous_audio_tail.size),
+                            )
                         )
                         emitted, refill_start, refill_score = (
                             self._refill_from_full_context(
-                                native_previous_audio_tail,
+                                refill_match_tail,
                                 full_audio,
                                 expected_start=expected_start,
                                 sample_rate=self.sample_rate,

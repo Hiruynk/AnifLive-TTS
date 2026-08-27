@@ -680,7 +680,7 @@ def export_onnx(args):
 
     if "Pro" not in model_version:
         raise RuntimeError(
-            "AnifLive-TTS v1.1 streaming export currently requires a V2ProPlus model"
+            "AnifLive-TTS streaming export currently requires a V2ProPlus model"
         )
     print("Exporting SoVITS streaming decoder...")
     sovits_streaming_wrapper = SoVITSStreaming(vq_model, model_version)

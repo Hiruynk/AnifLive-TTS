@@ -127,7 +127,7 @@ class WarmRetentionController:
         maximum_temperature_c: int = 70,
         resume_temperature_c: int = 65,
         maximum_utilization_percent: int = 20,
-        maximum_pulse_seconds: float = 0.020,
+        maximum_pulse_seconds: float = 0.040,
     ) -> None:
         self._pulse = pulse
         self._inference_lock = inference_lock

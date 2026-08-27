@@ -20,7 +20,9 @@ class SemanticBatch:
 class SemanticRuntime(Protocol):
     backend_name: str
 
-    def prepare(self, inputs: Mapping[str, Any], **options: Any) -> "TransformerSemanticState": ...
+    def prepare(
+        self, inputs: Mapping[str, Any], **options: Any
+    ) -> "TransformerSemanticState": ...
 
     def iter_batches(
         self,
@@ -31,6 +33,62 @@ class SemanticRuntime(Protocol):
     ) -> Iterator[SemanticBatch]: ...
 
     def close(self) -> None: ...
+
+
+def _apply_repetition_penalty_to_topk(
+    torch: Any,
+    topk_values: Any,
+    topk_indices: Any,
+    *,
+    seen_token_mask: Any | None,
+    repetition_penalty: float,
+) -> tuple[Any, Any]:
+    values = topk_values.detach()
+    indices = topk_indices.detach()
+    if seen_token_mask is None or repetition_penalty == 1.0:
+        return values, indices
+
+    repeated = seen_token_mask.index_select(
+        0, indices.reshape(-1).to(torch.int64)
+    ).reshape_as(indices)
+    penalized = torch.where(
+        values < 0,
+        values * repetition_penalty,
+        values / repetition_penalty,
+    )
+    values = torch.where(repeated, penalized, values)
+    values, order = torch.sort(values, dim=-1, descending=True)
+    indices = torch.gather(indices, dim=-1, index=order)
+    return values, indices
+
+
+def _suppress_eos_in_topk(
+    torch: Any,
+    topk_values: Any,
+    topk_indices: Any,
+    *,
+    eos_token: int = 1024,
+) -> tuple[Any, Any]:
+    """Keep EOS out of sampling without moving candidates off the GPU."""
+    values = topk_values.detach().masked_fill(
+        topk_indices.detach() == int(eos_token),
+        float("-inf"),
+    )
+    values, order = torch.sort(values, dim=-1, descending=True)
+    indices = torch.gather(topk_indices.detach(), dim=-1, index=order)
+    return values, indices
+
+
+def _resolve_minimum_semantic_tokens(repetition_penalty: float) -> int:
+    configured = os.environ.get("ANIFLIVE_TTS_MIN_SEMANTIC_TOKENS")
+    minimum = (
+        int(configured)
+        if configured is not None
+        else (11 if repetition_penalty != 1.0 else 0)
+    )
+    if minimum < 0:
+        raise ValueError("ANIFLIVE_TTS_MIN_SEMANTIC_TOKENS must be non-negative")
+    return min(minimum, 1000)
 
 
 class _SampleCudaGraph:
@@ -53,7 +111,9 @@ class _SampleCudaGraph:
         self.parameters = (float(temperature), int(top_k), float(top_p))
         self.input_addresses = (topk_values.data_ptr(), topk_indices.data_ptr())
         self.token_storage = torch.empty(
-            (self.token_capacity, 1), dtype=topk_indices.dtype, device=topk_values.device
+            (self.token_capacity, 1),
+            dtype=topk_indices.dtype,
+            device=topk_values.device,
         )
 
         stream.synchronize()
@@ -83,16 +143,115 @@ class _SampleCudaGraph:
         top_k: int,
         top_p: float,
     ) -> bool:
-        return (
-            self.input_addresses == (topk_values.data_ptr(), topk_indices.data_ptr())
-            and self.parameters == (float(temperature), int(top_k), float(top_p))
-        )
+        return self.input_addresses == (
+            topk_values.data_ptr(),
+            topk_indices.data_ptr(),
+        ) and self.parameters == (float(temperature), int(top_k), float(top_p))
 
     def replay(self, step: int) -> tuple[Any, Any]:
         self.graph.replay()
         stored = self.token_storage[step : step + 1].reshape(1, 1)
         stored.copy_(self.sampled)
         return self.sampled, stored
+
+
+class _PersistentGPTStepContexts:
+    """Pre-bind the two ping-pong GPT contexts without changing model math."""
+
+    def __init__(
+        self,
+        *,
+        torch: Any,
+        trt: Any,
+        model: Any,
+        stream: Any,
+        cache_pair: list[tuple[Any, Any]],
+        x_length: Any,
+        y_length: Any,
+    ) -> None:
+        self.stream = stream
+        self.cache_addresses = tuple(
+            tensor.data_ptr() for pair in cache_pair for tensor in pair
+        )
+        self.length_addresses = (x_length.data_ptr(), y_length.data_ptr())
+        self.contexts: list[Any] = []
+        self.sample_addresses: list[int | None] = [None, None]
+
+        output_device = {
+            name: (
+                "cpu"
+                if model.tensor_location.get(name, trt.TensorLocation.DEVICE)
+                == trt.TensorLocation.HOST
+                else model.device
+            )
+            for name in ("topk_values", "topk_indices")
+        }
+        self.topk_values = torch.empty(
+            tuple(model.engine.get_tensor_shape("topk_values")),
+            dtype=model.tensor_dtype["topk_values"],
+            device=output_device["topk_values"],
+        )
+        self.topk_indices = torch.empty(
+            tuple(model.engine.get_tensor_shape("topk_indices")),
+            dtype=model.tensor_dtype["topk_indices"],
+            device=output_device["topk_indices"],
+        )
+        self.outputs = {
+            "topk_values": self.topk_values,
+            "topk_indices": self.topk_indices,
+        }
+
+        for parity in range(2):
+            source_cache = cache_pair[parity]
+            destination_cache = cache_pair[(parity + 1) % 2]
+            context = model.engine.create_execution_context()
+            if context is None:
+                raise RuntimeError(
+                    "TensorRT could not create a persistent GPT execution context"
+                )
+            fixed_bindings = {
+                "k_cache": source_cache[0],
+                "v_cache": source_cache[1],
+                "x_len": x_length,
+                "y_len": y_length,
+                "topk_values": self.topk_values,
+                "topk_indices": self.topk_indices,
+                "k_cache_new": destination_cache[0],
+                "v_cache_new": destination_cache[1],
+            }
+            for name, tensor in fixed_bindings.items():
+                if not context.set_tensor_address(name, tensor.data_ptr()):
+                    raise RuntimeError(
+                        f"TensorRT rejected persistent GPT binding {name}"
+                    )
+            self.contexts.append(context)
+
+    def matches(
+        self,
+        *,
+        cache_pair: list[tuple[Any, Any]],
+        x_length: Any,
+        y_length: Any,
+    ) -> bool:
+        return self.cache_addresses == tuple(
+            tensor.data_ptr() for pair in cache_pair for tensor in pair
+        ) and self.length_addresses == (x_length.data_ptr(), y_length.data_ptr())
+
+    def execute(self, *, step: int, current: Any, index: Any) -> dict[str, Any]:
+        parity = step % 2
+        context = self.contexts[parity]
+        sample_address = int(current.data_ptr())
+        if self.sample_addresses[parity] != sample_address:
+            if not context.set_tensor_address("samples", sample_address):
+                raise RuntimeError("TensorRT rejected persistent GPT sample binding")
+            self.sample_addresses[parity] = sample_address
+        if not context.set_tensor_address("idx", index.data_ptr()):
+            raise RuntimeError("TensorRT rejected persistent GPT index binding")
+        if not context.execute_async_v3(stream_handle=self.stream.cuda_stream):
+            raise RuntimeError(
+                "TensorRT persistent GPT execute_async_v3 returned false"
+            )
+        return self.outputs
 
 
 @dataclass
@@ -111,6 +270,9 @@ class TransformerSemanticState:
     temperature: float
     top_k: int
     top_p: float
+    repetition_penalty: float
+    minimum_semantic_tokens: int
+    seen_token_mask: Any | None
     detailed_profile: bool
     steps: int = 0
     host_sync_count: int = 0
@@ -119,12 +281,14 @@ class TransformerSemanticState:
     sample_cuda_graph_cache_hits: int = 0
     sample_cuda_graph_captures: int = 0
     sample_cuda_graph_enabled: bool = False
+    persistent_step_contexts: Any | None = None
 
 
 class TransformerSemanticRuntime:
     """The v1.1 Transformer AR path behind a versioned semantic boundary."""
 
     backend_name = "transformer"
+    use_ping_pong_cache = True
 
     def __init__(
         self,
@@ -141,9 +305,72 @@ class TransformerSemanticRuntime:
         self.trt = trt
         self.logger = logger or logging.getLogger(__name__)
         self._destination_cache: tuple[Any, Any] | None = None
-        self._sample_graphs: OrderedDict[tuple[Any, ...], _SampleCudaGraph] = OrderedDict()
+        self._sample_graphs: OrderedDict[tuple[Any, ...], _SampleCudaGraph] = (
+            OrderedDict()
+        )
         self._sample_graph_disabled = False
         self._full_graph_notice_emitted = False
+        self._persistent_step_contexts: _PersistentGPTStepContexts | None = None
+        self._seen_token_mask: Any | None = None
+
+    def _prepare_seen_token_mask(self, repetition_penalty: float) -> Any | None:
+        if repetition_penalty == 1.0:
+            return None
+        if repetition_penalty <= 0.0:
+            raise ValueError("repetition_penalty must be positive")
+        if (
+            self._seen_token_mask is None
+            or int(self._seen_token_mask.numel()) != 1025
+            or self._seen_token_mask.device != self.engine.device
+        ):
+            self._seen_token_mask = self.torch.zeros(
+                1025,
+                dtype=self.torch.bool,
+                device=self.engine.device,
+            )
+        else:
+            self._seen_token_mask.zero_()
+        return self._seen_token_mask
+
+    def _sample_candidates(
+        self,
+        topk_values: Any,
+        topk_indices: Any,
+        *,
+        temperature: float,
+        top_k: int,
+        top_p: float,
+        repetition_penalty: float,
+        seen_token_mask: Any | None,
+        suppress_eos: bool = False,
+    ) -> Any:
+        values, indices = _apply_repetition_penalty_to_topk(
+            self.torch,
+            topk_values,
+            topk_indices,
+            seen_token_mask=seen_token_mask,
+            repetition_penalty=repetition_penalty,
+        )
+        if suppress_eos:
+            values, indices = _suppress_eos_in_topk(
+                self.torch,
+                values,
+                indices,
+            )
+        sampled = self.sample_topk(
+            values,
+            indices,
+            temperature=temperature,
+            top_k=top_k,
+            top_p=top_p,
+        ).to(self.engine.device)
+        if seen_token_mask is not None:
+            seen_token_mask.scatter_(
+                0,
+                sampled.reshape(-1).to(self.torch.int64),
+                True,
+            )
+        return sampled
 
     def _prepare_step_input(self, name: str, tensor: Any) -> Any:
         location = self.engine.model_gpt_step.tensor_location.get(
@@ -160,24 +387,41 @@ class TransformerSemanticRuntime:
         temperature: float,
         top_k: int,
         top_p: float,
+        repetition_penalty: float | None = None,
         detailed_profile: bool = False,
     ) -> TransformerSemanticState:
+        if repetition_penalty is None:
+            repetition_penalty = float(
+                os.environ.get("ANIFLIVE_TTS_REPETITION_PENALTY", "1.0")
+            )
+        minimum_semantic_tokens = _resolve_minimum_semantic_tokens(
+            repetition_penalty
+        )
         started = time.perf_counter()
         encoded = self.engine.model_gpt_enc(dict(inputs))
         encoder_seconds = time.perf_counter() - started
-        current = self.sample_topk(
-            encoded["topk_values"].detach(),
-            encoded["topk_indices"].detach(),
+        seen_token_mask = self._prepare_seen_token_mask(repetition_penalty)
+        current = self._sample_candidates(
+            encoded["topk_values"],
+            encoded["topk_indices"],
             temperature=temperature,
             top_k=top_k,
             top_p=top_p,
-        ).to(self.engine.device)
+            repetition_penalty=repetition_penalty,
+            seen_token_mask=seen_token_mask,
+            suppress_eos=minimum_semantic_tokens > 0,
+        )
 
         k_cache = encoded["k_cache"]
         v_cache = encoded["v_cache"]
-        encoded_lengths_list = self.torch.stack(
-            (encoded["x_len"].reshape(-1)[0], encoded["y_len"].reshape(-1)[0])
-        ).detach().cpu().tolist()
+        encoded_lengths_list = (
+            self.torch.stack(
+                (encoded["x_len"].reshape(-1)[0], encoded["y_len"].reshape(-1)[0])
+            )
+            .detach()
+            .cpu()
+            .tolist()
+        )
         encoded_lengths = (int(encoded_lengths_list[0]), int(encoded_lengths_list[1]))
         maximum_steps = max(
             1,
@@ -199,26 +443,40 @@ class TransformerSemanticRuntime:
                 "GPT step cache profile is too short for this segment: "
                 f"requires {required_cache}, engine capacity {step_cache_capacity}"
             )
+        maximum_steps = max(
+            1,
+            min(
+                maximum_steps,
+                step_cache_capacity - encoded_lengths[0] - encoded_lengths[1] - 1,
+            ),
+        )
         if int(k_cache.shape[2]) != step_cache_capacity:
             k_cache = k_cache[:, :, :step_cache_capacity, :].contiguous()
             v_cache = v_cache[:, :, :step_cache_capacity, :].contiguous()
-        if (
-            self._destination_cache is None
-            or self._destination_cache[0].shape != k_cache.shape
-            or self._destination_cache[0].dtype != k_cache.dtype
-        ):
-            self._destination_cache = (
-                self.torch.empty_like(k_cache),
-                self.torch.empty_like(v_cache),
-            )
-        cache_pair = [(k_cache, v_cache), self._destination_cache]
+        if self.use_ping_pong_cache:
+            if (
+                self._destination_cache is None
+                or self._destination_cache[0].shape != k_cache.shape
+                or self._destination_cache[0].dtype != k_cache.dtype
+            ):
+                self._destination_cache = (
+                    self.torch.empty_like(k_cache),
+                    self.torch.empty_like(v_cache),
+                )
+            cache_pair = [(k_cache, v_cache), self._destination_cache]
+        else:
+            cache_pair = [(k_cache, v_cache)]
         index_location = self.engine.model_gpt_step.tensor_location.get(
             "idx", self.trt.TensorLocation.DEVICE
         )
         index_device = (
-            "cpu" if index_location == self.trt.TensorLocation.HOST else self.engine.device
+            "cpu"
+            if index_location == self.trt.TensorLocation.HOST
+            else self.engine.device
         )
-        indices = self.torch.arange(maximum_steps, dtype=self.torch.int64, device=index_device)
+        indices = self.torch.arange(
+            maximum_steps, dtype=self.torch.int64, device=index_device
+        )
         if (
             os.environ.get("ANIFLIVE_TTS_CUDA_GRAPH", "0").strip().lower()
             not in {"0", "false", "no", "off"}
@@ -235,6 +493,29 @@ class TransformerSemanticRuntime:
             for pair in cache_pair
             for tensor in pair
         )
+        persistent_contexts_requested = os.environ.get(
+            "ANIFLIVE_TTS_PERSISTENT_GPT_CONTEXTS", "1"
+        ).strip().lower() not in {"0", "false", "no", "off"}
+        persistent_step_contexts = None
+        if persistent_contexts_requested and self.use_ping_pong_cache:
+            if (
+                self._persistent_step_contexts is None
+                or not self._persistent_step_contexts.matches(
+                    cache_pair=cache_pair,
+                    x_length=x_length,
+                    y_length=y_length,
+                )
+            ):
+                self._persistent_step_contexts = _PersistentGPTStepContexts(
+                    torch=self.torch,
+                    trt=self.trt,
+                    model=self.engine.model_gpt_step,
+                    stream=self.engine.stream,
+                    cache_pair=cache_pair,
+                    x_length=x_length,
+                    y_length=y_length,
+                )
+            persistent_step_contexts = self._persistent_step_contexts
         return TransformerSemanticState(
             current=current,
             first_token=current,
@@ -250,7 +531,36 @@ class TransformerSemanticRuntime:
             temperature=float(temperature),
             top_k=int(top_k),
             top_p=float(top_p),
+            repetition_penalty=float(repetition_penalty),
+            minimum_semantic_tokens=minimum_semantic_tokens,
+            seen_token_mask=seen_token_mask,
             detailed_profile=bool(detailed_profile),
+            persistent_step_contexts=persistent_step_contexts,
+        )
+
+    def _execute_step(
+        self, state: TransformerSemanticState, step: int
+    ) -> dict[str, Any]:
+        source_cache = state.cache_pair[step % 2]
+        destination_cache = state.cache_pair[(step + 1) % 2]
+        state.outputs["k_cache_new"], state.outputs["v_cache_new"] = destination_cache
+        if state.persistent_step_contexts is None:
+            return self.engine.model_gpt_step(
+                {
+                    "samples": state.current.to(self.torch.int64),
+                    "k_cache": source_cache[0],
+                    "v_cache": source_cache[1],
+                    "idx": state.indices[step : step + 1],
+                    "x_len": state.x_length,
+                    "y_len": state.y_length,
+                },
+                outputs=state.outputs,
+                sync=False,
+            )
+        return state.persistent_step_contexts.execute(
+            step=step,
+            current=state.current,
+            index=state.indices[step : step + 1],
         )
 
     def iter_batches(
@@ -266,37 +576,30 @@ class TransformerSemanticRuntime:
         decode_started = time.perf_counter()
         sample_graph_requested = (
             os.environ.get("ANIFLIVE_TTS_SAMPLE_CUDA_GRAPH", "1").strip().lower()
-            not in {"0", "false", "no", "off"}
+            not in {
+                "0",
+                "false",
+                "no",
+                "off",
+            }
+            and state.repetition_penalty == 1.0
+            and state.minimum_semantic_tokens == 0
         )
         try:
             for step in range(state.maximum_steps):
                 if cancelled is not None and cancelled.is_set():
                     return
-                source_cache = state.cache_pair[step % 2]
-                destination_cache = state.cache_pair[(step + 1) % 2]
-                state.outputs["k_cache_new"], state.outputs["v_cache_new"] = destination_cache
-                decoded = self.engine.model_gpt_step(
-                {
-                    "samples": state.current.to(self.torch.int64),
-                    "k_cache": source_cache[0],
-                    "v_cache": source_cache[1],
-                    "idx": state.indices[step : step + 1],
-                    "x_len": state.x_length,
-                    "y_len": state.y_length,
-                },
-                outputs=state.outputs,
-                sync=False,
-                )
+                decoded = self._execute_step(state, step)
                 if sample_graph_requested and not self._sample_graph_disabled:
                     try:
                         if sample_graph is None:
                             graph_key = (
-                            int(decoded["topk_values"].data_ptr()),
-                            int(decoded["topk_indices"].data_ptr()),
-                            state.temperature,
-                            state.top_k,
-                            state.top_p,
-                        )
+                                int(decoded["topk_values"].data_ptr()),
+                                int(decoded["topk_indices"].data_ptr()),
+                                state.temperature,
+                                state.top_k,
+                                state.top_p,
+                            )
                             sample_graph = self._sample_graphs.get(graph_key)
                             if sample_graph is not None and sample_graph.matches(
                                 topk_values=decoded["topk_values"],
@@ -309,15 +612,15 @@ class TransformerSemanticRuntime:
                                 state.sample_cuda_graph_cache_hits += 1
                             else:
                                 sample_graph = _SampleCudaGraph(
-                                torch=self.torch,
-                                sample_topk=self.sample_topk,
-                                stream=self.engine.stream,
-                                topk_values=decoded["topk_values"],
-                                topk_indices=decoded["topk_indices"],
-                                token_capacity=1000,
-                                temperature=state.temperature,
-                                top_k=state.top_k,
-                                top_p=state.top_p,
+                                    torch=self.torch,
+                                    sample_topk=self.sample_topk,
+                                    stream=self.engine.stream,
+                                    topk_values=decoded["topk_values"],
+                                    topk_indices=decoded["topk_indices"],
+                                    token_capacity=1000,
+                                    temperature=state.temperature,
+                                    top_k=state.top_k,
+                                    top_p=state.top_p,
                                 )
                                 self._sample_graphs[graph_key] = sample_graph
                                 state.sample_cuda_graph_captures += 1
@@ -331,7 +634,8 @@ class TransformerSemanticRuntime:
                         self._sample_graphs.clear()
                         self._sample_graph_disabled = True
                         self.logger.warning(
-                            "Sampling CUDA Graph disabled after capture failure: %s", exc
+                            "Sampling CUDA Graph disabled after capture failure: %s",
+                            exc,
                         )
                 if (
                     not sample_graph_requested
@@ -339,13 +643,18 @@ class TransformerSemanticRuntime:
                     or self._sample_graph_disabled
                 ):
                     pending_storage_start = None
-                    state.current = self.sample_topk(
-                    decoded["topk_values"].detach(),
-                    decoded["topk_indices"].detach(),
-                    temperature=state.temperature,
-                    top_k=state.top_k,
-                    top_p=state.top_p,
-                    ).to(self.engine.device)
+                    state.current = self._sample_candidates(
+                        decoded["topk_values"],
+                        decoded["topk_indices"],
+                        temperature=state.temperature,
+                        top_k=state.top_k,
+                        top_p=state.top_p,
+                        repetition_penalty=state.repetition_penalty,
+                        seen_token_mask=state.seen_token_mask,
+                        suppress_eos=(
+                            1 + state.steps < state.minimum_semantic_tokens
+                        ),
+                    )
                     stored_current = state.current
                 state.steps += 1
                 pending_tokens.append(stored_current)
@@ -366,10 +675,16 @@ class TransformerSemanticRuntime:
                 if state.first_batch_seconds == 0.0:
                     state.first_batch_seconds = time.perf_counter() - decode_started
                 eos_offset = next(
-                    (offset for offset, value in enumerate(pending_values) if int(value) == 1024),
+                    (
+                        offset
+                        for offset, value in enumerate(pending_values)
+                        if int(value) == 1024
+                    ),
                     None,
                 )
-                accepted_count = len(pending_tokens) if eos_offset is None else eos_offset
+                accepted_count = (
+                    len(pending_tokens) if eos_offset is None else eos_offset
+                )
                 yield SemanticBatch(
                     tokens=pending_batch[:, :accepted_count],
                     eos=eos_offset is not None,
@@ -389,6 +704,8 @@ class TransformerSemanticRuntime:
     def close(self) -> None:
         self._sample_graphs.clear()
         self._destination_cache = None
+        self._persistent_step_contexts = None
+        self._seen_token_mask = None
 
 
 __all__ = [

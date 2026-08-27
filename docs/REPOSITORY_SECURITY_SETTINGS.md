@@ -31,12 +31,12 @@ that commit to the OCI `org.opencontainers.image.revision` label and index
 annotation, enables BuildKit SBOM and maximum provenance attestations, and
 uploads these files:
 
-- `SBOM-AnifLive-TTS-v1.1.0-cu126.spdx.json`
-- `SBOM-AnifLive-TTS-v1.1.0-cu128.spdx.json`
-- `RELEASE-METADATA-AnifLive-TTS-v1.1.0-cu126.json`
-- `RELEASE-METADATA-AnifLive-TTS-v1.1.0-cu128.json`
-- `TRIVY-AnifLive-TTS-v1.1.0-cu126.json`
-- `TRIVY-AnifLive-TTS-v1.1.0-cu128.json`
+- `SBOM-AnifLive-TTS-v1.2.0-cu126.spdx.json`
+- `SBOM-AnifLive-TTS-v1.2.0-cu128.spdx.json`
+- `RELEASE-METADATA-AnifLive-TTS-v1.2.0-cu126.json`
+- `RELEASE-METADATA-AnifLive-TTS-v1.2.0-cu128.json`
+- `TRIVY-AnifLive-TTS-v1.2.0-cu126.json`
+- `TRIVY-AnifLive-TTS-v1.2.0-cu128.json`
 
 The metadata file records the immutable image digest, source commit, workflow
 run URL, SBOM filename, and attestation policy. Attach the reviewed files to the

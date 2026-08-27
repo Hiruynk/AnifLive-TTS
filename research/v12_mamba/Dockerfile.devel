@@ -1,0 +1,57 @@
+ARG CUDA_DEVEL_IMAGE=nvidia/cuda:12.8.1-cudnn-devel-ubuntu24.04
+FROM ${CUDA_DEVEL_IMAGE}
+
+ARG TENSORRT_VERSION=11.2.1.2
+ARG TENSORRT_HEADERS_REV=c93b7d4893184af4882f9f1862e13a5c64b8677d
+ARG CUDA_ARCHITECTURES=120
+
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+ENV DEBIAN_FRONTEND=noninteractive \
+    VIRTUAL_ENV=/opt/venv \
+    PATH=/opt/venv/bin:$PATH \
+    PYTHONUNBUFFERED=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_NO_CACHE_DIR=1
+
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    apt-get update \
+    && apt-get install -y --no-install-recommends \
+      build-essential cmake git ninja-build python3 python3-pip python3-venv \
+    && rm -rf /var/lib/apt/lists/* \
+    && python3 -m venv /opt/venv \
+    && python -m pip install --upgrade pip setuptools wheel
+
+RUN --mount=type=cache,target=/root/.cache/pip,sharing=locked \
+    python -m pip install \
+      numpy==2.2.6 \
+      tensorrt-cu12-bindings==${TENSORRT_VERSION} \
+      "tensorrt-cu12-libs @ https://pypi.nvidia.com/tensorrt-cu12-libs/tensorrt_cu12_libs-${TENSORRT_VERSION}-py3-none-manylinux_2_28_x86_64.whl#sha256=d13d25345b1f87279478e2c63e0f1286c00c0824bc9eb0915ad0935857bc4e8e"
+
+# TensorRT public headers are pinned to the same 11.2.1.2 release as the
+# runtime wheel. The production image and Dockerfile are deliberately unused.
+RUN git init /opt/tensorrt-src \
+    && git -C /opt/tensorrt-src remote add origin https://github.com/NVIDIA/TensorRT.git \
+    && git -C /opt/tensorrt-src config core.sparseCheckout true \
+    && printf '/include/\n' > /opt/tensorrt-src/.git/info/sparse-checkout \
+    && git -C /opt/tensorrt-src fetch --depth 1 origin "${TENSORRT_HEADERS_REV}" \
+    && git -C /opt/tensorrt-src checkout --detach FETCH_HEAD \
+    && test "$(git -C /opt/tensorrt-src rev-parse HEAD)" = "${TENSORRT_HEADERS_REV}"
+
+WORKDIR /workspace
+COPY CMakeLists.txt /workspace/CMakeLists.txt
+COPY src /workspace/src
+COPY tools /workspace/tools
+
+RUN TRT_LIBRARY="$(python -c 'from pathlib import Path; import tensorrt_libs; root=Path(tensorrt_libs.__file__).parent; matches=sorted(root.glob("libnvinfer.so.11*")); assert matches, root; print(matches[0])')" \
+    && cmake -S /workspace -B /workspace/build -G Ninja \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_CUDA_ARCHITECTURES="${CUDA_ARCHITECTURES}" \
+      -DTENSORRT_INCLUDE_DIR=/opt/tensorrt-src/include \
+      -DTENSORRT_LIBRARY="${TRT_LIBRARY}" \
+    && cmake --build /workspace/build --parallel
+
+CMD ["python", "/workspace/tools/validate_plugin.py", \
+     "--plugin", "/workspace/build/libaniflive_mamba2_update_plugin.so", \
+     "--engine", "/out/mamba2-update-sm120.engine", \
+     "--report", "/out/mamba2-update-feasibility.json"]

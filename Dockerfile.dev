@@ -1,7 +1,7 @@
-ARG BASE_IMAGE=aniflive-tts:1.1.0-cu128
+ARG BASE_IMAGE=aniflive-tts:1.2.0-cu128
 FROM ${BASE_IMAGE}
 
-ARG VERSION=1.1.0
+ARG VERSION=1.2.0
 LABEL org.opencontainers.image.version="${VERSION}" \
       org.opencontainers.image.licenses="PolyForm-Noncommercial-1.0.0" \
       org.opencontainers.image.source="https://github.com/Hiruynk/AnifLive-TTS"

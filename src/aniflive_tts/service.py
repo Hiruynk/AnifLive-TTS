@@ -54,7 +54,7 @@ logging.basicConfig(
 )
 
 SERVICE_NAME = "AnifLive-TTS"
-SERVICE_VERSION = "1.1.0"
+SERVICE_VERSION = "1.2.0"
 MODEL_ID = os.environ.get("ANIFLIVE_TTS_MODEL_ID", "unconfigured")
 VOICE_ID = os.environ.get("ANIFLIVE_TTS_VOICE_PROFILE", "default")
 REFERENCE_TEXT = os.environ.get("ANIFLIVE_TTS_REFERENCE_TEXT", "")
@@ -650,7 +650,7 @@ class TensorRTService:
                     os.environ.get("ANIFLIVE_TTS_WARM_MAX_GPU_UTILIZATION", "20")
                 ),
                 maximum_pulse_seconds=float(
-                    os.environ.get("ANIFLIVE_TTS_WARM_MAX_PULSE_SECONDS", "0.020")
+                    os.environ.get("ANIFLIVE_TTS_WARM_MAX_PULSE_SECONDS", "0.040")
                 ),
             )
             self._warm_retention.start()
@@ -1451,7 +1451,7 @@ async def lifespan(_: FastAPI):
 app = FastAPI(
     title="AnifLive-TTS API",
     version=SERVICE_VERSION,
-    description="Low-latency multilingual AnifLive-TTS v1.1 service backed by TensorRT 11.",
+    description="Low-latency multilingual AnifLive-TTS v1.2 service backed by TensorRT 11.",
     lifespan=lifespan,
 )
 

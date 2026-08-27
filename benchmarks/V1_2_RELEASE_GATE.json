@@ -1,0 +1,110 @@
+{
+  "schema": 1,
+  "project": "AnifLive-TTS",
+  "release": "1.2.0",
+  "measured_at": "2026-08-27",
+  "candidate": {
+    "semantic_backend": "transformer",
+    "precision": "FP16",
+    "backend": "TensorRT-11",
+    "pytorch_neural_fallback": false,
+    "models": [
+      "miku-v2proplus",
+      "roxy-v2proplus"
+    ]
+  },
+  "performance_gates": {
+    "keepalive_audible_ttfa_p50": {
+      "baseline_ms": 89.296,
+      "candidate_ms": 77.71667500038893,
+      "improvement_percent": 12.967350160825875,
+      "required_improvement_percent": 10.0,
+      "pass": true
+    },
+    "keepalive_audible_ttfa_p95": {
+      "baseline_ms": 123.19,
+      "candidate_ms": 94.54979999996795,
+      "improvement_percent": 23.2488026625798,
+      "requirement": "no regression",
+      "pass": true
+    },
+    "new_connection_audible_ttfa_p50": {
+      "baseline_ms": 101.721,
+      "candidate_ms": 96.03375000007509,
+      "improvement_percent": 5.5910284011412745,
+      "required_improvement_percent": 5.0,
+      "pass": true
+    },
+    "complete_wav_rtf_p50": {
+      "baseline": 0.128717,
+      "candidate": 0.08877415331793087,
+      "improvement_percent": 31.031523949493174,
+      "maximum_regression_percent": 3.0,
+      "pass": true
+    },
+    "gpt_decode_p50": {
+      "required_improvement_percent": 25.0,
+      "observed_improvement_percent_range": [
+        13.385150988711313,
+        19.007485409513645
+      ],
+      "evidence": [
+        "release_candidate/quality/miku-v11-v12-penalty100-ab.json",
+        "release_candidate/quality/miku-v11-v12-default-exact.json",
+        "release_candidate/quality/miku-v11-v12-penalty100-long-ab.json"
+      ],
+      "pass": false
+    },
+    "peak_process_vram": {
+      "required_maximum_regression_percent": 10.0,
+      "measured": false,
+      "pass": null
+    }
+  },
+  "quality_gates": {
+    "miku_stream_vs_complete": {
+      "log_mel_cosine": 0.9928138,
+      "speaker_cosine": 0.9830659,
+      "duration_difference_percent": 0.0,
+      "pass": true
+    },
+    "roxy_stream_vs_complete": {
+      "log_mel_cosine": 0.990298,
+      "speaker_cosine": 0.9893237,
+      "duration_difference_percent": 0.032015,
+      "pass": true
+    },
+    "miku_complete_vs_v1_1": {
+      "byte_identical": true,
+      "speaker_cosine": 0.9999998998,
+      "pass": true
+    },
+    "manual_blinded_listening": {
+      "status": "pending",
+      "pass": null
+    }
+  },
+  "reliability_gates": {
+    "five_languages": true,
+    "api_contract": true,
+    "long_form": true,
+    "determinism": true,
+    "tensorrt_execution_proven": true,
+    "pytorch_neural_fallback": false,
+    "formal_requests_per_mode": 2000
+  },
+  "research_variants": {
+    "mtp": "rejected",
+    "gpu_viterbi": "rejected",
+    "mamba2_standalone_plugin_feasibility": "passed",
+    "mamba2_hybrid": "rejected",
+    "full_gpt_step_cuda_graph": "rejected",
+    "eos4": "rejected"
+  },
+  "status": "hold",
+  "hold_reasons": [
+    "The GPT decode P50 research subgate did not reach 25% in preserved matched A/B reports.",
+    "Peak process VRAM has not been isolated and measured.",
+    "The final manual blinded listening gate is pending."
+  ]
+}

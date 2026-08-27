@@ -33,3 +33,11 @@ differed at 1 of 59. Therefore:
 Machine-readable reports are stored outside the repository under the v1.2
 investigation report directory. Model checkpoints, ONNX files, engines, and
 voice assets are never stored in this source tree.
+
+## Rejected runtime experiments
+
+`mtp_semantic_runtime_experiment.py`, `build_mtp_block.py`, and
+`benchmark_mtp_block.py` preserve the MTP-2/MTP-4 verification experiments.
+They live here so the production backend cannot import or select them. The
+experiments did not pass the combined parity, quality, and measured-gain gates
+for v1.2 and are not part of the service runtime.

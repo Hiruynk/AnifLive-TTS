@@ -20,6 +20,9 @@ from .profiles import profiles_for
 from .trt_builder import DetailedTensorRTLogger, TensorRTEngineBuilder
 
 
+STAGE_MAX_AUX_STREAMS: dict[str, int] = {"gpt_step": 0}
+
+
 def sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as stream:
@@ -383,6 +386,7 @@ def build_engines(
                 workspace_bytes=workspace_mib * 1024 * 1024,
                 allow_tf32=False,
                 builder_optimization_level=optimization_level,
+                max_aux_streams=STAGE_MAX_AUX_STREAMS.get(stage),
                 logger=logger,
             )
             result = builder.build(
@@ -412,6 +416,7 @@ def build_engines(
             "tf32_allowed": False,
             "workspace_mib": workspace_mib,
             "builder_optimization_level": optimization_level,
+            "max_aux_streams_by_stage": STAGE_MAX_AUX_STREAMS,
             "payload": {"settings": {"profile": "fitted"}},
             "onnx_sha256": onnx_hashes,
             "graph_patch": graph_patch,

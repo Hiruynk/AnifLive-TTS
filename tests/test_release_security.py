@@ -33,7 +33,7 @@ def test_container_release_records_source_and_evidence() -> None:
     assert "VCS_REF=${{ github.sha }}" in workflow
     assert "BUILD_DATE=${{ steps.build_date.outputs.value }}" in workflow
     assert "index:org.opencontainers.image.revision=${{ github.sha }}" in workflow
-    assert "RELEASE-METADATA-AnifLive-TTS-v1.1.0-" in workflow
+    assert "RELEASE-METADATA-AnifLive-TTS-v1.2.0-" in workflow
     assert "provenance: mode=max" in workflow
     assert "pyspdxtools -i" in workflow
     assert workflow.count('python scripts/normalize_spdx_sbom.py "${output}"') == 2

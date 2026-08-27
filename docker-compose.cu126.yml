@@ -4,4 +4,4 @@ services:
       args:
         CUDA_BASE_IMAGE: nvidia/cuda:12.6.3-cudnn-runtime-ubuntu24.04@sha256:8aef630a54bc5c5146ae5ce68e6af5caa3df0fb690bb91544175c91f307e4356
         TORCH_REQUIREMENTS: requirements/torch-cu126.txt
-    image: aniflive-tts:1.1.0-cu126
+    image: aniflive-tts:1.2.0-cu126

@@ -12,7 +12,6 @@ Development is isolated from v1.0 and v1.1:
 
 - base tag: `v1.1.0` (`674902e`)
 - branch: `v1.2-semantic-research`
-- worktree: `D:\Win\Work\Projects\AnifLive-TTS-v1.2`
 - Python: the worktree-local `.venv`
 
 No v1.2 experiment may overwrite a v1.0/v1.1 model package, engine, image,
@@ -99,3 +98,47 @@ failure.
 Every phase produces implementation, tests, a machine-readable benchmark, a
 quality report, and an explicit pass/fail decision before the next phase begins.
 
+## Release Candidate Results
+
+The selected candidate keeps the Transformer semantic backend and the complete
+v1.1 acoustic path. It uses per-model fitted GPT engines, persistent TensorRT
+contexts, zero auxiliary streams, sampling CUDA Graph, the established 9+8
+first-preview policy, two-step EOS checks, and a 25-second guarded warm window.
+
+Formal measurement alternated Miku and Roxy across 10 sessions per model. Each
+of the 20 model-sessions used 10 warmups followed by 100 complete-WAV, 100
+new-connection streaming, and 100 keep-alive streaming requests.
+
+| Gate | Baseline | Candidate | Result |
+|---|---:|---:|---|
+| Keep-alive audible TTFA P50 | 89.296 ms | 77.717 ms | Pass, 12.967% faster |
+| Keep-alive audible TTFA P95 | 123.190 ms | 94.550 ms | Pass |
+| New-connection audible TTFA P50 | 101.721 ms | 96.034 ms | Pass, 5.591% faster |
+| Complete-WAV RTF P50 | 0.128717 | 0.088774 | Pass, 31.032% faster |
+| GPT decode P50 | >=25% faster required | 13.385–19.007% in preserved A/B reports | Fail |
+| Peak process VRAM | <=10% regression required | Not isolated | Not measured |
+
+All five language cases, API checks, long-form checks, deterministic checks,
+and TensorRT execution checks passed. Every formal request reported
+`TensorRT-11` with `X-PyTorch-Fallback: false`.
+
+Automated streaming quality passed for both model packages:
+
+| Model | Log-mel cosine | Speaker cosine | Duration difference | Result |
+|---|---:|---:|---:|---|
+| Miku V2ProPlus | 0.992814 | 0.983066 | 0.000% | Pass |
+| Roxy V2ProPlus | 0.990298 | 0.989324 | 0.032% | Pass |
+
+The fixed Miku complete-WAV regression case is byte-identical to v1.1 and has
+speaker cosine 0.9999999. The default repetition penalty is therefore `1.0`;
+the rejected `1.10` experiment is not part of the candidate.
+
+MTP, GPU Viterbi, Mamba-2 hybrid, full GPT-step CUDA Graph, and EOS4 were not
+selected because they failed parity, quality, compatibility, or measured-gain
+requirements. None is enabled in the production runtime.
+
+Current decision: **HOLD**. End-to-end performance, reliability, and automated
+quality gates pass, but the strict GPT decode subgate did not reach 25%, peak
+process VRAM is not yet isolated, and final blinded listening remains pending.
+The machine-readable decision is stored in
+[`benchmarks/V1_2_RELEASE_GATE.json`](../benchmarks/V1_2_RELEASE_GATE.json).
