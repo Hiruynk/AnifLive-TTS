@@ -203,11 +203,12 @@ the [v1.2 semantic experiment record](docs/research/v1.2-semantic-experiments.md
 
 | Candidate | Result | Decision |
 |---|---|---|
+| Reference-directed expression control | Passed objective, compatibility, and blind-listening gates | Adopted |
 | Hard-token acoustic lookahead with MTP future context | Cross-model quality and end-to-end latency gates were not met | Not adopted |
 | Recurrent speculative decoding | Reduced target NFE, but drafter and verifier overhead limited wall-time benefit | Not adopted |
 | SemanticPiece / EABPE | Sequence compression did not concentrate in the first 17 TTFA-critical tokens | Not adopted |
 | FastStart distilled/pruned Transformer | Continuation and refill reliability gates were not met | Not adopted |
-| Reference-directed expression control | Passed objective, compatibility, and blind-listening gates | Adopted |
+| D16 block diffusion | The evaluated low-rank adaptation did not pass the semantic-quality gate | Not adopted |
 
 These decisions apply to the evaluated AnifLive-TTS V2ProPlus workload, not to every possible implementation of the candidate architectures. See the [v1.3 latency experiment record](docs/research/v1.3-latency-experiments.md) and [expression design record](docs/research/v1.3-reference-expression-design.md).
 
