@@ -388,15 +388,20 @@ class TransformerSemanticRuntime:
         top_k: int,
         top_p: float,
         repetition_penalty: float | None = None,
+        minimum_semantic_tokens: int | None = None,
         detailed_profile: bool = False,
     ) -> TransformerSemanticState:
         if repetition_penalty is None:
             repetition_penalty = float(
                 os.environ.get("ANIFLIVE_TTS_REPETITION_PENALTY", "1.0")
             )
-        minimum_semantic_tokens = _resolve_minimum_semantic_tokens(
-            repetition_penalty
-        )
+        if minimum_semantic_tokens is None:
+            minimum_semantic_tokens = _resolve_minimum_semantic_tokens(
+                repetition_penalty
+            )
+        elif minimum_semantic_tokens < 0:
+            raise ValueError("minimum_semantic_tokens must be non-negative")
+        minimum_semantic_tokens = min(int(minimum_semantic_tokens), 1000)
         started = time.perf_counter()
         encoded = self.engine.model_gpt_enc(dict(inputs))
         encoder_seconds = time.perf_counter() - started

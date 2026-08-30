@@ -33,7 +33,7 @@ def test_container_release_records_source_and_evidence() -> None:
     assert "VCS_REF=${{ github.sha }}" in workflow
     assert "BUILD_DATE=${{ steps.build_date.outputs.value }}" in workflow
     assert "index:org.opencontainers.image.revision=${{ github.sha }}" in workflow
-    assert "RELEASE-METADATA-AnifLive-TTS-v1.2.0-" in workflow
+    assert "RELEASE-METADATA-AnifLive-TTS-v1.3.0-" in workflow
     assert "provenance: mode=max" in workflow
     assert "pyspdxtools -i" in workflow
     assert workflow.count('python scripts/normalize_spdx_sbom.py "${output}"') == 2
@@ -48,3 +48,57 @@ def test_release_checksums_cover_all_image_evidence() -> None:
     assert "RELEASE-METADATA-AnifLive-TTS-v$Version-cu126.json" in script
     assert "TRIVY-AnifLive-TTS-v$Version-cu128.json" in script
     assert "TRIVY-AnifLive-TTS-v$Version-cu126.json" in script
+
+
+def test_public_webui_contains_no_login_or_credential_state() -> None:
+    public_files = [ROOT / "src" / "aniflive_tts" / "webui.py", ROOT / "run_webui.bat"]
+    public_files.extend(sorted((ROOT / "webui").glob("*")))
+    combined = "\n".join(
+        path.read_text(encoding="utf-8", errors="ignore")
+        for path in public_files
+        if path.is_file()
+    ).lower()
+
+    for forbidden in (
+        "login.html",
+        "username",
+        "password",
+        "password_hash",
+        "credential",
+        "session_cookie",
+        "authorization",
+    ):
+        assert forbidden not in combined
+    assert "sessionstorage" not in combined
+    assert combined.count("localstorage") == 2
+    assert 'const locale_key = "aniflive.uilocale"' in combined
+
+
+def test_readmes_avoid_defensive_webui_authentication_copy() -> None:
+    forbidden = (
+        "contains no login screen or stored account credentials",
+        "authenticated overlay is not part of the public source",
+        "不包含登入頁或已儲存的帳戶憑證",
+        "本機登入版本不會進入公開原始碼",
+        "不包含登录页或已保存的账户凭据",
+        "本地登录版本不会进入公开源代码",
+    )
+    for name in ("README.md", "README_ZH_HK.md", "README_ZH_CN.md"):
+        content = (ROOT / name).read_text(encoding="utf-8")
+        for phrase in forbidden:
+            assert phrase not in content
+
+
+def test_expression_runtime_has_no_character_name_branches() -> None:
+    runtime_files = (
+        ROOT / "src" / "aniflive_tts" / "expression.py",
+        ROOT / "src" / "aniflive_tts" / "service.py",
+        ROOT / "src" / "aniflive_tts" / "streaming.py",
+        ROOT / "src" / "aniflive_tts" / "webui.py",
+        ROOT / "webui" / "annotation_editor.js",
+        ROOT / "webui" / "index.html",
+    )
+    pattern = re.compile(r"\b(?:miku|roxy)\b", re.IGNORECASE)
+    for path in runtime_files:
+        matches = pattern.findall(path.read_text(encoding="utf-8"))
+        assert not matches, f"{path.relative_to(ROOT)} contains a voice-name branch"

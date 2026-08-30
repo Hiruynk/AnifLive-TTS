@@ -1,4 +1,32 @@
-# AnifLive-TTS v1.1 Performance Engineering
+# AnifLive-TTS Performance Engineering Records
+
+## v1.3 Canonical Result
+
+The v1.3 release benchmark uses the external Roxy V2ProPlus package only. Ten
+sessions each run 10 warmups, 100 complete-WAV requests, 100 new-connection
+streaming requests, and 100 keep-alive streaming requests at concurrency 1.
+Audible TTFA is measured from client request send to the first audible PCM
+sample above -45 dBFS in the earliest active 10 ms frame, constrained by the
+arrival time of its server-emitted chunk. Device playback latency is excluded.
+
+| Metric | Median across 10 sessions | Session range |
+|---|---:|---:|
+| Complete WAV wall P50 / P95 | 153.177 / 189.548 ms | 146.508-166.100 / 158.981-201.439 ms |
+| Server inference P50 | 148.591 ms | 142.121-161.275 ms |
+| RTF P50 | 0.087680 | 0.083863-0.095077 |
+| New-connection first-packet P50 / P95 | 67.077 / 90.853 ms | 64.866-74.544 / 71.753-120.376 ms |
+| Keep-alive first-packet P50 / P95 | 67.953 / 92.019 ms | 65.456-76.345 / 81.640-136.052 ms |
+| New-connection audible TTFA P50 / P95 | 73.702 / 97.478 ms | 71.491-81.169 / 78.378-127.001 ms |
+| Keep-alive audible TTFA P50 / P95 | 74.578 / 98.644 ms | 72.081-82.970 / 88.265-142.677 ms |
+| GPU busy-time P50 / P95 | 53.0% / 56.0% | 50.5-54% / 56-57% |
+
+All 3,000 formal requests reported TensorRT 11 and no PyTorch neural fallback.
+The machine-readable source of truth is
+`benchmarks/README_BENCHMARK_SUMMARY.json`. Expression references are prepared
+at model activation and remain GPU-resident; the public WebUI reuses the active
+API and does not start another neural runtime.
+
+## v1.1 Historical Result
 
 ## Local Result
 

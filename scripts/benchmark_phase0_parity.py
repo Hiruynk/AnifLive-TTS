@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import shutil
 import statistics
 import subprocess
 import sys
@@ -26,6 +27,55 @@ def _summary(values: list[float]) -> dict[str, float]:
         "mean": statistics.fmean(ordered),
         "max": ordered[-1],
     }
+
+
+def _source_tree_digest(repo: Path) -> str:
+    digest = hashlib.sha256()
+    roots = [repo / "pyproject.toml", repo / "src" / "aniflive_tts"]
+    files = [roots[0]] + sorted(roots[1].rglob("*.py"))
+    for path in files:
+        relative = path.relative_to(repo).as_posix().encode("utf-8")
+        digest.update(len(relative).to_bytes(4, "big"))
+        digest.update(relative)
+        digest.update(path.read_bytes())
+    return digest.hexdigest()
+
+
+def _source_revision(repo: Path) -> str:
+    git = shutil.which("git")
+    if git is not None:
+        try:
+            revision = subprocess.check_output(
+                [
+                    git,
+                    "-c",
+                    f"safe.directory={repo.as_posix()}",
+                    "-C",
+                    str(repo),
+                    "rev-parse",
+                    "HEAD",
+                ],
+                text=True,
+            ).strip()
+            status = subprocess.check_output(
+                [
+                    git,
+                    "-c",
+                    f"safe.directory={repo.as_posix()}",
+                    "-C",
+                    str(repo),
+                    "status",
+                    "--porcelain",
+                    "--untracked-files=all",
+                ],
+                text=True,
+            )
+            if status.strip():
+                return f"{revision}+dirty-tree-sha256:{_source_tree_digest(repo)}"
+            return revision
+        except (OSError, subprocess.CalledProcessError):
+            pass
+    return "tree-sha256:" + _source_tree_digest(repo)
 
 
 def _options(service_module: Any, text: str) -> Any:
@@ -154,10 +204,7 @@ def _capture_runtime(args: argparse.Namespace) -> int:
 
         report = {
             "schema": 1,
-            "source_commit": subprocess.check_output(
-                ["git", "-c", f"safe.directory={repo.as_posix()}", "-C", str(repo), "rev-parse", "HEAD"],
-                text=True,
-            ).strip(),
+            "source_revision": _source_revision(repo),
             "repo": str(repo),
             "warmup_runs": args.warmup,
             "formal_runs": args.runs,

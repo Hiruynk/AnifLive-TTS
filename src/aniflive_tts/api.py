@@ -71,6 +71,7 @@ def configure_runtime(settings: RuntimeSettings | None = None) -> dict[str, Any]
         "ANIFLIVE_TTS_REFERENCE_WAV": str(required["reference"]),
         "ANIFLIVE_TTS_REFERENCE_TEXT": str(profile["reference_text"]),
         "ANIFLIVE_TTS_REFERENCE_LANGUAGE": str(profile["reference_language"]),
+        "ANIFLIVE_TTS_PROFILE_MANIFEST": str(profile_path),
         "ANIFLIVE_TTS_JA_USERDIC_DIR": str(source_dir / "GPT_SoVITS" / "text" / "ja_userdic"),
         "NLTK_DATA": os.environ.get(
             "ANIFLIVE_TTS_NLTK_DATA",

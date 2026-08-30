@@ -25,6 +25,17 @@ import soundfile as sf
 import soxr
 
 from aniflive_tts.backend.semantic_runtime import TransformerSemanticRuntime
+from aniflive_tts.expression import (
+    BoundaryKind,
+    ConditioningBundle,
+    ConditioningPolicy,
+    ExpressionRuntimePolicy,
+    PreparedReference,
+    PreparedReferenceBank,
+    classify_boundary,
+    should_bridge_expression_context,
+)
+from aniflive_tts.expression_transition import TransitionCurve, apply_edge_fade
 
 
 INITIAL_LEADING_SILENCE_RETAIN_SECONDS = 0.007
@@ -33,15 +44,10 @@ MIN_INITIAL_PREVIEW_PUBLISHED_SECONDS = 0.112
 MAX_CACHED_PREVIEW_TOKENS = 32
 
 
-@dataclass(frozen=True)
-class PreparedReference:
-    """GPU-resident features extracted from the fixed reference recording."""
+def _expression_minimum_semantic_tokens(phoneme_count: int) -> int:
+    """Reject immediate EOS without forcing a long hallucinated utterance."""
 
-    prompt_semantic: Any
-    spectrogram: Any
-    speaker_embedding: Any
-    phones: list[int]
-    bert: Any
+    return min(16, max(4, int(phoneme_count)))
 
 
 @dataclass(frozen=True)
@@ -297,7 +303,8 @@ class TensorRTFixedReferenceStreamer:
             self.semantic_runtime = transformer_runtime
         else:
             raise ValueError(f"Unsupported semantic backend: {semantic_backend}")
-        self.reference: PreparedReference | None = None
+        self.reference_bank = PreparedReferenceBank(identity_id="default")
+        self.expression_runtime_policy: ExpressionRuntimePolicy | None = None
         self._mute_matrix: Any | None = None
         self._mute_matrix_checked = False
         self._gpt_destination_cache: tuple[Any, Any] | None = None
@@ -353,8 +360,9 @@ class TensorRTFixedReferenceStreamer:
     def sample_rate(self) -> int:
         return int(self.engine.hps["data"]["sampling_rate"])
 
-    def _load_audio(self, sample_rate: int) -> np.ndarray:
-        audio, source_rate = sf.read(str(self.reference_wav), dtype="float32", always_2d=True)
+    @staticmethod
+    def _load_audio(path: Path, sample_rate: int) -> np.ndarray:
+        audio, source_rate = sf.read(str(path), dtype="float32", always_2d=True)
         mono = audio.mean(axis=1, dtype=np.float32)
         if int(source_rate) == int(sample_rate):
             return mono
@@ -362,14 +370,38 @@ class TensorRTFixedReferenceStreamer:
             np.float32, copy=False
         )
 
-    def prepare_reference(self) -> PreparedReference:
+    def _prepare_reference(
+        self,
+        *,
+        reference_id: str,
+        reference_wav: Path,
+        reference_text: str,
+        reference_language: str,
+        normalize_semantic_onset: bool = False,
+        semantic_onset_threshold_dbfs: float = -45.0,
+        semantic_onset_retain_ms: int = 40,
+    ) -> PreparedReference:
         """Run the fixed reference through SSL/VQ/spec/SV engines once."""
 
         torch = self.torch
         with torch.cuda.stream(self.engine.stream):
             self.logger.info("Preparing reference: decode 16 kHz audio")
-            wav16k = self._load_audio(16000)
-            wav16k_tensor = torch.from_numpy(wav16k).to(self.engine.device).to(self.engine.precision)
+            wav16k = self._load_audio(reference_wav, 16000)
+            semantic_wav16k = wav16k
+            semantic_onset_removed_ms = 0.0
+            if normalize_semantic_onset:
+                semantic_wav16k, removed_samples = self._trim_reference_semantic_onset(
+                    wav16k,
+                    sample_rate=16000,
+                    threshold_dbfs=semantic_onset_threshold_dbfs,
+                    retain_ms=semantic_onset_retain_ms,
+                )
+                semantic_onset_removed_ms = removed_samples / 16.0
+            wav16k_tensor = (
+                torch.from_numpy(semantic_wav16k)
+                .to(self.engine.device)
+                .to(self.engine.precision)
+            )
             silence = torch.zeros(
                 int(16000 * 0.3), device=self.engine.device, dtype=self.engine.precision
             )
@@ -381,7 +413,7 @@ class TensorRTFixedReferenceStreamer:
             prompt_semantic = codes[0, 0][None, :]
 
             self.logger.info("Preparing reference: TensorRT spectrogram enqueue")
-            wav_ref = self._load_audio(self.sample_rate)
+            wav_ref = self._load_audio(reference_wav, self.sample_rate)
             spectrogram = self.engine.model_spectrogram(
                 {
                     "audio": torch.from_numpy(wav_ref)[None, :]
@@ -411,27 +443,93 @@ class TensorRTFixedReferenceStreamer:
 
             self.logger.info("Preparing reference: multilingual text frontend and TensorRT BERT")
             phones, bert, _ = self.engine.get_phones_and_bert(
-                self.reference_text, self.reference_language, self.engine.version
+                reference_text, reference_language, self.engine.version
             )
 
         self.logger.info("Preparing reference: synchronize CUDA stream")
         torch.cuda.synchronize(self.engine.stream)
-        self.reference = PreparedReference(
+        reference = PreparedReference(
             prompt_semantic=prompt_semantic,
             spectrogram=spectrogram,
             speaker_embedding=speaker_embedding,
             phones=list(phones),
             bert=bert,
+            id=reference_id,
+            semantic_onset_removed_ms=semantic_onset_removed_ms,
         )
         self._warm_input_ids = torch.zeros(
             (1, 32), dtype=torch.int64, device=self.engine.device
         )
         self.logger.info(
-            "Prepared fixed voice reference once: prompt=%d tokens, spectrogram=%s",
+            "Prepared fixed voice reference once: prompt=%d tokens, spectrogram=%s, "
+            "semantic_onset_removed_ms=%.1f",
             int(prompt_semantic.shape[-1]),
             tuple(int(value) for value in spectrogram.shape),
+            semantic_onset_removed_ms,
         )
-        return self.reference
+        return reference
+
+    @staticmethod
+    def _trim_reference_semantic_onset(
+        audio: np.ndarray,
+        *,
+        sample_rate: int,
+        threshold_dbfs: float,
+        retain_ms: int,
+    ) -> tuple[np.ndarray, int]:
+        """Trim only redundant silence seen by the SSL/VQ semantic prompt."""
+
+        samples = np.asarray(audio, dtype=np.float32)
+        if samples.ndim != 1 or samples.size == 0:
+            return samples, 0
+        frame_samples = max(1, int(round(sample_rate * 0.010)))
+        threshold = float(10.0 ** (threshold_dbfs / 20.0))
+        first_active: int | None = None
+        for start in range(0, int(samples.size), frame_samples):
+            frame = samples[start : start + frame_samples]
+            if frame.size and float(np.sqrt(np.mean(np.square(frame), dtype=np.float64))) >= threshold:
+                first_active = start
+                break
+        if first_active is None:
+            return samples, 0
+        retained_samples = max(0, int(round(sample_rate * retain_ms / 1000.0)))
+        removed_samples = max(0, first_active - retained_samples)
+        if removed_samples == 0:
+            return samples, 0
+        return samples[removed_samples:].copy(), removed_samples
+
+    def prepare_reference(self) -> PreparedReference:
+        reference = self._prepare_reference(
+            reference_id="default",
+            reference_wav=self.reference_wav,
+            reference_text=self.reference_text,
+            reference_language=self.reference_language,
+        )
+        self.reference_bank.replace(reference)
+        return reference
+
+    def prepare_reference_profile(
+        self,
+        *,
+        reference_id: str,
+        reference_wav: Path,
+        reference_text: str,
+        reference_language: str,
+        normalize_semantic_onset: bool = False,
+        semantic_onset_threshold_dbfs: float = -45.0,
+        semantic_onset_retain_ms: int = 40,
+    ) -> PreparedReference:
+        reference = self._prepare_reference(
+            reference_id=reference_id,
+            reference_wav=reference_wav,
+            reference_text=reference_text,
+            reference_language=reference_language,
+            normalize_semantic_onset=normalize_semantic_onset,
+            semantic_onset_threshold_dbfs=semantic_onset_threshold_dbfs,
+            semantic_onset_retain_ms=semantic_onset_retain_ms,
+        )
+        self.reference_bank.add(reference)
+        return reference
 
     def warm_frontends(self) -> None:
         """Resolve every advertised language frontend before accepting traffic."""
@@ -535,6 +633,7 @@ class TensorRTFixedReferenceStreamer:
     def _decode_chunk(
         self,
         *,
+        conditioning: ConditioningBundle,
         tokens: Any,
         history: Any | None,
         lookahead: Any | None,
@@ -546,10 +645,6 @@ class TensorRTFixedReferenceStreamer:
         model: Any | None = None,
         stream: Any | None = None,
     ) -> np.ndarray:
-        reference = self.reference
-        if reference is None:
-            raise RuntimeError("The fixed voice reference has not been prepared")
-
         selected_model = model or self.engine.model_sovits
         selected_stream = stream or self.engine.stream
         with self.torch.cuda.stream(selected_stream):
@@ -567,8 +662,8 @@ class TensorRTFixedReferenceStreamer:
             sovits_inputs = {
                 "pred_semantic": semantic.to(self.torch.int64),
                 "text_seq": text_seq,
-                "refer_spec": reference.spectrogram,
-                "sv_emb": reference.speaker_embedding,
+                "refer_spec": conditioning.spectrogram,
+                "sv_emb": conditioning.speaker_embedding,
                 "noise_scale": self.torch.tensor(
                     [noise_scale], dtype=self.torch.float32, device=self.engine.device
                 ),
@@ -597,6 +692,7 @@ class TensorRTFixedReferenceStreamer:
     def _decode_native_stream_chunk(
         self,
         *,
+        conditioning: ConditioningBundle,
         cumulative_tokens: Any,
         new_token_count: int,
         phones: Sequence[int],
@@ -607,9 +703,6 @@ class TensorRTFixedReferenceStreamer:
     ) -> tuple[np.ndarray, Any, int]:
         """Decode a model-aligned V2ProPlus chunk with TensorRT only."""
 
-        reference = self.reference
-        if reference is None:
-            raise RuntimeError("The fixed voice reference has not been prepared")
         model = self.engine.model_sovits_stream
         maximum = int(model.input_max_shapes.get("pred_semantic", (1, 1, 250))[-1])
         if int(cumulative_tokens.shape[-1]) > maximum:
@@ -645,8 +738,8 @@ class TensorRTFixedReferenceStreamer:
         inputs = {
             "pred_semantic": cumulative_tokens[:, None, :].to(self.torch.int64),
             "text_seq": text_seq,
-            "refer_spec": reference.spectrogram,
-            "sv_emb": reference.speaker_embedding,
+            "refer_spec": conditioning.spectrogram,
+            "sv_emb": conditioning.speaker_embedding,
             "noise_scale": self.torch.tensor(
                 [noise_scale], dtype=self.torch.float32, device=self.engine.device
             ),
@@ -716,6 +809,21 @@ class TensorRTFixedReferenceStreamer:
         )
 
     @staticmethod
+    def _first_preview_context_tokens(
+        *,
+        first_chunk_tokens: int,
+        first_lookahead_tokens: int,
+        configured_context_tokens: int,
+        low_latency_stream: bool,
+    ) -> int:
+        """Apply package-calibrated exact context only to low-latency previews."""
+
+        baseline = int(first_chunk_tokens) + int(first_lookahead_tokens)
+        if not low_latency_stream:
+            return baseline
+        return max(baseline, int(configured_context_tokens))
+
+    @staticmethod
     def _remember_preview_target(
         *, cached_tokens: int | None, successful_tokens: int
     ) -> int:
@@ -771,6 +879,32 @@ class TensorRTFixedReferenceStreamer:
         return aligned
 
     @classmethod
+    def _should_use_full_context_refill(
+        cls,
+        *,
+        enabled: bool,
+        low_latency_stream: bool,
+        emitted_chunks: int,
+        progressive_refill_count: int,
+        has_audio_tail: bool,
+        has_semantic_tokens: bool,
+    ) -> bool:
+        del cls
+        if not (
+            enabled
+            and low_latency_stream
+            and emitted_chunks >= 1
+            and has_audio_tail
+            and has_semantic_tokens
+        ):
+            return False
+        # The v1.2 path refills only after its first preview. Once a normal
+        # steady chunk has already been published, decoding from the initial
+        # preview offset would repeat speech. Expression streaming may refill
+        # again only when a progressive refill explicitly advanced that offset.
+        return emitted_chunks == 1 or progressive_refill_count > 0
+
+    @classmethod
     def _refill_from_full_context(
         cls,
         previous_tail: np.ndarray,
@@ -778,6 +912,8 @@ class TensorRTFixedReferenceStreamer:
         *,
         expected_start: int,
         sample_rate: int,
+        published_samples: int | None = None,
+        baseline_compatible: bool = False,
     ) -> tuple[np.ndarray, int, float]:
         """Join a low-latency preview to a full-context decode by waveform match."""
 
@@ -795,6 +931,26 @@ class TensorRTFixedReferenceStreamer:
             max(0, int(expected_start)),
             max(0, int(full_audio.size) - match_samples),
         )
+        # A preview may already contain audible speech after its natural
+        # leading silence was trimmed, while the full-context decode can place
+        # the same onset substantially later. Joining at the raw architecture
+        # offset would then insert a long silent gap inside one spoken clause.
+        # Preserve up to 5 ms for a smooth join, but only intervene when the
+        # residual gap exceeds 80 ms; ordinary pauses and neutral parity stay
+        # untouched.
+        if not baseline_compatible:
+            continuation_silence = cls._leading_silence_seconds(
+                full_audio[expected:], sample_rate
+            )
+            if continuation_silence > 0.080:
+                skip_samples = max(
+                    0,
+                    int(round((continuation_silence - 0.005) * sample_rate)),
+                )
+                expected = min(
+                    expected + skip_samples,
+                    max(0, int(full_audio.size) - match_samples),
+                )
         if reference_energy <= 1e-10:
             start = expected
             score = 0.0
@@ -840,6 +996,26 @@ class TensorRTFixedReferenceStreamer:
                     score = candidate_score
             if score < 0.15:
                 start = expected
+                if (
+                    not baseline_compatible
+                    and published_samples is not None
+                    and published_samples > 0
+                ):
+                    # Non-causal SoVITS previews can be audibly valid while
+                    # their tail is not waveform-correlated with the same
+                    # prefix decoded in full context. Fall back to a temporal
+                    # splice after the already-published audible duration so
+                    # the first phrase is not emitted twice.
+                    full_onset_samples = int(
+                        round(
+                            cls._leading_silence_seconds(full_audio, sample_rate)
+                            * sample_rate
+                        )
+                    )
+                    start = min(
+                        full_onset_samples + int(published_samples),
+                        max(0, int(full_audio.size) - match_samples),
+                    )
         crossfade_samples = min(
             match_samples,
             max(128, int(round(max(1, sample_rate) * 0.015))),
@@ -984,6 +1160,7 @@ class TensorRTFixedReferenceStreamer:
     def _decode_tail(
         self,
         *,
+        conditioning: ConditioningBundle,
         ready_event: Any,
         full_tokens: Any,
         phones: Sequence[int],
@@ -1000,6 +1177,7 @@ class TensorRTFixedReferenceStreamer:
         started = time.perf_counter()
         self._tail_stream.wait_event(ready_event)
         full_audio, invocations = self._decode_complete_profile_safe(
+            conditioning=conditioning,
             full_tokens=full_tokens,
             phones=phones,
             noise_scale=noise_scale,
@@ -1029,6 +1207,7 @@ class TensorRTFixedReferenceStreamer:
     def _decode_complete_profile_safe(
         self,
         *,
+        conditioning: ConditioningBundle,
         full_tokens: Any,
         phones: Sequence[int],
         noise_scale: float,
@@ -1044,6 +1223,7 @@ class TensorRTFixedReferenceStreamer:
         if semantic_limit <= 0 or total_tokens <= semantic_limit:
             return (
                 self._decode_chunk(
+                    conditioning=conditioning,
                     tokens=full_tokens,
                     history=None,
                     lookahead=None,
@@ -1077,6 +1257,7 @@ class TensorRTFixedReferenceStreamer:
                 :, position + count : position + count + lookahead_tokens
             ]
             audio = self._decode_chunk(
+                conditioning=conditioning,
                 tokens=current,
                 history=history,
                 lookahead=following if int(following.shape[-1]) else None,
@@ -1115,6 +1296,8 @@ class TensorRTFixedReferenceStreamer:
         self,
         *,
         segments: Sequence[str],
+        conditioning: ConditioningBundle | None = None,
+        conditionings: Sequence[ConditioningBundle] | None = None,
         text_language: str,
         top_k: int,
         top_p: float,
@@ -1128,9 +1311,24 @@ class TensorRTFixedReferenceStreamer:
     ) -> Iterator[np.ndarray]:
         """Yield mono float32 chunks while retaining the reference on the GPU."""
 
-        reference = self.reference
-        if reference is None:
-            raise RuntimeError("The fixed voice reference has not been prepared")
+        if conditioning is not None and conditionings is not None:
+            raise ValueError("conditioning and conditionings are mutually exclusive")
+        if conditionings is not None:
+            if len(conditionings) != len(segments):
+                raise ValueError("conditionings must match the number of segments")
+            resolved_conditionings = tuple(conditionings)
+        else:
+            if conditioning is None:
+                try:
+                    conditioning = self.reference_bank.conditioning(
+                        reference_id=self.reference_bank.identity_id,
+                        policy=ConditioningPolicy.FULL_SWITCH,
+                    )
+                except KeyError as error:
+                    raise RuntimeError("The fixed voice reference has not been prepared") from error
+            resolved_conditionings = (conditioning,) * len(segments)
+        if not resolved_conditionings:
+            raise ValueError("segments must not be empty")
         if chunk_length is None:
             chunk_length = self.streaming_chunk_length()
         if chunk_length < 8:
@@ -1177,12 +1375,152 @@ class TensorRTFixedReferenceStreamer:
             os.environ.get("ANIFLIVE_TTS_FULL_CONTEXT_REFILL", "1").strip().lower()
             not in {"0", "false", "no", "off"}
         )
-        preview_publish_seconds = max(
-            0.0,
-            min(
+        controlled_expression = any(
+            item.expression_id != self.reference_bank.identity_id
+            for item in resolved_conditionings
+        )
+        package_runtime_policy = (
+            self.expression_runtime_policy if controlled_expression else None
+        )
+        runtime_override = (
+            os.environ.get("ANIFLIVE_TTS_EXPRESSION_RUNTIME_OVERRIDE", "0")
+            .strip()
+            .lower()
+            not in {"0", "false", "no", "off"}
+        )
+        if package_runtime_policy is not None and not runtime_override:
+            preview_publish_seconds = package_runtime_policy.preview_publish_seconds
+            minimum_initial_preview_seconds = (
+                package_runtime_policy.minimum_initial_preview_seconds
+            )
+            progressive_refill_tokens = package_runtime_policy.progressive_refill_tokens
+            progressive_refill_seconds = package_runtime_policy.progressive_refill_seconds
+            progressive_refill_limit = package_runtime_policy.progressive_refill_count
+            progressive_refill_min_segments = (
+                package_runtime_policy.progressive_refill_min_segments
+            )
+            progressive_refill_min_phonemes = (
+                package_runtime_policy.progressive_refill_min_phonemes
+            )
+            progressive_refill_short_tokens = (
+                package_runtime_policy.progressive_refill_short_tokens
+            )
+            progressive_refill_short_seconds = (
+                package_runtime_policy.progressive_refill_short_seconds
+            )
+            expression_transition = package_runtime_policy.transition
+            expression_transition_ms = package_runtime_policy.transition_ms
+            expression_sigmoid_k = package_runtime_policy.sigmoid_k
+            configured_first_context_tokens = package_runtime_policy.first_context_tokens
+            onset_hold_ms = package_runtime_policy.onset_hold_ms
+            runtime_policy_source = "package"
+        else:
+            preview_publish_seconds = max(
+                0.0,
+                min(
+                    1.0,
+                    float(os.environ.get("ANIFLIVE_TTS_PREVIEW_PUBLISH_SECONDS", "0")),
+                ),
+            )
+            minimum_initial_preview_seconds = (
+                MIN_INITIAL_PREVIEW_PUBLISHED_SECONDS
+            )
+            progressive_refill_tokens = max(
+                0,
+                min(
+                    64,
+                    int(os.environ.get("ANIFLIVE_TTS_PROGRESSIVE_REFILL_TOKENS", "0")),
+                ),
+            )
+            progressive_refill_seconds = max(
+                0.0,
+                min(
+                    1.0,
+                    float(
+                        os.environ.get(
+                            "ANIFLIVE_TTS_PROGRESSIVE_REFILL_SECONDS", "0"
+                        )
+                    ),
+                ),
+            )
+            if progressive_refill_seconds <= 0.0:
+                progressive_refill_seconds = max(preview_publish_seconds, 0.112)
+            progressive_refill_limit = max(
+                1,
+                min(
+                    4,
+                    int(os.environ.get("ANIFLIVE_TTS_PROGRESSIVE_REFILL_COUNT", "1")),
+                ),
+            )
+            progressive_refill_min_segments = max(
+                1,
+                int(
+                    os.environ.get(
+                        "ANIFLIVE_TTS_PROGRESSIVE_REFILL_MIN_SEGMENTS", "2"
+                    )
+                ),
+            )
+            progressive_refill_min_phonemes = max(
+                1,
+                int(
+                    os.environ.get(
+                        "ANIFLIVE_TTS_PROGRESSIVE_REFILL_MIN_PHONEMES", "80"
+                    )
+                ),
+            )
+            progressive_refill_short_tokens = max(
+                0,
+                min(
+                    64,
+                    int(
+                        os.environ.get(
+                            "ANIFLIVE_TTS_PROGRESSIVE_REFILL_SHORT_TOKENS", "0"
+                        )
+                    ),
+                ),
+            )
+            progressive_refill_short_seconds = max(
+                0.0,
+                min(
+                    1.0,
+                    float(
+                        os.environ.get(
+                            "ANIFLIVE_TTS_PROGRESSIVE_REFILL_SHORT_SECONDS", "0.112"
+                        )
+                    ),
+                ),
+            )
+            try:
+                expression_transition = TransitionCurve(
+                    os.environ.get(
+                        "ANIFLIVE_TTS_EXPRESSION_TRANSITION", "hard-natural"
+                    ).strip().lower()
+                )
+            except ValueError as error:
+                raise ValueError(
+                    "ANIFLIVE_TTS_EXPRESSION_TRANSITION is invalid"
+                ) from error
+            expression_transition_ms = max(
+                0.0,
+                min(
+                    20.0,
+                    float(os.environ.get("ANIFLIVE_TTS_EXPRESSION_TRANSITION_MS", "4")),
+                ),
+            )
+            expression_sigmoid_k = max(
                 1.0,
-                float(os.environ.get("ANIFLIVE_TTS_PREVIEW_PUBLISH_SECONDS", "0")),
-            ),
+                min(
+                    40.0,
+                    float(os.environ.get("ANIFLIVE_TTS_EXPRESSION_SIGMOID_K", "12")),
+                ),
+            )
+            configured_first_context_tokens = 17
+            onset_hold_ms = 0
+            runtime_policy_source = "environment" if runtime_override else "legacy"
+        progressive_refill_enabled = bool(
+            progressive_refill_tokens > 0
+            and full_context_refill_enabled
+            and preview_publish_seconds > 0.0
         )
         native_stream_enabled = (
             os.environ.get("ANIFLIVE_TTS_NATIVE_SOVITS_STREAM", "1").strip().lower()
@@ -1197,8 +1535,28 @@ class TensorRTFixedReferenceStreamer:
         profile["full_context_refill_enabled"] = int(full_context_refill_enabled)
         profile["full_context_refill_decoder"] = "native"
         profile["preview_publish_seconds"] = preview_publish_seconds
+        profile["minimum_initial_preview_seconds"] = (
+            minimum_initial_preview_seconds
+        )
+        profile["progressive_refill_tokens"] = progressive_refill_tokens
+        profile["progressive_refill_seconds"] = progressive_refill_seconds
+        profile["progressive_refill_limit"] = progressive_refill_limit
+        profile["progressive_refill_min_segments"] = progressive_refill_min_segments
+        profile["progressive_refill_min_phonemes"] = progressive_refill_min_phonemes
+        profile["progressive_refill_short_tokens"] = progressive_refill_short_tokens
+        profile["progressive_refill_short_seconds"] = progressive_refill_short_seconds
+        profile["progressive_refill_enabled"] = int(progressive_refill_enabled)
+        profile["expression_runtime_policy_source"] = runtime_policy_source
+        profile["first_context_tokens"] = configured_first_context_tokens
+        profile["onset_hold_ms"] = onset_hold_ms
         profile["native_sovits_stream_enabled"] = int(native_stream_enabled)
         profile["first_segment_preview_only"] = int(first_segment_preview_only)
+        expression_fade_samples = int(
+            round(self.sample_rate * expression_transition_ms / 1000.0)
+        )
+        profile["expression_transition"] = expression_transition.value
+        profile["expression_transition_ms"] = expression_transition_ms
+        profile["expression_sigmoid_k"] = expression_sigmoid_k
         mute_matrix = self._load_mute_matrix()
         history_tokens, lookahead_tokens, fade_samples = 32, 16, 256
         pending_tail: _PendingTail | None = None
@@ -1208,6 +1566,7 @@ class TensorRTFixedReferenceStreamer:
         continuation_bert: Any | None = None
         continuation_tokens: Any | None = None
         previous_was_technical = False
+        pending_expression_fade_in = False
         # Do not publish silent preview chunks as if speech had started.  The
         # same conservative head trim is used for the first segment and every
         # later natural sentence, retaining a short guard against clipped
@@ -1217,6 +1576,12 @@ class TensorRTFixedReferenceStreamer:
 
         def note_audio(audio: np.ndarray, segment_index: int) -> np.ndarray:
             nonlocal first_audio_emitted
+            segment_profiles = profile["segment_profiles"]
+            if 0 <= segment_index < len(segment_profiles):
+                segment_profile = segment_profiles[segment_index]
+                segment_profile["published_samples"] = int(
+                    segment_profile.get("published_samples", 0)
+                ) + int(audio.size)
             if audio.size and not first_audio_emitted:
                 profile["first_audio_seconds"] = time.perf_counter() - request_started
                 profile["first_audio_segment"] = segment_index
@@ -1225,6 +1590,24 @@ class TensorRTFixedReferenceStreamer:
 
         def prepare_segment_head(audio: np.ndarray) -> np.ndarray:
             nonlocal pending_technical_tail, trim_natural_segment_head
+            nonlocal pending_expression_fade_in
+
+            def apply_expression_head_fade(value: np.ndarray) -> np.ndarray:
+                nonlocal pending_expression_fade_in
+                if value.size == 0 or not pending_expression_fade_in:
+                    return value
+                pending_expression_fade_in = False
+                profile["expression_head_fades"] = int(
+                    profile.get("expression_head_fades", 0)
+                ) + 1
+                return apply_edge_fade(
+                    value,
+                    samples=expression_fade_samples,
+                    curve=expression_transition,
+                    fade_in=True,
+                    sigmoid_k=expression_sigmoid_k,
+                )
+
             if audio.size == 0:
                 return audio
             if pending_technical_tail is None and trim_natural_segment_head:
@@ -1251,9 +1634,9 @@ class TensorRTFixedReferenceStreamer:
                 # A segment can begin with one or more entirely silent PCM
                 # chunks. Keep trimming until the first audible samples arrive.
                 trim_natural_segment_head = audio.size == 0
-                return audio
+                return apply_expression_head_fade(audio)
             if pending_technical_tail is None:
-                return audio
+                return apply_expression_head_fade(audio)
             leading_silence = self._leading_silence_seconds(audio, self.sample_rate)
             audio, trimmed_seconds = self._trim_excess_leading_silence(
                 audio,
@@ -1267,14 +1650,16 @@ class TensorRTFixedReferenceStreamer:
                 return tail
             overlap = min(technical_crossfade_samples, int(tail.size), int(audio.size))
             if overlap <= 0:
-                return np.concatenate((tail, audio))
+                return apply_expression_head_fade(np.concatenate((tail, audio)))
             fade_in = np.linspace(0.0, 1.0, overlap, dtype=np.float32)
             blended = tail[-overlap:] * (1.0 - fade_in) + audio[:overlap] * fade_in
             profile["technical_crossfades"] = int(profile.get("technical_crossfades", 0)) + 1
             profile["trimmed_leading_silence_seconds"] = float(
                 profile.get("trimmed_leading_silence_seconds", 0.0)
             ) + trimmed_seconds
-            return np.concatenate((tail[:-overlap], blended, audio[overlap:]))
+            return apply_expression_head_fade(
+                np.concatenate((tail[:-overlap], blended, audio[overlap:]))
+            )
 
         def consume_pending_tail() -> list[np.ndarray]:
             nonlocal pending_tail
@@ -1331,20 +1716,62 @@ class TensorRTFixedReferenceStreamer:
                         pending_tail.future.result()
                     return
                 text = raw_text.strip()
+                segment_conditioning = resolved_conditionings[segment_index]
+                reference = segment_conditioning.semantic
+                current_conditioning_key = (
+                    segment_conditioning.expression_id,
+                    segment_conditioning.policy.value,
+                )
+                previous_conditioning_key = None
+                if segment_index > 0:
+                    previous = resolved_conditionings[segment_index - 1]
+                    previous_conditioning_key = (
+                        previous.expression_id,
+                        previous.policy.value,
+                    )
+                entering_expression_switch = bool(
+                    previous_conditioning_key is not None
+                    and previous_conditioning_key != current_conditioning_key
+                )
+                next_conditioning_key = None
+                if segment_index + 1 < len(resolved_conditionings):
+                    following = resolved_conditionings[segment_index + 1]
+                    next_conditioning_key = (
+                        following.expression_id,
+                        following.policy.value,
+                    )
+                leaving_expression_switch = (
+                    next_conditioning_key is not None
+                    and next_conditioning_key != current_conditioning_key
+                )
+                boundary_kind = classify_boundary(
+                    raw_text,
+                    expression_switch=leaving_expression_switch,
+                )
+                expression_context_bridge = should_bridge_expression_context(
+                    raw_text,
+                    expression_switch=leaving_expression_switch,
+                )
                 segment_profile: dict[str, Any] = {
                     "index": segment_index,
                     "characters": len(text),
                     "boundary": text[-1:] if text else "",
+                    "boundary_kind": boundary_kind.value,
+                    "expression_id": segment_conditioning.expression_id,
+                    "expression_policy": segment_conditioning.policy.value,
+                    "expression_context_bridge": int(expression_context_bridge),
                 }
                 technical_continuation = (
                     segment_index + 1 < len(segments)
-                    and not self._has_natural_boundary(raw_text)
+                    and (
+                        boundary_kind is BoundaryKind.TECHNICAL
+                        or expression_context_bridge
+                    )
                 )
                 natural_continuation = (
                     segment_index + 1 < len(segments) and not technical_continuation
                 )
                 pending_natural_silence = np.empty(0, dtype=np.float32)
-
                 def hold_natural_trailing_silence(audio: np.ndarray) -> list[np.ndarray]:
                     nonlocal pending_natural_silence
                     if not natural_continuation or audio.size == 0:
@@ -1381,6 +1808,43 @@ class TensorRTFixedReferenceStreamer:
                 profile["text_processing_seconds"] += text_elapsed
                 segment_profile["text_processing_seconds"] = text_elapsed
                 segment_profile["phonemes"] = len(phones)
+                long_refill_request = bool(
+                    len(segments) >= progressive_refill_min_segments
+                    or len(phones) >= progressive_refill_min_phonemes
+                )
+                segment_progressive_refill_tokens = (
+                    progressive_refill_tokens
+                    if long_refill_request
+                    else progressive_refill_short_tokens
+                )
+                segment_progressive_refill_seconds = (
+                    progressive_refill_seconds
+                    if long_refill_request
+                    else progressive_refill_short_seconds
+                )
+                segment_progressive_refill_enabled = bool(
+                    progressive_refill_enabled
+                    and segment_conditioning.expression_id
+                    != self.reference_bank.identity_id
+                    and segment_progressive_refill_tokens > 0
+                    and segment_progressive_refill_seconds > 0.0
+                )
+                segment_profile["progressive_refill_expression_active"] = int(
+                    segment_conditioning.expression_id
+                    != self.reference_bank.identity_id
+                )
+                segment_profile["progressive_refill_enabled"] = int(
+                    segment_progressive_refill_enabled
+                )
+                segment_profile["progressive_refill_mode"] = (
+                    "long" if long_refill_request else "short"
+                )
+                segment_profile["progressive_refill_tokens"] = (
+                    segment_progressive_refill_tokens
+                )
+                segment_profile["progressive_refill_seconds"] = (
+                    segment_progressive_refill_seconds
+                )
                 max_text = self.engine.sovits_max_text_len
                 if max_text is not None and len(phones) > int(max_text):
                     raise ValueError(
@@ -1399,7 +1863,23 @@ class TensorRTFixedReferenceStreamer:
                         0,
                         encoder_max_phones - len(reference.phones) - len(phones),
                     )
-                    history_phone_count = min(75, available_phones, len(continuation_phones))
+                    history_phone_limit = (
+                        max(
+                            1,
+                            int(
+                                os.environ.get(
+                                    "ANIFLIVE_TTS_EXPRESSION_CONTEXT_PHONEMES", "12"
+                                )
+                            ),
+                        )
+                        if entering_expression_switch
+                        else 75
+                    )
+                    history_phone_count = min(
+                        history_phone_limit,
+                        available_phones,
+                        len(continuation_phones),
+                    )
                     if history_phone_count > 0 and continuation_bert is not None:
                         history_phones = continuation_phones[-history_phone_count:]
                         history_bert = continuation_bert[:, -history_phone_count:]
@@ -1412,8 +1892,20 @@ class TensorRTFixedReferenceStreamer:
                             0,
                             encoder_max_prompts - int(reference.prompt_semantic.shape[-1]),
                         )
+                        history_token_limit = (
+                            max(
+                                1,
+                                int(
+                                    os.environ.get(
+                                        "ANIFLIVE_TTS_EXPRESSION_CONTEXT_TOKENS", "48"
+                                    )
+                                ),
+                            )
+                            if entering_expression_switch
+                            else 125
+                        )
                         history_token_count = min(
-                            125,
+                            history_token_limit,
                             available_prompts,
                             int(continuation_tokens.shape[-1]),
                         )
@@ -1454,6 +1946,11 @@ class TensorRTFixedReferenceStreamer:
                     temperature=temperature,
                     top_k=top_k,
                     top_p=top_p,
+                    minimum_semantic_tokens=(
+                        _expression_minimum_semantic_tokens(len(phones))
+                        if controlled_expression
+                        else None
+                    ),
                     detailed_profile=detailed_profile,
                 )
                 encoder_elapsed = semantic_state.encoder_seconds
@@ -1489,6 +1986,9 @@ class TensorRTFixedReferenceStreamer:
                 native_preview_audio_samples = 0
                 native_acoustic_frame_cursor = 0
                 emitted_chunks = 0
+                published_refill_samples = 0
+                progressive_refill_count = 0
+                next_progressive_refill_tokens = segment_progressive_refill_tokens
                 segment_chunk_length = int(chunk_length)
                 if first_segment_preview_only and segment_index > 0:
                     segment_chunk_length = max(
@@ -1513,7 +2013,12 @@ class TensorRTFixedReferenceStreamer:
                 # The quality gate requires the complete 9+8 semantic prefix.
                 # It is committed as one native streaming chunk rather than
                 # proportionally slicing a shorter waveform preview.
-                first_preview_tokens = first_chunk_tokens + first_lookahead_tokens
+                first_preview_tokens = self._first_preview_context_tokens(
+                    first_chunk_tokens=first_chunk_tokens,
+                    first_lookahead_tokens=first_lookahead_tokens,
+                    configured_context_tokens=configured_first_context_tokens,
+                    low_latency_stream=low_latency_stream,
+                )
                 preview_target_tokens = self._preview_target_for_segment(
                     base_tokens=first_preview_tokens,
                     cached_tokens=self._preview_token_hint,
@@ -1553,6 +2058,7 @@ class TensorRTFixedReferenceStreamer:
                             native_previous_latent,
                             overlap_samples,
                         ) = self._decode_native_stream_chunk(
+                            conditioning=segment_conditioning,
                             cumulative_tokens=native_semantic_history,
                             new_token_count=new_token_count,
                             phones=phones,
@@ -1569,6 +2075,7 @@ class TensorRTFixedReferenceStreamer:
                         # final standalone chunk through the already-loaded
                         # full TensorRT SoVITS engine.
                         audio = self._decode_chunk(
+                            conditioning=segment_conditioning,
                             tokens=native_semantic_history,
                             history=None,
                             lookahead=None,
@@ -1686,7 +2193,11 @@ class TensorRTFixedReferenceStreamer:
                             target = (
                                 preview_target_tokens
                                 if emitted_chunks == 0
-                                else segment_chunk_length
+                                else (
+                                    maximum_steps
+                                    if progressive_refill_enabled
+                                    else segment_chunk_length
+                                )
                             )
                             if buffered_count >= target:
                                 current_chunk = torch.cat(token_buffer[:target], dim=1)
@@ -1751,7 +2262,7 @@ class TensorRTFixedReferenceStreamer:
                                     < int(
                                         round(
                                             self.sample_rate
-                                            * MIN_INITIAL_PREVIEW_PUBLISHED_SECONDS
+                                            * minimum_initial_preview_seconds
                                         )
                                     )
                                 )
@@ -1783,6 +2294,7 @@ class TensorRTFixedReferenceStreamer:
                                     token_buffer = token_buffer[target:]
                                     buffered_count -= target
                                     emitted_chunks += 1
+                                    published_refill_samples += int(emitted.size)
                                     for pending in consume_pending_tail():
                                         yield note_audio(
                                             pending, max(0, segment_index - 1)
@@ -1802,6 +2314,139 @@ class TensorRTFixedReferenceStreamer:
                                     preview_target_tokens = min(
                                         maximum_steps,
                                         target + preview_retry_tokens,
+                                    )
+
+                        if (
+                            segment_progressive_refill_enabled
+                            and low_latency_stream
+                            and emitted_chunks >= 1
+                            and progressive_refill_count < progressive_refill_limit
+                            and buffered_count >= next_progressive_refill_tokens
+                            and native_previous_audio_tail is not None
+                            and bool(segment_token_parts)
+                        ):
+                            partial_tokens = torch.cat(segment_token_parts, dim=1)
+                            partial_token_count = int(partial_tokens.shape[-1])
+                            semantic_limit = int(
+                                self.engine.model_sovits_stream.input_max_shapes.get(
+                                    "pred_semantic", (1, 1, 250)
+                                )[-1]
+                            )
+                            if partial_token_count <= semantic_limit:
+                                progressive_started = time.perf_counter()
+                                partial_audio, _, _ = self._decode_native_stream_chunk(
+                                    conditioning=segment_conditioning,
+                                    cumulative_tokens=partial_tokens,
+                                    new_token_count=partial_token_count,
+                                    phones=phones,
+                                    noise_scale=noise_scale,
+                                    speed=speed,
+                                    previous_latent=None,
+                                    acoustic_noise=acoustic_noise[
+                                        :, :, : partial_token_count * 2
+                                    ].contiguous(),
+                                )
+                                profile["sovits_seconds"] += (
+                                    time.perf_counter() - progressive_started
+                                )
+                                profile["sovits_invocations"] += 1
+                                refill_match_tail = (
+                                    native_refill_match_tail
+                                    if native_refill_match_tail is not None
+                                    else native_previous_audio_tail
+                                )
+                                expected_start = (
+                                    int(native_refill_expected_start)
+                                    if native_refill_expected_start is not None
+                                    else max(
+                                        0,
+                                        native_preview_audio_samples
+                                        - int(native_previous_audio_tail.size),
+                                    )
+                                )
+                                progressive_audio, refill_start, refill_score = (
+                                    self._refill_from_full_context(
+                                        refill_match_tail,
+                                        partial_audio,
+                                        expected_start=expected_start,
+                                        sample_rate=self.sample_rate,
+                                        published_samples=published_refill_samples,
+                                    )
+                                )
+                                publish_samples = min(
+                                    int(progressive_audio.size),
+                                    int(
+                                        round(
+                                            self.sample_rate
+                                            * segment_progressive_refill_seconds
+                                        )
+                                    ),
+                                )
+                                remaining_samples = max(
+                                    0, int(progressive_audio.size) - publish_samples
+                                )
+                                match_samples = min(
+                                    max(0, int(refill_match_tail.size)),
+                                    remaining_samples,
+                                )
+                                if publish_samples > 0 and match_samples >= 128:
+                                    native_refill_match_tail = progressive_audio[
+                                        publish_samples : publish_samples + match_samples
+                                    ].copy()
+                                    native_refill_expected_start = (
+                                        int(refill_start) + publish_samples
+                                    )
+                                    progressive_audio = progressive_audio[
+                                        :publish_samples
+                                    ]
+                                    published_refill_samples += int(
+                                        progressive_audio.size
+                                    )
+                                    emitted_chunks += 1
+                                    progressive_refill_count += 1
+                                    next_progressive_refill_tokens += (
+                                        segment_progressive_refill_tokens
+                                    )
+                                    profile["progressive_refills"] = int(
+                                        profile.get("progressive_refills", 0)
+                                    ) + 1
+                                    profile["progressive_refill_published_samples"] = (
+                                        int(
+                                            profile.get(
+                                                "progressive_refill_published_samples",
+                                                0,
+                                            )
+                                        )
+                                        + int(progressive_audio.size)
+                                    )
+                                    segment_profile[
+                                        "progressive_refill_token_count"
+                                    ] = partial_token_count
+                                    segment_profile[
+                                        "progressive_refill_start_sample"
+                                    ] = int(refill_start)
+                                    segment_profile[
+                                        "progressive_refill_match_score"
+                                    ] = float(refill_score)
+                                    segment_profile.setdefault(
+                                        "progressive_refill_events", []
+                                    ).append(
+                                        {
+                                            "index": progressive_refill_count,
+                                            "token_count": partial_token_count,
+                                            "start_sample": int(refill_start),
+                                            "match_score": float(refill_score),
+                                            "published_samples": int(
+                                                progressive_audio.size
+                                            ),
+                                        }
+                                    )
+                                    for pending in consume_pending_tail():
+                                        yield note_audio(
+                                            pending, max(0, segment_index - 1)
+                                        )
+                                    yield note_audio(
+                                        progressive_audio, segment_index
                                     )
 
                         while split and len(queue) > 1:
@@ -1856,6 +2501,11 @@ class TensorRTFixedReferenceStreamer:
                 segment_profile["semantic_tokens"] = segment_tokens
                 segment_profile["gpt_steps"] = segment_steps
                 segment_profile["semantic_nfe"] = segment_steps
+                if segment_tokens <= 1:
+                    raise RuntimeError(
+                        "The semantic decoder emitted EOS before producing speech "
+                        f"for segment {segment_index}; refusing to omit requested text"
+                    )
                 segment_profile["host_sync_count"] = semantic_state.host_sync_count
                 segment_profile["host_sync_seconds"] = semantic_state.host_sync_seconds
                 segment_profile["attention_kv_bytes"] = semantic_state.attention_kv_bytes
@@ -1872,12 +2522,13 @@ class TensorRTFixedReferenceStreamer:
                 if mtp_trace is not None:
                     segment_profile["mtp_trace"] = mtp_trace
 
-                use_full_context_refill = (
-                    full_context_refill_enabled
-                    and low_latency_stream
-                    and emitted_chunks == 1
-                    and native_previous_audio_tail is not None
-                    and bool(segment_token_parts)
+                use_full_context_refill = self._should_use_full_context_refill(
+                    enabled=full_context_refill_enabled,
+                    low_latency_stream=low_latency_stream,
+                    emitted_chunks=emitted_chunks,
+                    progressive_refill_count=progressive_refill_count,
+                    has_audio_tail=native_previous_audio_tail is not None,
+                    has_semantic_tokens=bool(segment_token_parts),
                 )
                 if use_full_context_refill:
                     full_tokens = torch.cat(segment_token_parts, dim=1)
@@ -1890,6 +2541,7 @@ class TensorRTFixedReferenceStreamer:
                     if full_token_count <= semantic_limit:
                         refill_started = time.perf_counter()
                         full_audio, _, _ = self._decode_native_stream_chunk(
+                            conditioning=segment_conditioning,
                             cumulative_tokens=full_tokens,
                             new_token_count=full_token_count,
                             phones=phones,
@@ -1918,13 +2570,19 @@ class TensorRTFixedReferenceStreamer:
                                 - int(native_previous_audio_tail.size),
                             )
                         )
+                        segment_profile["refill_expected_start"] = int(expected_start)
                         emitted, refill_start, refill_score = (
-                            self._refill_from_full_context(
-                                refill_match_tail,
-                                full_audio,
-                                expected_start=expected_start,
-                                sample_rate=self.sample_rate,
-                            )
+                        self._refill_from_full_context(
+                            refill_match_tail,
+                            full_audio,
+                            expected_start=expected_start,
+                            sample_rate=self.sample_rate,
+                            published_samples=published_refill_samples,
+                            baseline_compatible=(
+                                segment_conditioning.expression_id
+                                == self.reference_bank.identity_id
+                            ),
+                        )
                         )
                         native_previous_audio_tail = None
                         native_previous_latent = None
@@ -1935,6 +2593,12 @@ class TensorRTFixedReferenceStreamer:
                             profile.get("full_context_refills", 0)
                         ) + 1
                         segment_profile["refill_start_sample"] = int(refill_start)
+                        segment_profile["refill_silence_skip_samples"] = max(
+                            0, int(refill_start) - int(expected_start)
+                        )
+                        segment_profile["refill_temporal_fallback"] = int(
+                            refill_score < 0.15
+                        )
                         segment_profile["refill_match_score"] = float(refill_score)
                     else:
                         use_full_context_refill = False
@@ -1973,7 +2637,23 @@ class TensorRTFixedReferenceStreamer:
                                 pending_technical_tail = emitted[-reserve:].copy()
                                 emitted = emitted[:-reserve]
                         if emitted.size:
-                            for ready in hold_natural_trailing_silence(emitted):
+                            ready_chunks = hold_natural_trailing_silence(emitted)
+                            if (
+                                leaving_expression_switch
+                                and expression_transition is not TransitionCurve.HARD_NATURAL
+                                and ready_chunks
+                            ):
+                                ready_chunks[-1] = apply_edge_fade(
+                                    ready_chunks[-1],
+                                    samples=expression_fade_samples,
+                                    curve=expression_transition,
+                                    fade_in=False,
+                                    sigmoid_k=expression_sigmoid_k,
+                                )
+                                profile["expression_tail_fades"] = int(
+                                    profile.get("expression_tail_fades", 0)
+                                ) + 1
+                            for ready in ready_chunks:
                                 yield note_audio(ready, segment_index)
                 if segment_index + 1 < len(segments) and not technical_continuation:
                     target_pause_seconds = self._target_pause_seconds(
@@ -2004,13 +2684,30 @@ class TensorRTFixedReferenceStreamer:
                         yield note_audio(np.concatenate(pause_parts), segment_index)
                     pending_natural_silence = np.empty(0, dtype=np.float32)
                     trim_natural_segment_head = True
+                    if (
+                        leaving_expression_switch
+                        and expression_transition is not TransitionCurve.HARD_NATURAL
+                    ):
+                        pending_expression_fade_in = True
 
                 if technical_continuation and segment_token_parts:
-                    continuation_phones = list(phones)
-                    continuation_bert = bert.detach()
-                    continuation_tokens = (
-                        torch.cat(segment_token_parts, dim=1).detach().clone()
-                    )
+                    current_tokens = torch.cat(segment_token_parts, dim=1).detach()
+                    if (
+                        previous_was_technical
+                        and continuation_bert is not None
+                        and continuation_tokens is not None
+                    ):
+                        continuation_phones = continuation_phones + list(phones)
+                        continuation_bert = torch.cat(
+                            (continuation_bert, bert.detach()), dim=1
+                        )
+                        continuation_tokens = torch.cat(
+                            (continuation_tokens, current_tokens), dim=1
+                        ).detach()
+                    else:
+                        continuation_phones = list(phones)
+                        continuation_bert = bert.detach()
+                        continuation_tokens = current_tokens.clone()
                     previous_was_technical = True
                 else:
                     continuation_phones = []

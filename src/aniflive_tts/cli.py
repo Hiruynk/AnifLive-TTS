@@ -73,6 +73,20 @@ def _rebuild_engines(args: argparse.Namespace) -> int:
     return 0
 
 
+def _import_expressions(args: argparse.Namespace) -> int:
+    from .expression_import import import_expression_profiles
+
+    result = import_expression_profiles(
+        model_package=args.model_package,
+        voice_profile=args.voice_profile,
+        spec_file=args.spec_file,
+        asset_root=args.asset_root,
+        output=args.output,
+    )
+    print(result)
+    return 0
+
+
 def _migrate_engine_metadata(args: argparse.Namespace) -> int:
     from .model_package import migrate_engine_metadata
 
@@ -92,6 +106,13 @@ def _serve(args: argparse.Namespace) -> int:
     import uvicorn
 
     uvicorn.run(create_app(), host=args.host, port=args.port, workers=1)
+    return 0
+
+
+def _webui(args: argparse.Namespace) -> int:
+    from .webui import run_webui
+
+    run_webui(host=args.host, port=args.port, upstream=args.upstream)
     return 0
 
 
@@ -122,6 +143,13 @@ def build_parser() -> argparse.ArgumentParser:
     convert.add_argument("--workspace-mib", type=int, default=4096)
     convert.add_argument("--optimization-level", type=int, default=5)
     convert.set_defaults(handler=_convert)
+    import_expressions = model_commands.add_parser("import-expressions")
+    import_expressions.add_argument("--model-package", type=Path, required=True)
+    import_expressions.add_argument("--voice-profile", default="default")
+    import_expressions.add_argument("--spec-file", type=Path, required=True)
+    import_expressions.add_argument("--asset-root", type=Path, required=True)
+    import_expressions.add_argument("--output", type=Path, required=True)
+    import_expressions.set_defaults(handler=_import_expressions)
     rebuild = model_commands.add_parser("rebuild-engines")
     rebuild.add_argument("--model-package", type=Path, required=True)
     rebuild.add_argument("--workspace-mib", type=int, default=4096)
@@ -149,6 +177,11 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--host", default="127.0.0.1")
     serve.add_argument("--port", type=int, default=9880)
     serve.set_defaults(handler=_serve)
+    webui = commands.add_parser("webui")
+    webui.add_argument("--host", default="127.0.0.1")
+    webui.add_argument("--port", type=int, default=9890)
+    webui.add_argument("--upstream", default="http://127.0.0.1:9880")
+    webui.set_defaults(handler=_webui)
     return parser
 
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import importlib
 import threading
 from pathlib import Path
 
@@ -10,6 +11,20 @@ import torch
 
 from aniflive_tts.runtime_control import GpuTelemetrySample, WarmRetentionController
 from aniflive_tts.streaming import TensorRTFixedReferenceStreamer
+
+
+def test_cancel_active_stream_is_idempotent_and_signals_producer() -> None:
+    service_module = importlib.import_module("aniflive_tts.service")
+    service = object.__new__(service_module.TensorRTService)
+    service._active_guard = threading.Lock()
+    service._active_stream_cancel = threading.Event()
+
+    assert service.cancel_active_stream() is True
+    assert service._active_stream_cancel.is_set()
+    assert service.cancel_active_stream() is True
+
+    service._active_stream_cancel = None
+    assert service.cancel_active_stream() is False
 
 
 def test_native_latent_overlap_crossfade_never_drops_aligned_samples() -> None:
@@ -51,6 +66,35 @@ def test_only_first_segment_uses_and_updates_cross_request_preview_hint() -> Non
     assert remember(cached_tokens=None, successful_tokens=96) == 32
 
 
+def test_expression_package_can_increase_exact_first_preview_context() -> None:
+    context = TensorRTFixedReferenceStreamer._first_preview_context_tokens
+
+    assert context(
+        first_chunk_tokens=9,
+        first_lookahead_tokens=8,
+        configured_context_tokens=17,
+        low_latency_stream=True,
+    ) == 17
+    assert context(
+        first_chunk_tokens=9,
+        first_lookahead_tokens=8,
+        configured_context_tokens=33,
+        low_latency_stream=True,
+    ) == 33
+    assert context(
+        first_chunk_tokens=9,
+        first_lookahead_tokens=8,
+        configured_context_tokens=8,
+        low_latency_stream=True,
+    ) == 17
+    assert context(
+        first_chunk_tokens=200,
+        first_lookahead_tokens=16,
+        configured_context_tokens=33,
+        low_latency_stream=False,
+    ) == 216
+
+
 def test_full_context_refill_finds_preview_tail_without_proportional_crop() -> None:
     rng = np.random.default_rng(20260824)
     full_audio = rng.normal(0.0, 0.2, 16000).astype(np.float32)
@@ -86,6 +130,148 @@ def test_full_context_refill_cannot_jump_to_a_distant_repeated_period() -> None:
     )
 
     assert abs(start - expected) <= int(sample_rate * 0.010)
+
+
+def test_full_context_refill_removes_only_excess_same_clause_silence() -> None:
+    sample_rate = 32000
+    expected = 2000
+    silence_samples = int(sample_rate * 1.5)
+    rng = np.random.default_rng(20260829)
+    speech = rng.normal(0.0, 0.2, 16000).astype(np.float32)
+    published_samples = 8000
+    full_audio = np.concatenate(
+        (
+            np.zeros(expected + silence_samples, dtype=np.float32),
+            speech,
+        )
+    )
+
+    merged, start, _ = TensorRTFixedReferenceStreamer._refill_from_full_context(
+        rng.normal(0.0, 0.2, 1600).astype(np.float32),
+        full_audio,
+        expected_start=expected,
+        sample_rate=sample_rate,
+        published_samples=published_samples,
+    )
+
+    expected_continuation = expected + silence_samples + published_samples
+    assert abs(start - expected_continuation) <= int(sample_rate * 0.006)
+    assert merged.size < full_audio.size - expected
+
+
+def test_full_context_refill_preserves_short_natural_pause() -> None:
+    sample_rate = 32000
+    expected = 2000
+    pause_samples = int(sample_rate * 0.040)
+    rng = np.random.default_rng(20260829)
+    speech = rng.normal(0.0, 0.2, 8000).astype(np.float32)
+    full_audio = np.concatenate(
+        (
+            np.zeros(expected + pause_samples, dtype=np.float32),
+            speech,
+        )
+    )
+
+    _, start, _ = TensorRTFixedReferenceStreamer._refill_from_full_context(
+        speech[:1600],
+        full_audio,
+        expected_start=expected,
+        sample_rate=sample_rate,
+    )
+
+    assert abs(start - expected) <= int(sample_rate * 0.010)
+
+
+def test_full_context_refill_low_match_preserves_internal_quiet_audio() -> None:
+    sample_rate = 32000
+    onset = 4000
+    expected = 10000
+    published_samples = 7000
+    quiet_samples = int(sample_rate * 0.350)
+    rng = np.random.default_rng(20260829)
+    full_audio = np.concatenate(
+        (
+            np.zeros(onset, dtype=np.float32),
+            rng.normal(0.0, 0.2, expected - onset).astype(np.float32),
+            np.zeros(quiet_samples, dtype=np.float32),
+            rng.normal(0.0, 0.2, 16000).astype(np.float32),
+        )
+    )
+
+    _, start, score = TensorRTFixedReferenceStreamer._refill_from_full_context(
+        rng.normal(0.0, 0.2, 1600).astype(np.float32),
+        full_audio,
+        expected_start=expected,
+        sample_rate=sample_rate,
+        published_samples=published_samples,
+    )
+
+    assert score < 0.15
+    detected_onset = int(
+        round(
+            TensorRTFixedReferenceStreamer._leading_silence_seconds(
+                full_audio, sample_rate
+            )
+            * sample_rate
+        )
+    )
+    assert start == detected_onset + published_samples
+
+
+def test_full_context_refill_baseline_mode_keeps_legacy_low_match_offset() -> None:
+    sample_rate = 32000
+    expected = 10000
+    published_samples = 7000
+    rng = np.random.default_rng(20260829)
+    full_audio = np.concatenate(
+        (
+            np.zeros(4000, dtype=np.float32),
+            rng.normal(0.0, 0.2, 6000).astype(np.float32),
+            np.zeros(int(sample_rate * 0.350), dtype=np.float32),
+            rng.normal(0.0, 0.2, 16000).astype(np.float32),
+        )
+    )
+
+    _, start, score = TensorRTFixedReferenceStreamer._refill_from_full_context(
+        rng.normal(0.0, 0.2, 1600).astype(np.float32),
+        full_audio,
+        expected_start=expected,
+        sample_rate=sample_rate,
+        published_samples=published_samples,
+        baseline_compatible=True,
+    )
+
+    assert score < 0.15
+    assert start == expected
+
+
+def test_full_context_refill_does_not_repeat_a_published_steady_chunk() -> None:
+    should_refill = TensorRTFixedReferenceStreamer._should_use_full_context_refill
+
+    assert should_refill(
+        enabled=True,
+        low_latency_stream=True,
+        emitted_chunks=1,
+        progressive_refill_count=0,
+        has_audio_tail=True,
+        has_semantic_tokens=True,
+    )
+    assert not should_refill(
+        enabled=True,
+        low_latency_stream=True,
+        emitted_chunks=2,
+        progressive_refill_count=0,
+        has_audio_tail=True,
+        has_semantic_tokens=True,
+    )
+    assert should_refill(
+        enabled=True,
+        low_latency_stream=True,
+        emitted_chunks=2,
+        progressive_refill_count=1,
+        has_audio_tail=True,
+        has_semantic_tokens=True,
+    )
 
 
 def test_cli_source_dir_prefers_runtime_environment(monkeypatch, tmp_path) -> None:
@@ -251,6 +437,14 @@ def test_safe_punctuation_segments_preserve_semantic_tokens() -> None:
     ]
 
 
+def test_expression_minimum_semantic_tokens_is_bounded_by_text_frontend_size() -> None:
+    from aniflive_tts.streaming import _expression_minimum_semantic_tokens
+
+    assert _expression_minimum_semantic_tokens(0) == 4
+    assert _expression_minimum_semantic_tokens(9) == 9
+    assert _expression_minimum_semantic_tokens(100) == 16
+
+
 def test_safe_punctuation_does_not_split_numeric_commas_or_ellipsis() -> None:
     from aniflive_tts.service import _cut_segments
 
@@ -313,6 +507,14 @@ def test_long_single_segment_uses_stable_stream_prebuffer() -> None:
     assert _recommended_stream_prebuffer_ms(["短い文章です。"]) == 32
     assert _recommended_stream_prebuffer_ms(["これは十六文字を超える長い文章を自然につなげます"]) == 64
     assert _recommended_stream_prebuffer_ms(["前半。", "後半。"]) == 64
+    assert (
+        _recommended_stream_prebuffer_ms(
+            ["前半。", "後半。"],
+            short_prebuffer_ms=32,
+            long_prebuffer_ms=208,
+        )
+        == 208
+    )
 
 
 def test_adaptive_pause_targets_match_natural_balanced_preset() -> None:
@@ -374,6 +576,48 @@ def test_technical_bridge_trims_only_excess_leading_silence() -> None:
     assert removed == pytest.approx(0.095)
     assert trimmed.size == audio.size - 3040
     assert np.array_equal(trimmed[160:], audio[3200:])
+
+
+def test_expression_reference_semantic_onset_keeps_natural_attack() -> None:
+    rate = 16000
+    audio = np.concatenate(
+        [
+            np.zeros(int(rate * 0.50), dtype=np.float32),
+            np.full(int(rate * 0.25), 0.2, dtype=np.float32),
+        ]
+    )
+
+    trimmed, removed = TensorRTFixedReferenceStreamer._trim_reference_semantic_onset(
+        audio,
+        sample_rate=rate,
+        threshold_dbfs=-45.0,
+        retain_ms=40,
+    )
+
+    assert removed == int(rate * 0.46)
+    assert trimmed.size == audio.size - removed
+    assert np.allclose(trimmed[: int(rate * 0.04)], 0.0)
+    assert np.allclose(trimmed[int(rate * 0.04) :], 0.2)
+
+
+def test_expression_reference_semantic_onset_leaves_short_lead_untouched() -> None:
+    rate = 16000
+    audio = np.concatenate(
+        [
+            np.zeros(int(rate * 0.03), dtype=np.float32),
+            np.full(int(rate * 0.10), 0.2, dtype=np.float32),
+        ]
+    )
+
+    trimmed, removed = TensorRTFixedReferenceStreamer._trim_reference_semantic_onset(
+        audio,
+        sample_rate=rate,
+        threshold_dbfs=-45.0,
+        retain_ms=40,
+    )
+
+    assert removed == 0
+    assert np.array_equal(trimmed, audio)
 
 
 def test_natural_segment_head_retains_configured_initial_silence() -> None:

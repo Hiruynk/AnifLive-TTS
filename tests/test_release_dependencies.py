@@ -97,7 +97,7 @@ def test_container_workflow_scans_built_image_digest() -> None:
     assert "aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25" in workflow
     assert "${{ env.IMAGE }}@${{ steps.build.outputs.digest }}" in workflow
     assert "scripts/check_trivy_report.py" in workflow
-    assert "TRIVY-AnifLive-TTS-v1.2.0-${{ matrix.tag }}.json" in workflow
+    assert "TRIVY-AnifLive-TTS-v1.3.0-${{ matrix.tag }}.json" in workflow
     assert "spdx-tools==0.8.3" in workflow
     assert 'pyspdxtools -i "${output}"' in workflow
 

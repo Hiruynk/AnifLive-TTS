@@ -29,10 +29,11 @@ def test_capabilities_reserve_expression_interface(monkeypatch) -> None:
         "native": True,
         "controlled_profiles": False,
         "continuous_vector": False,
+        "segmented": False,
     }
 
 
-def test_expression_enabled_returns_501(monkeypatch) -> None:
+def test_expression_enabled_rejects_package_without_profiles(monkeypatch) -> None:
     with _client(monkeypatch) as client:
         response = client.post(
             "/v1/audio/speech",
@@ -45,8 +46,201 @@ def test_expression_enabled_returns_501(monkeypatch) -> None:
                 "expression": {"enabled": True, "profile": "calm", "intensity": 0.5},
             },
         )
-    assert response.status_code == 501
-    assert response.json()["error"]["code"] == "expression_not_implemented"
+    assert response.status_code == 400
+    assert "unavailable" in response.json()["message"]
+
+
+def test_expression_request_reaches_runtime_with_structured_controls(monkeypatch) -> None:
+    module = importlib.import_module("aniflive_tts.service")
+    captured = []
+    monkeypatch.setattr(module.SERVICE, "_sample_rate", 32000)
+    monkeypatch.setattr(module.SERVICE, "validate_expression", captured.append)
+    monkeypatch.setattr(module.SERVICE, "stream_pcm", lambda options: iter((b"\x01\x00",)))
+
+    with _client(monkeypatch) as client:
+        response = client.post(
+            "/v1/audio/speech",
+            json={
+                "model": "test-v2pp",
+                "voice_profile": "default",
+                "text": "hello",
+                "language": "en",
+                "stream": True,
+                "expression": {
+                    "enabled": True,
+                    "profile": "shy",
+                    "intensity": 0.7,
+                    "policy": "identity-lock",
+                },
+            },
+        )
+
+    assert response.status_code == 200
+    assert captured[-1].expression_profile == "shy"
+    assert captured[-1].expression_intensity == 0.7
+    assert captured[-1].expression_policy is module.ConditioningPolicy.IDENTITY_LOCK
+    assert response.headers["x-tts-expression"] == "shy"
+    assert response.headers["x-tts-expression-policy"] == "identity-lock"
+
+
+def test_expression_request_inherits_active_package_preferred_policy(monkeypatch) -> None:
+    module = importlib.import_module("aniflive_tts.service")
+    captured = []
+    monkeypatch.setattr(module.SERVICE, "_sample_rate", 32000)
+    monkeypatch.setattr(module.SERVICE, "validate_expression", captured.append)
+    monkeypatch.setattr(module.SERVICE, "stream_pcm", lambda options: iter((b"\x01\x00",)))
+    monkeypatch.setattr(
+        module.SERVICE,
+        "preferred_expression_policy",
+        lambda **_: module.ConditioningPolicy.SEMANTIC_STYLE,
+    )
+    monkeypatch.setattr(
+        module.SERVICE,
+        "expression_metadata",
+        lambda: {"runtime_policy": {"first_context_tokens": 64}},
+    )
+
+    with _client(monkeypatch) as client:
+        response = client.post(
+            "/v1/audio/speech",
+            json={
+                "model": "test-v2pp",
+                "voice_profile": "default",
+                "text": "hello",
+                "language": "en",
+                "stream": True,
+                "expression": {
+                    "enabled": True,
+                    "profile": "shy",
+                    "intensity": 0.7,
+                },
+            },
+        )
+
+    assert response.status_code == 200
+    assert captured[-1].expression_policy is module.ConditioningPolicy.SEMANTIC_STYLE
+    assert response.headers["x-tts-expression-policy"] == "semantic-style"
+    assert response.headers["x-tts-first-context-tokens"] == "64"
+
+
+def test_segmented_expression_request_is_structured_and_inherits_defaults(monkeypatch) -> None:
+    module = importlib.import_module("aniflive_tts.service")
+    captured = []
+    monkeypatch.setattr(module.SERVICE, "_sample_rate", 32000)
+    monkeypatch.setattr(module.SERVICE, "validate_expression", captured.append)
+    monkeypatch.setattr(module.SERVICE, "stream_pcm", lambda options: iter((b"\x01\x00",)))
+
+    with _client(monkeypatch) as client:
+        response = client.post(
+            "/v1/audio/speech",
+            json={
+                "model": "test-v2pp",
+                "voice_profile": "default",
+                "segments": [
+                    {"text": "I was worried,", "expression": {"profile": "shy"}},
+                    {
+                        "text": "but now I am ready.",
+                        "expression": {"profile": "battle", "intensity": 0.9},
+                    },
+                ],
+                "language": "en",
+                "stream": True,
+                "expression": {
+                    "enabled": True,
+                    "intensity": 0.6,
+                    "policy": "identity-lock",
+                },
+            },
+        )
+
+    assert response.status_code == 200
+    options = captured[-1]
+    assert [segment.text for segment in options.expression_segments] == [
+        "I was worried,",
+        "but now I am ready.",
+    ]
+    assert [segment.profile for segment in options.expression_segments] == [
+        "shy",
+        "battle",
+    ]
+    assert options.expression_segments[0].intensity == 0.6
+    assert all(
+        segment.policy is module.ConditioningPolicy.IDENTITY_LOCK
+        for segment in options.expression_segments
+    )
+
+
+def test_expression_segments_preserve_text_and_merge_identical_controls(monkeypatch) -> None:
+    module = importlib.import_module("aniflive_tts.service")
+    segments = module._expression_segments(
+        [
+            {"text": "Hello, ", "expression": {"enabled": False}},
+            {"text": "world!", "expression": {"enabled": False}},
+        ],
+        default_enabled=False,
+        default_profile=None,
+        default_intensity=0.5,
+        default_policy=module.ConditioningPolicy.SEMANTIC_STYLE,
+    )
+
+    assert len(segments) == 1
+    assert segments[0].text == "Hello, world!"
+
+
+def test_expression_switch_rejects_mid_phrase_segments() -> None:
+    module = importlib.import_module("aniflive_tts.service")
+    segments = (
+        module.ExpressionSegment(text="I want ", enabled=True, profile="shy"),
+        module.ExpressionSegment(text="to explain.", enabled=True, profile="battle"),
+    )
+
+    with pytest.raises(module.RequestError, match="speech-safe punctuation"):
+        module._validate_expression_segment_boundaries(segments)
+
+
+def test_expression_switch_accepts_complete_clauses() -> None:
+    module = importlib.import_module("aniflive_tts.service")
+    segments = (
+        module.ExpressionSegment(text="I was worried, ", enabled=True, profile="shy"),
+        module.ExpressionSegment(text="but now I am ready.", enabled=True, profile="battle"),
+    )
+
+    module._validate_expression_segment_boundaries(segments)
+
+
+def test_canonical_api_rejects_text_and_segments_together(monkeypatch) -> None:
+    with _client(monkeypatch) as client:
+        response = client.post(
+            "/v1/audio/speech",
+            json={
+                "text": "hello",
+                "segments": [{"text": "world"}],
+                "language": "en",
+            },
+        )
+    assert response.status_code == 400
+    assert "Exactly one of text or segments" in response.json()["message"]
+
+
+def test_segment_expression_rejects_reference_overrides(monkeypatch) -> None:
+    with _client(monkeypatch) as client:
+        response = client.post(
+            "/v1/audio/speech",
+            json={
+                "segments": [
+                    {
+                        "text": "hello",
+                        "expression": {
+                            "profile": "shy",
+                            "reference_audio": "C:/private.wav",
+                        },
+                    }
+                ],
+                "language": "en",
+            },
+        )
+    assert response.status_code == 400
+    assert "unsupported fields" in response.json()["message"]
 
 
 def test_stream_transport_declares_little_endian_pcm(monkeypatch) -> None:
@@ -72,6 +266,7 @@ def test_stream_transport_declares_little_endian_pcm(monkeypatch) -> None:
     assert response.headers["x-tts-sample-format"] == "s16le"
     assert response.headers["x-tts-sample-rate"] == "32000"
     assert response.headers["x-tts-channels"] == "1"
+    assert response.headers["x-tts-first-context-tokens"] == "17"
     assert response.content == b"\x01\x00"
 
 

@@ -55,6 +55,25 @@ def test_convert_cli_exposes_generic_stream_overlap() -> None:
     )
 
 
+def test_expression_import_cli_is_admin_only_and_explicit(tmp_path) -> None:
+    args = build_parser().parse_args(
+        [
+            "model",
+            "import-expressions",
+            "--model-package",
+            str(tmp_path / "source"),
+            "--spec-file",
+            str(tmp_path / "expressions.json"),
+            "--asset-root",
+            str(tmp_path / "assets"),
+            "--output",
+            str(tmp_path / "output"),
+        ]
+    )
+    assert args.handler.__name__ == "_import_expressions"
+    assert args.voice_profile == "default"
+
+
 def test_enqueue_validation_accepts_runtime_paths(tmp_path) -> None:
     args = build_parser().parse_args(
         [

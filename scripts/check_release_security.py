@@ -18,9 +18,12 @@ REQUIRED_FILES = (
     "THIRD_PARTY_NOTICES.md",
     "docs/RELEASE_VERIFICATION.md",
     "docs/REPOSITORY_SECURITY_SETTINGS.md",
+    "run_webui.bat",
     "scripts/normalize_spdx_sbom.py",
     "scripts/check_trivy_report.py",
     "scripts/shared_assets_lock.json",
+    "webui/index.html",
+    "webui/playback_model.js",
 )
 FORBIDDEN_PREFIXES = ("Miku/", "data/", "dist/", "reports/")
 FORBIDDEN_SUFFIXES = (
@@ -44,8 +47,11 @@ def _git(*args: str) -> str:
     ).strip()
 
 
-def _tracked_files() -> list[str]:
-    output = _git("ls-files", "-z")
+def _release_files(*, include_untracked: bool = False) -> list[str]:
+    args = ["ls-files", "-z"]
+    if include_untracked:
+        args.extend(("--cached", "--others", "--exclude-standard"))
+    output = _git(*args)
     return [name for name in output.split("\0") if name]
 
 
@@ -113,16 +119,53 @@ def _check_action_pins() -> None:
         )
 
 
+def _check_public_webui() -> None:
+    public_files = [ROOT / "src" / "aniflive_tts" / "webui.py", ROOT / "run_webui.bat"]
+    public_files.extend(sorted((ROOT / "webui").glob("*")))
+    missing = [str(path.relative_to(ROOT)) for path in public_files[:2] if not path.is_file()]
+    if missing or not (ROOT / "webui" / "index.html").is_file():
+        raise SystemExit("Missing public WebUI files: " + ", ".join(missing or ["webui/index.html"]))
+    combined = "\n".join(
+        path.read_text(encoding="utf-8", errors="ignore")
+        for path in public_files
+        if path.is_file()
+    ).lower()
+    forbidden = (
+        "login.html",
+        "username",
+        "password",
+        "password_hash",
+        "credential",
+        "session_cookie",
+        "authorization",
+        "sessionstorage",
+    )
+    violations = [value for value in forbidden if value in combined]
+    if violations:
+        raise SystemExit(
+            "Public WebUI contains login or credential state: " + ", ".join(violations)
+        )
+    if combined.count("localstorage") != 2 or (
+        'const locale_key = "aniflive.uilocale"' not in combined
+    ):
+        raise SystemExit("Public WebUI may only persist its interface locale")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run the AnifLive-TTS release security gate")
     parser.add_argument("--expected-version")
+    parser.add_argument(
+        "--include-untracked",
+        action="store_true",
+        help="also inspect untracked files intended for the next release",
+    )
     args = parser.parse_args()
 
     missing = [name for name in REQUIRED_FILES if not (ROOT / name).is_file()]
     if missing:
         raise SystemExit("Missing release security files: " + ", ".join(missing))
 
-    files = _tracked_files()
+    files = _release_files(include_untracked=args.include_untracked)
     untracked_required = [name for name in REQUIRED_FILES if name not in files]
     if untracked_required:
         raise SystemExit(
@@ -132,6 +175,7 @@ def main() -> int:
     _check_tracked_paths(files)
     _check_credentials(files)
     _check_action_pins()
+    _check_public_webui()
 
     dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
     if 'ARG VCS_REF=' not in dockerfile:
@@ -143,8 +187,13 @@ def main() -> int:
         pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
         if f'version = "{args.expected_version}"' not in pyproject:
             raise SystemExit("pyproject version does not match --expected-version")
+        release_notes = ROOT / f"RELEASE_NOTES_v{args.expected_version}.md"
+        if not release_notes.is_file():
+            raise SystemExit(f"Missing release notes: {release_notes.name}")
+        if release_notes.name not in files:
+            raise SystemExit(f"Release notes must be tracked by Git: {release_notes.name}")
 
-    print(f"Release security gate passed for {len(files)} tracked files")
+    print(f"Release security gate passed for {len(files)} release files")
     return 0
 
 

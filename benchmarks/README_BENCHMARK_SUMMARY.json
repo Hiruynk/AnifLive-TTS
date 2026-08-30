@@ -1,10 +1,9 @@
 {
   "schema": 3,
-  "measured_at": "2026-08-27",
+  "measured_at": "2026-08-30",
   "project": "AnifLive-TTS",
-  "release": "1.2.0",
+  "release": "1.3.0",
   "models": [
-    "miku-v2proplus",
     "roxy-v2proplus"
   ],
   "voice_profile": "default",
@@ -14,12 +13,18 @@
     "seed": 1234,
     "top_k": 15,
     "top_p": 1.0,
-    "temperature": 1.0
+    "temperature": 1.0,
+    "expression": {
+      "enabled": false,
+      "profile": null,
+      "intensity": 0.7,
+      "policy": "semantic-style"
+    }
   },
   "methodology": {
     "sessions": 10,
-    "models": 2,
-    "total_model_sessions": 20,
+    "models": 1,
+    "total_model_sessions": 10,
     "warmup_requests_per_session": 10,
     "full_wav_requests_per_session": 100,
     "stream_requests_per_session": 100,
@@ -29,12 +34,12 @@
     "connection_reuse": "reported separately",
     "keepalive_connection_warmup_requests_per_session": 1,
     "session_idle_barrier": "health active_requests=0 and switching=false before each session; barrier time is outside every measured request",
-    "model_session_order": "session-major; multiple models are alternated within each session index and activation time is outside measured requests",
+    "model_session_order": "session-major; one configured model is measured in every session",
     "ttfp_definition": "client wall-clock time from sending the HTTP request until reading the first server-emitted PCM chunk",
     "audible_ttfa_definition": "device-independent earliest audible playback time at the first PCM sample above threshold within the earliest active RMS frame, constrained by that PCM chunk's arrival time",
     "audible_threshold_dbfs": -45.0,
     "audible_frame_ms": 10.0,
-    "headline_statistic": "median of all model-session-level statistics"
+    "headline_statistic": "median of all session-level statistics"
   },
   "environment": {
     "gpu": {
@@ -49,728 +54,456 @@
   "execution_proof": {
     "backend": "TensorRT-11",
     "pytorch_fallback": false,
-    "formal_full_wav_requests": 2000,
-    "formal_stream_requests": 2000,
-    "formal_keepalive_stream_requests": 2000,
-    "gpu_samples": 8230
+    "formal_full_wav_requests": 1000,
+    "formal_stream_requests": 1000,
+    "formal_keepalive_stream_requests": 1000,
+    "gpu_samples": 3783
   },
   "table": [
     {
       "key": "complete_wav_wall_p50_ms",
       "label": "Complete REST WAV wall P50",
-      "median": 192.8796499996679,
-      "range_min": 169.38124999978754,
-      "range_max": 227.02994999963266
+      "median": 153.17687549999448,
+      "range_min": 146.50830850000318,
+      "range_max": 166.10011400001667
     },
     {
       "key": "complete_wav_wall_p95_ms",
       "label": "Complete REST WAV wall P95",
-      "median": 230.75024999980087,
-      "range_min": 195.75450000047567,
-      "range_max": 273.3457999984239
+      "median": 189.54812250001396,
+      "range_min": 158.98120200000676,
+      "range_max": 201.43918899998425
     },
     {
       "key": "server_inference_p50_ms",
       "label": "Server inference P50",
-      "median": 166.22575,
-      "range_min": 139.831,
-      "range_max": 201.973
+      "median": 148.5915,
+      "range_min": 142.121,
+      "range_max": 161.275
     },
     {
       "key": "wall_rtf_p50",
       "label": "RTF P50",
-      "median": 0.08877415331793087,
-      "range_min": 0.07113990060344627,
-      "range_max": 0.10610085861444052
+      "median": 0.0876799516313649,
+      "range_min": 0.0838627982255313,
+      "range_max": 0.09507734058386758
     },
     {
       "key": "stream_ttfp_p50_ms",
       "label": "Streaming first-packet latency P50",
-      "median": 87.14042499968855,
-      "range_min": 79.40484999971886,
-      "range_max": 92.39095000157249
+      "median": 67.07727550001152,
+      "range_min": 64.86635849998379,
+      "range_max": 74.54356649998317
     },
     {
       "key": "stream_ttfp_p95_ms",
       "label": "Streaming first-packet latency P95",
-      "median": 103.11305000050197,
-      "range_min": 87.92389999962325,
-      "range_max": 122.15250000008382
+      "median": 90.85325050000392,
+      "range_min": 71.7526709999845,
+      "range_max": 120.37578799998983
     },
     {
       "key": "stream_keepalive_ttfp_p50_ms",
       "label": "Keep-alive streaming first-packet latency P50",
-      "median": 69.69762499966237,
-      "range_min": 63.80775000025096,
-      "range_max": 72.60954999946989
+      "median": 67.95256650002557,
+      "range_min": 65.45627049999325,
+      "range_max": 76.34489250000343
     },
     {
       "key": "stream_keepalive_ttfp_p95_ms",
       "label": "Keep-alive streaming first-packet latency P95",
-      "median": 85.29745000123512,
-      "range_min": 76.91030000023602,
-      "range_max": 99.75649999978486
+      "median": 92.01927850000402,
+      "range_min": 81.64022800002613,
+      "range_max": 136.052032000066
     },
     {
       "key": "stream_audible_ttfa_p50_ms",
       "label": "Audible streaming TTFA P50",
-      "median": 96.03375000007509,
-      "range_min": 88.75894999984303,
-      "range_max": 101.67080000037822
+      "median": 73.70227550001152,
+      "range_min": 71.49135849998379,
+      "range_max": 81.16856649998317
     },
     {
       "key": "stream_audible_ttfa_p95_ms",
       "label": "Audible streaming TTFA P95",
-      "median": 111.56475000039791,
-      "range_min": 98.17389999962325,
-      "range_max": 128.77750000008382
+      "median": 97.47825050000392,
+      "range_min": 78.3776709999845,
+      "range_max": 127.00078799998981
     },
     {
       "key": "stream_keepalive_audible_ttfa_p50_ms",
       "label": "Keep-alive audible streaming TTFA P50",
-      "median": 77.71667500038893,
-      "range_min": 71.78855000076146,
-      "range_max": 82.83304999959364
+      "median": 74.57756650002557,
+      "range_min": 72.08127049999325,
+      "range_max": 82.96989250000343
     },
     {
       "key": "stream_keepalive_audible_ttfa_p95_ms",
       "label": "Keep-alive audible streaming TTFA P95",
-      "median": 94.54979999996795,
-      "range_min": 86.57810000023892,
-      "range_max": 110.00649999978486
+      "median": 98.64427850000402,
+      "range_min": 88.26522800002613,
+      "range_max": 142.677032000066
     },
     {
       "key": "gpu_busy_p50_percent",
       "label": "GPU busy-time P50",
       "median": 53.0,
-      "range_min": 46.0,
-      "range_max": 56.0
+      "range_min": 50.5,
+      "range_max": 54.0
     },
     {
       "key": "gpu_busy_p95_percent",
       "label": "GPU busy-time P95",
-      "median": 60.0,
-      "range_min": 58.0,
-      "range_max": 62.0
+      "median": 56.0,
+      "range_min": 56.0,
+      "range_max": 57.0
     }
   ],
   "session_distribution": {
     "complete_wav_wall_p50_ms": {
-      "session_median": 192.8796499996679,
-      "best": 169.38124999978754,
-      "worst": 227.02994999963266
+      "session_median": 153.17687549999448,
+      "best": 146.50830850000318,
+      "worst": 166.10011400001667
     },
     "complete_wav_wall_p95_ms": {
-      "session_median": 230.75024999980087,
-      "best": 195.75450000047567,
-      "worst": 273.3457999984239
+      "session_median": 189.54812250001396,
+      "best": 158.98120200000676,
+      "worst": 201.43918899998425
     },
     "server_inference_p50_ms": {
-      "session_median": 166.22575,
-      "best": 139.831,
-      "worst": 201.973
+      "session_median": 148.5915,
+      "best": 142.121,
+      "worst": 161.275
     },
     "wall_rtf_p50": {
-      "session_median": 0.08877415331793087,
-      "best": 0.07113990060344627,
-      "worst": 0.10610085861444052
+      "session_median": 0.0876799516313649,
+      "best": 0.0838627982255313,
+      "worst": 0.09507734058386758
     },
     "stream_ttfp_p50_ms": {
-      "session_median": 87.14042499968855,
-      "best": 79.40484999971886,
-      "worst": 92.39095000157249
+      "session_median": 67.07727550001152,
+      "best": 64.86635849998379,
+      "worst": 74.54356649998317
     },
     "stream_ttfp_p95_ms": {
-      "session_median": 103.11305000050197,
-      "best": 87.92389999962325,
-      "worst": 122.15250000008382
+      "session_median": 90.85325050000392,
+      "best": 71.7526709999845,
+      "worst": 120.37578799998983
     },
     "stream_keepalive_ttfp_p50_ms": {
-      "session_median": 69.69762499966237,
-      "best": 63.80775000025096,
-      "worst": 72.60954999946989
+      "session_median": 67.95256650002557,
+      "best": 65.45627049999325,
+      "worst": 76.34489250000343
     },
     "stream_keepalive_ttfp_p95_ms": {
-      "session_median": 85.29745000123512,
-      "best": 76.91030000023602,
-      "worst": 99.75649999978486
+      "session_median": 92.01927850000402,
+      "best": 81.64022800002613,
+      "worst": 136.052032000066
     },
     "stream_audible_ttfa_p50_ms": {
-      "session_median": 96.03375000007509,
-      "best": 88.75894999984303,
-      "worst": 101.67080000037822
+      "session_median": 73.70227550001152,
+      "best": 71.49135849998379,
+      "worst": 81.16856649998317
     },
     "stream_audible_ttfa_p95_ms": {
-      "session_median": 111.56475000039791,
-      "best": 98.17389999962325,
-      "worst": 128.77750000008382
+      "session_median": 97.47825050000392,
+      "best": 78.3776709999845,
+      "worst": 127.00078799998981
     },
     "stream_keepalive_audible_ttfa_p50_ms": {
-      "session_median": 77.71667500038893,
-      "best": 71.78855000076146,
-      "worst": 82.83304999959364
+      "session_median": 74.57756650002557,
+      "best": 72.08127049999325,
+      "worst": 82.96989250000343
     },
     "stream_keepalive_audible_ttfa_p95_ms": {
-      "session_median": 94.54979999996795,
-      "best": 86.57810000023892,
-      "worst": 110.00649999978486
+      "session_median": 98.64427850000402,
+      "best": 88.26522800002613,
+      "worst": 142.677032000066
     },
     "gpu_busy_p50_percent": {
       "session_median": 53.0,
-      "best": 46.0,
-      "worst": 56.0
+      "best": 50.5,
+      "worst": 54.0
     },
     "gpu_busy_p95_percent": {
-      "session_median": 60.0,
-      "best": 58.0,
-      "worst": 62.0
+      "session_median": 56.0,
+      "best": 56.0,
+      "worst": 57.0
     }
   },
   "session_records": [
     {
-      "model": "miku-v2proplus",
-      "session": 1,
-      "metrics": {
-        "complete_wav_wall_p50_ms": 210.29619999990246,
-        "complete_wav_wall_p95_ms": 251.85220000003028,
-        "server_inference_p50_ms": 188.93699999999998,
-        "wall_rtf_p50": 0.07465253816112973,
-        "stream_ttfp_p50_ms": 88.01524999989851,
-        "stream_ttfp_p95_ms": 109.28919999969366,
-        "stream_keepalive_ttfp_p50_ms": 70.33989999990808,
-        "stream_keepalive_ttfp_p95_ms": 87.47940000012022,
-        "stream_audible_ttfa_p50_ms": 98.26524999989851,
-        "stream_audible_ttfa_p95_ms": 119.53919999969366,
-        "stream_keepalive_audible_ttfa_p50_ms": 80.58989999990808,
-        "stream_keepalive_audible_ttfa_p95_ms": 97.72940000012022,
-        "gpu_busy_p50_percent": 54.0,
-        "gpu_busy_p95_percent": 61.0
-      }
-    },
-    {
       "model": "roxy-v2proplus",
       "session": 1,
       "metrics": {
-        "complete_wav_wall_p50_ms": 185.2564999999231,
-        "complete_wav_wall_p95_ms": 225.49330000038026,
-        "server_inference_p50_ms": 159.69549999999998,
-        "wall_rtf_p50": 0.10604264453344195,
-        "stream_ttfp_p50_ms": 82.67150000028778,
-        "stream_ttfp_p95_ms": 97.07840000010037,
-        "stream_keepalive_ttfp_p50_ms": 65.71274999987509,
-        "stream_keepalive_ttfp_p95_ms": 80.89019999988523,
-        "stream_audible_ttfa_p50_ms": 89.29650000028778,
-        "stream_audible_ttfa_p95_ms": 103.70340000010037,
-        "stream_keepalive_audible_ttfa_p50_ms": 72.33774999987509,
-        "stream_keepalive_audible_ttfa_p95_ms": 87.51519999988523,
-        "gpu_busy_p50_percent": 51.5,
-        "gpu_busy_p95_percent": 59.0
-      }
-    },
-    {
-      "model": "miku-v2proplus",
-      "session": 2,
-      "metrics": {
-        "complete_wav_wall_p50_ms": 200.91355000022304,
-        "complete_wav_wall_p95_ms": 259.3661000000793,
-        "server_inference_p50_ms": 172.3315,
-        "wall_rtf_p50": 0.07132181398658965,
-        "stream_ttfp_p50_ms": 80.71879999988596,
-        "stream_ttfp_p95_ms": 94.21070000007603,
-        "stream_keepalive_ttfp_p50_ms": 64.94364999980462,
-        "stream_keepalive_ttfp_p95_ms": 84.49349999955302,
-        "stream_audible_ttfa_p50_ms": 90.96879999988596,
-        "stream_audible_ttfa_p95_ms": 104.46070000007603,
-        "stream_keepalive_audible_ttfa_p50_ms": 75.19364999980462,
-        "stream_keepalive_audible_ttfa_p95_ms": 94.74349999955302,
-        "gpu_busy_p50_percent": 52.0,
-        "gpu_busy_p95_percent": 59.0
+        "complete_wav_wall_p50_ms": 147.7218689999944,
+        "complete_wav_wall_p95_ms": 196.7685529999983,
+        "server_inference_p50_ms": 143.353,
+        "wall_rtf_p50": 0.0845574522037747,
+        "stream_ttfp_p50_ms": 67.01969299999178,
+        "stream_ttfp_p95_ms": 120.37578799998983,
+        "stream_keepalive_ttfp_p50_ms": 65.45627049999325,
+        "stream_keepalive_ttfp_p95_ms": 102.10436999997796,
+        "stream_audible_ttfa_p50_ms": 73.64469299999178,
+        "stream_audible_ttfa_p95_ms": 127.00078799998981,
+        "stream_keepalive_audible_ttfa_p50_ms": 72.08127049999325,
+        "stream_keepalive_audible_ttfa_p95_ms": 108.72936999997796,
+        "gpu_busy_p50_percent": 53.0,
+        "gpu_busy_p95_percent": 56.0
       }
     },
     {
       "model": "roxy-v2proplus",
       "session": 2,
       "metrics": {
-        "complete_wav_wall_p50_ms": 174.56684999979188,
-        "complete_wav_wall_p95_ms": 206.06990000032965,
-        "server_inference_p50_ms": 153.394,
-        "wall_rtf_p50": 0.09992378362895929,
-        "stream_ttfp_p50_ms": 83.43739999963873,
-        "stream_ttfp_p95_ms": 105.11419999966165,
-        "stream_keepalive_ttfp_p50_ms": 65.44425000038245,
-        "stream_keepalive_ttfp_p95_ms": 79.95310000023892,
-        "stream_audible_ttfa_p50_ms": 90.06239999963873,
-        "stream_audible_ttfa_p95_ms": 111.73919999966165,
-        "stream_keepalive_audible_ttfa_p50_ms": 72.06925000038245,
-        "stream_keepalive_audible_ttfa_p95_ms": 86.57810000023892,
-        "gpu_busy_p50_percent": 46.0,
-        "gpu_busy_p95_percent": 58.0
-      }
-    },
-    {
-      "model": "miku-v2proplus",
-      "session": 3,
-      "metrics": {
-        "complete_wav_wall_p50_ms": 201.33785000007265,
-        "complete_wav_wall_p95_ms": 224.01150000041525,
-        "server_inference_p50_ms": 172.1095,
-        "wall_rtf_p50": 0.07147243521479327,
-        "stream_ttfp_p50_ms": 79.40484999971886,
-        "stream_ttfp_p95_ms": 87.92389999962325,
-        "stream_keepalive_ttfp_p50_ms": 63.80775000025096,
-        "stream_keepalive_ttfp_p95_ms": 78.09500000075786,
-        "stream_audible_ttfa_p50_ms": 89.65484999971886,
-        "stream_audible_ttfa_p95_ms": 98.17389999962325,
-        "stream_keepalive_audible_ttfa_p50_ms": 74.05775000025096,
-        "stream_keepalive_audible_ttfa_p95_ms": 88.34500000075786,
+        "complete_wav_wall_p50_ms": 146.50830850000318,
+        "complete_wav_wall_p95_ms": 158.98120200000676,
+        "server_inference_p50_ms": 142.121,
+        "wall_rtf_p50": 0.0838627982255313,
+        "stream_ttfp_p50_ms": 64.86635849998379,
+        "stream_ttfp_p95_ms": 71.7526709999845,
+        "stream_keepalive_ttfp_p50_ms": 66.75704149999717,
+        "stream_keepalive_ttfp_p95_ms": 88.7601709999899,
+        "stream_audible_ttfa_p50_ms": 71.49135849998379,
+        "stream_audible_ttfa_p95_ms": 78.3776709999845,
+        "stream_keepalive_audible_ttfa_p50_ms": 73.38204149999717,
+        "stream_keepalive_audible_ttfa_p95_ms": 95.3851709999899,
         "gpu_busy_p50_percent": 54.0,
-        "gpu_busy_p95_percent": 60.0
+        "gpu_busy_p95_percent": 56.0
       }
     },
     {
       "model": "roxy-v2proplus",
       "session": 3,
       "metrics": {
-        "complete_wav_wall_p50_ms": 169.38124999978754,
-        "complete_wav_wall_p95_ms": 224.46380000110366,
-        "server_inference_p50_ms": 139.831,
-        "wall_rtf_p50": 0.09695549513439469,
-        "stream_ttfp_p50_ms": 82.46209999924758,
-        "stream_ttfp_p95_ms": 95.82200000113517,
-        "stream_keepalive_ttfp_p50_ms": 65.16355000076146,
-        "stream_keepalive_ttfp_p95_ms": 90.27310000055877,
-        "stream_audible_ttfa_p50_ms": 89.08709999924758,
-        "stream_audible_ttfa_p95_ms": 102.44700000113517,
-        "stream_keepalive_audible_ttfa_p50_ms": 71.78855000076146,
-        "stream_keepalive_audible_ttfa_p95_ms": 96.89810000055877,
+        "complete_wav_wall_p50_ms": 152.6655160000132,
+        "complete_wav_wall_p95_ms": 191.12844900001846,
+        "server_inference_p50_ms": 148.41949999999997,
+        "wall_rtf_p50": 0.08738724441901156,
+        "stream_ttfp_p50_ms": 66.74261049997199,
+        "stream_ttfp_p95_ms": 88.73271800001703,
+        "stream_keepalive_ttfp_p50_ms": 66.20476300000178,
+        "stream_keepalive_ttfp_p95_ms": 81.64022800002613,
+        "stream_audible_ttfa_p50_ms": 73.36761049997199,
+        "stream_audible_ttfa_p95_ms": 95.35771800001703,
+        "stream_keepalive_audible_ttfa_p50_ms": 72.82976300000178,
+        "stream_keepalive_audible_ttfa_p95_ms": 88.26522800002613,
         "gpu_busy_p50_percent": 54.0,
-        "gpu_busy_p95_percent": 59.0
-      }
-    },
-    {
-      "model": "miku-v2proplus",
-      "session": 4,
-      "metrics": {
-        "complete_wav_wall_p50_ms": 200.5601499995464,
-        "complete_wav_wall_p95_ms": 237.61190000004717,
-        "server_inference_p50_ms": 171.55399999999997,
-        "wall_rtf_p50": 0.07119636137719076,
-        "stream_ttfp_p50_ms": 80.34520000001066,
-        "stream_ttfp_p95_ms": 90.08670000002894,
-        "stream_keepalive_ttfp_p50_ms": 64.24389999938285,
-        "stream_keepalive_ttfp_p95_ms": 76.91030000023602,
-        "stream_audible_ttfa_p50_ms": 90.59520000001066,
-        "stream_audible_ttfa_p95_ms": 100.33670000002894,
-        "stream_keepalive_audible_ttfa_p50_ms": 74.49389999938285,
-        "stream_keepalive_audible_ttfa_p95_ms": 87.16030000023602,
-        "gpu_busy_p50_percent": 53.0,
-        "gpu_busy_p95_percent": 59.0
+        "gpu_busy_p95_percent": 56.0
       }
     },
     {
       "model": "roxy-v2proplus",
       "session": 4,
       "metrics": {
-        "complete_wav_wall_p50_ms": 171.02350000004662,
-        "complete_wav_wall_p95_ms": 207.86779999980354,
-        "server_inference_p50_ms": 143.73350000000002,
-        "wall_rtf_p50": 0.09789553520323219,
-        "stream_ttfp_p50_ms": 82.13394999984303,
-        "stream_ttfp_p95_ms": 93.244899999263,
-        "stream_keepalive_ttfp_p50_ms": 67.22064999939903,
-        "stream_keepalive_ttfp_p95_ms": 84.36369999981252,
-        "stream_audible_ttfa_p50_ms": 88.75894999984303,
-        "stream_audible_ttfa_p95_ms": 99.869899999263,
-        "stream_keepalive_audible_ttfa_p50_ms": 73.84564999939903,
-        "stream_keepalive_audible_ttfa_p95_ms": 90.98869999981252,
-        "gpu_busy_p50_percent": 47.0,
-        "gpu_busy_p95_percent": 58.0
-      }
-    },
-    {
-      "model": "miku-v2proplus",
-      "session": 5,
-      "metrics": {
-        "complete_wav_wall_p50_ms": 200.40109999990818,
-        "complete_wav_wall_p95_ms": 209.75859999998647,
-        "server_inference_p50_ms": 170.99999999999997,
-        "wall_rtf_p50": 0.07113990060344627,
-        "stream_ttfp_p50_ms": 79.97274999979709,
-        "stream_ttfp_p95_ms": 103.49820000010368,
-        "stream_keepalive_ttfp_p50_ms": 65.57375000011234,
-        "stream_keepalive_ttfp_p95_ms": 81.04649999950198,
-        "stream_audible_ttfa_p50_ms": 90.22274999979709,
-        "stream_audible_ttfa_p95_ms": 113.74820000010368,
-        "stream_keepalive_audible_ttfa_p50_ms": 75.82375000011234,
-        "stream_keepalive_audible_ttfa_p95_ms": 91.29649999950198,
-        "gpu_busy_p50_percent": 51.0,
-        "gpu_busy_p95_percent": 59.0
+        "complete_wav_wall_p50_ms": 153.2135255000071,
+        "complete_wav_wall_p95_ms": 190.88780000004135,
+        "server_inference_p50_ms": 148.64849999999998,
+        "wall_rtf_p50": 0.08770093045220784,
+        "stream_ttfp_p50_ms": 66.90333349999378,
+        "stream_ttfp_p95_ms": 111.48702899998852,
+        "stream_keepalive_ttfp_p50_ms": 66.18392900000458,
+        "stream_keepalive_ttfp_p95_ms": 97.74641799998562,
+        "stream_audible_ttfa_p50_ms": 73.52833349999378,
+        "stream_audible_ttfa_p95_ms": 118.11202899998852,
+        "stream_keepalive_audible_ttfa_p50_ms": 72.80892900000458,
+        "stream_keepalive_audible_ttfa_p95_ms": 104.37141799998562,
+        "gpu_busy_p50_percent": 54.0,
+        "gpu_busy_p95_percent": 56.0
       }
     },
     {
       "model": "roxy-v2proplus",
       "session": 5,
       "metrics": {
-        "complete_wav_wall_p50_ms": 169.45045000011305,
-        "complete_wav_wall_p95_ms": 195.75450000047567,
-        "server_inference_p50_ms": 140.0025,
-        "wall_rtf_p50": 0.09699510589588611,
-        "stream_ttfp_p50_ms": 89.63070000027074,
-        "stream_ttfp_p95_ms": 105.70630000074743,
-        "stream_keepalive_ttfp_p50_ms": 71.50115000058577,
-        "stream_keepalive_ttfp_p95_ms": 95.46729999965464,
-        "stream_audible_ttfa_p50_ms": 96.25570000027074,
-        "stream_audible_ttfa_p95_ms": 112.33130000074743,
-        "stream_keepalive_audible_ttfa_p50_ms": 78.12615000058577,
-        "stream_keepalive_audible_ttfa_p95_ms": 102.09229999965464,
+        "complete_wav_wall_p50_ms": 150.71249100000728,
+        "complete_wav_wall_p95_ms": 176.24385300001677,
+        "server_inference_p50_ms": 146.4075,
+        "wall_rtf_p50": 0.08626931368059947,
+        "stream_ttfp_p50_ms": 66.45198649999884,
+        "stream_ttfp_p95_ms": 89.56718100000671,
+        "stream_keepalive_ttfp_p50_ms": 68.63295950000747,
+        "stream_keepalive_ttfp_p95_ms": 95.27838600001814,
+        "stream_audible_ttfa_p50_ms": 73.07698649999884,
+        "stream_audible_ttfa_p95_ms": 96.19218100000671,
+        "stream_keepalive_audible_ttfa_p50_ms": 75.25795950000747,
+        "stream_keepalive_audible_ttfa_p95_ms": 101.90338600001814,
         "gpu_busy_p50_percent": 53.0,
-        "gpu_busy_p95_percent": 60.0
-      }
-    },
-    {
-      "model": "miku-v2proplus",
-      "session": 6,
-      "metrics": {
-        "complete_wav_wall_p50_ms": 217.11549999963609,
-        "complete_wav_wall_p95_ms": 249.07429999984743,
-        "server_inference_p50_ms": 194.7005,
-        "wall_rtf_p50": 0.07707330493419812,
-        "stream_ttfp_p50_ms": 86.79449999999633,
-        "stream_ttfp_p95_ms": 98.51589999925636,
-        "stream_keepalive_ttfp_p50_ms": 70.07245000022522,
-        "stream_keepalive_ttfp_p95_ms": 85.90300000105344,
-        "stream_audible_ttfa_p50_ms": 97.04449999999633,
-        "stream_audible_ttfa_p95_ms": 108.76589999925636,
-        "stream_keepalive_audible_ttfa_p50_ms": 80.32245000022522,
-        "stream_keepalive_audible_ttfa_p95_ms": 96.15300000105344,
-        "gpu_busy_p50_percent": 55.0,
-        "gpu_busy_p95_percent": 62.0
+        "gpu_busy_p95_percent": 56.0
       }
     },
     {
       "model": "roxy-v2proplus",
       "session": 6,
       "metrics": {
-        "complete_wav_wall_p50_ms": 180.8162999996057,
-        "complete_wav_wall_p95_ms": 239.06689999967057,
-        "server_inference_p50_ms": 156.0805,
-        "wall_rtf_p50": 0.1035010303374961,
-        "stream_ttfp_p50_ms": 87.48634999938076,
-        "stream_ttfp_p95_ms": 98.63959999893268,
-        "stream_keepalive_ttfp_p50_ms": 72.56485000016255,
-        "stream_keepalive_ttfp_p95_ms": 97.21299999910116,
-        "stream_audible_ttfa_p50_ms": 94.11134999938076,
-        "stream_audible_ttfa_p95_ms": 105.26459999893268,
-        "stream_keepalive_audible_ttfa_p50_ms": 79.18985000016255,
-        "stream_keepalive_audible_ttfa_p95_ms": 103.83799999910116,
+        "complete_wav_wall_p50_ms": 153.14022549998185,
+        "complete_wav_wall_p95_ms": 201.43918899998425,
+        "server_inference_p50_ms": 148.5345,
+        "wall_rtf_p50": 0.08765897281052196,
+        "stream_ttfp_p50_ms": 68.00597099996253,
+        "stream_ttfp_p95_ms": 79.84110400002464,
+        "stream_keepalive_ttfp_p50_ms": 68.91021599997771,
+        "stream_keepalive_ttfp_p95_ms": 84.24175999999761,
+        "stream_audible_ttfa_p50_ms": 74.63097099996253,
+        "stream_audible_ttfa_p95_ms": 86.46610400002464,
+        "stream_keepalive_audible_ttfa_p50_ms": 75.53521599997771,
+        "stream_keepalive_audible_ttfa_p95_ms": 90.86675999999761,
         "gpu_busy_p50_percent": 53.0,
-        "gpu_busy_p95_percent": 62.0
-      }
-    },
-    {
-      "model": "miku-v2proplus",
-      "session": 7,
-      "metrics": {
-        "complete_wav_wall_p50_ms": 219.09694999976637,
-        "complete_wav_wall_p95_ms": 268.76629999969737,
-        "server_inference_p50_ms": 195.292,
-        "wall_rtf_p50": 0.07777669506558976,
-        "stream_ttfp_p50_ms": 86.17120000053546,
-        "stream_ttfp_p95_ms": 101.31550000005518,
-        "stream_keepalive_ttfp_p50_ms": 69.32279999909952,
-        "stream_keepalive_ttfp_p95_ms": 81.43990000098711,
-        "stream_audible_ttfa_p50_ms": 96.42120000053546,
-        "stream_audible_ttfa_p95_ms": 111.56550000005518,
-        "stream_keepalive_audible_ttfa_p50_ms": 79.57279999909952,
-        "stream_keepalive_audible_ttfa_p95_ms": 91.68990000098711,
-        "gpu_busy_p50_percent": 56.0,
-        "gpu_busy_p95_percent": 62.0
+        "gpu_busy_p95_percent": 56.0
       }
     },
     {
       "model": "roxy-v2proplus",
       "session": 7,
       "metrics": {
-        "complete_wav_wall_p50_ms": 176.6432000003988,
-        "complete_wav_wall_p95_ms": 236.00719999922148,
-        "server_inference_p50_ms": 152.95,
-        "wall_rtf_p50": 0.10111230681190542,
-        "stream_ttfp_p50_ms": 89.18679999987944,
-        "stream_ttfp_p95_ms": 102.72790000090026,
-        "stream_keepalive_ttfp_p50_ms": 70.6822000001921,
-        "stream_keepalive_ttfp_p95_ms": 82.9940000003262,
-        "stream_audible_ttfa_p50_ms": 95.81179999987944,
-        "stream_audible_ttfa_p95_ms": 109.35290000090026,
-        "stream_keepalive_audible_ttfa_p50_ms": 77.3072000001921,
-        "stream_keepalive_audible_ttfa_p95_ms": 89.6190000003262,
-        "gpu_busy_p50_percent": 54.0,
-        "gpu_busy_p95_percent": 60.0
-      }
-    },
-    {
-      "model": "miku-v2proplus",
-      "session": 8,
-      "metrics": {
-        "complete_wav_wall_p50_ms": 215.31434999997145,
-        "complete_wav_wall_p95_ms": 257.64800000069954,
-        "server_inference_p50_ms": 191.445,
-        "wall_rtf_p50": 0.07643391906282267,
-        "stream_ttfp_p50_ms": 89.07079999971756,
-        "stream_ttfp_p95_ms": 109.84170000119775,
-        "stream_keepalive_ttfp_p50_ms": 70.4763500007175,
-        "stream_keepalive_ttfp_p95_ms": 88.06489999915357,
-        "stream_audible_ttfa_p50_ms": 99.32079999971756,
-        "stream_audible_ttfa_p95_ms": 120.09170000119775,
-        "stream_keepalive_audible_ttfa_p50_ms": 80.7263500007175,
-        "stream_keepalive_audible_ttfa_p95_ms": 98.31489999915357,
-        "gpu_busy_p50_percent": 52.0,
-        "gpu_busy_p95_percent": 62.0
+        "complete_wav_wall_p50_ms": 156.4475440000308,
+        "complete_wav_wall_p95_ms": 178.860267999994,
+        "server_inference_p50_ms": 151.8025,
+        "wall_rtf_p50": 0.08955211448198672,
+        "stream_ttfp_p50_ms": 74.54356649998317,
+        "stream_ttfp_p95_ms": 92.13932000000113,
+        "stream_keepalive_ttfp_p50_ms": 76.34489250000343,
+        "stream_keepalive_ttfp_p95_ms": 132.37179699996204,
+        "stream_audible_ttfa_p50_ms": 81.16856649998317,
+        "stream_audible_ttfa_p95_ms": 98.76432000000113,
+        "stream_keepalive_audible_ttfa_p50_ms": 82.96989250000343,
+        "stream_keepalive_audible_ttfa_p95_ms": 138.99679699996204,
+        "gpu_busy_p50_percent": 50.5,
+        "gpu_busy_p95_percent": 56.0
       }
     },
     {
       "model": "roxy-v2proplus",
       "session": 8,
       "metrics": {
-        "complete_wav_wall_p50_ms": 181.8396999997276,
-        "complete_wav_wall_p95_ms": 216.26589999868884,
-        "server_inference_p50_ms": 156.962,
-        "wall_rtf_p50": 0.10408683457339873,
-        "stream_ttfp_p50_ms": 90.1945000005071,
-        "stream_ttfp_p95_ms": 111.10910000024887,
-        "stream_keepalive_ttfp_p50_ms": 71.95240000055492,
-        "stream_keepalive_ttfp_p95_ms": 98.22080000049027,
-        "stream_audible_ttfa_p50_ms": 96.8195000005071,
-        "stream_audible_ttfa_p95_ms": 117.73410000024887,
-        "stream_keepalive_audible_ttfa_p50_ms": 78.57740000055492,
-        "stream_keepalive_audible_ttfa_p95_ms": 104.84580000049027,
-        "gpu_busy_p50_percent": 52.0,
-        "gpu_busy_p95_percent": 60.0
-      }
-    },
-    {
-      "model": "miku-v2proplus",
-      "session": 9,
-      "metrics": {
-        "complete_wav_wall_p50_ms": 227.02994999963266,
-        "complete_wav_wall_p95_ms": 273.3457999984239,
-        "server_inference_p50_ms": 201.973,
-        "wall_rtf_p50": 0.08059281150146705,
-        "stream_ttfp_p50_ms": 91.42080000037822,
-        "stream_ttfp_p95_ms": 108.49050000069838,
-        "stream_keepalive_ttfp_p50_ms": 72.58304999959364,
-        "stream_keepalive_ttfp_p95_ms": 99.75649999978486,
-        "stream_audible_ttfa_p50_ms": 101.67080000037822,
-        "stream_audible_ttfa_p95_ms": 118.74050000069838,
-        "stream_keepalive_audible_ttfa_p50_ms": 82.83304999959364,
-        "stream_keepalive_audible_ttfa_p95_ms": 110.00649999978486,
-        "gpu_busy_p50_percent": 53.0,
-        "gpu_busy_p95_percent": 61.0
-      }
-    },
-    {
-      "model": "roxy-v2proplus",
-      "session": 9,
-      "metrics": {
-        "complete_wav_wall_p50_ms": 185.3581999994276,
-        "complete_wav_wall_p95_ms": 219.93429999929504,
-        "server_inference_p50_ms": 161.4515,
-        "wall_rtf_p50": 0.10610085861444052,
-        "stream_ttfp_p50_ms": 90.66120000079536,
-        "stream_ttfp_p95_ms": 104.93900000074063,
-        "stream_keepalive_ttfp_p50_ms": 70.10350000018661,
-        "stream_keepalive_ttfp_p95_ms": 87.73110000038287,
-        "stream_audible_ttfa_p50_ms": 97.28620000079536,
-        "stream_audible_ttfa_p95_ms": 111.56400000074063,
-        "stream_keepalive_audible_ttfa_p50_ms": 76.72850000018661,
-        "stream_keepalive_audible_ttfa_p95_ms": 94.35610000038287,
+        "complete_wav_wall_p50_ms": 166.10011400001667,
+        "complete_wav_wall_p95_ms": 196.76382400007242,
+        "server_inference_p50_ms": 161.275,
+        "wall_rtf_p50": 0.09507734058386758,
+        "stream_ttfp_p50_ms": 68.84307550001267,
+        "stream_ttfp_p95_ms": 117.45858099993711,
+        "stream_keepalive_ttfp_p50_ms": 69.50353900003847,
+        "stream_keepalive_ttfp_p95_ms": 82.33155499999611,
+        "stream_audible_ttfa_p50_ms": 75.46807550001267,
+        "stream_audible_ttfa_p95_ms": 124.08358099993711,
+        "stream_keepalive_audible_ttfa_p50_ms": 76.12853900003847,
+        "stream_keepalive_audible_ttfa_p95_ms": 88.95655499999611,
         "gpu_busy_p50_percent": 51.0,
-        "gpu_busy_p95_percent": 60.0
+        "gpu_busy_p95_percent": 56.0
       }
     },
     {
-      "model": "miku-v2proplus",
-      "session": 10,
+      "model": "roxy-v2proplus",
+      "session": 9,
       "metrics": {
-        "complete_wav_wall_p50_ms": 213.20505000039702,
-        "complete_wav_wall_p95_ms": 269.76879999892844,
-        "server_inference_p50_ms": 187.7005,
-        "wall_rtf_p50": 0.07568514377010899,
-        "stream_ttfp_p50_ms": 89.42200000001321,
-        "stream_ttfp_p95_ms": 108.52460000023711,
-        "stream_keepalive_ttfp_p50_ms": 69.04914999995526,
-        "stream_keepalive_ttfp_p95_ms": 84.6919000014168,
-        "stream_audible_ttfa_p50_ms": 99.67200000001321,
-        "stream_audible_ttfa_p95_ms": 118.77460000023711,
-        "stream_keepalive_audible_ttfa_p50_ms": 79.29914999995526,
-        "stream_keepalive_audible_ttfa_p95_ms": 94.9419000014168,
-        "gpu_busy_p50_percent": 52.0,
-        "gpu_busy_p95_percent": 61.0
+        "complete_wav_wall_p50_ms": 165.34262700002955,
+        "complete_wav_wall_p95_ms": 188.20844499998657,
+        "server_inference_p50_ms": 160.308,
+        "wall_rtf_p50": 0.09464374756727506,
+        "stream_ttfp_p50_ms": 67.13485800003127,
+        "stream_ttfp_p95_ms": 86.4918839999973,
+        "stream_keepalive_ttfp_p50_ms": 67.27217350004366,
+        "stream_keepalive_ttfp_p95_ms": 84.47464999994736,
+        "stream_audible_ttfa_p50_ms": 73.75985800003127,
+        "stream_audible_ttfa_p95_ms": 93.1168839999973,
+        "stream_keepalive_audible_ttfa_p50_ms": 73.89717350004366,
+        "stream_keepalive_audible_ttfa_p95_ms": 91.09964999994736,
+        "gpu_busy_p50_percent": 51.0,
+        "gpu_busy_p95_percent": 56.0
       }
     },
     {
       "model": "roxy-v2proplus",
       "session": 10,
       "metrics": {
-        "complete_wav_wall_p50_ms": 180.30635000013717,
-        "complete_wav_wall_p95_ms": 224.4994000011502,
-        "server_inference_p50_ms": 155.9785,
-        "wall_rtf_p50": 0.10320912993711343,
-        "stream_ttfp_p50_ms": 92.39095000157249,
-        "stream_ttfp_p95_ms": 122.15250000008382,
-        "stream_keepalive_ttfp_p50_ms": 72.60954999946989,
-        "stream_keepalive_ttfp_p95_ms": 86.22459999969578,
-        "stream_audible_ttfa_p50_ms": 99.01595000157249,
-        "stream_audible_ttfa_p95_ms": 128.77750000008382,
-        "stream_keepalive_audible_ttfa_p50_ms": 79.23454999946989,
-        "stream_keepalive_audible_ttfa_p95_ms": 92.84959999969578,
-        "gpu_busy_p50_percent": 54.0,
-        "gpu_busy_p95_percent": 61.0
+        "complete_wav_wall_p50_ms": 154.0138644999729,
+        "complete_wav_wall_p95_ms": 187.53433400001995,
+        "server_inference_p50_ms": 149.341,
+        "wall_rtf_p50": 0.08815905237548534,
+        "stream_ttfp_p50_ms": 72.07328700002336,
+        "stream_ttfp_p95_ms": 111.63181400002031,
+        "stream_keepalive_ttfp_p50_ms": 70.14845450004259,
+        "stream_keepalive_ttfp_p95_ms": 136.052032000066,
+        "stream_audible_ttfa_p50_ms": 78.69828700002336,
+        "stream_audible_ttfa_p95_ms": 118.25681400002031,
+        "stream_keepalive_audible_ttfa_p50_ms": 76.77345450004259,
+        "stream_keepalive_audible_ttfa_p95_ms": 142.677032000066,
+        "gpu_busy_p50_percent": 53.0,
+        "gpu_busy_p95_percent": 57.0
       }
     }
   ],
   "per_model": {
-    "miku-v2proplus": {
+    "roxy-v2proplus": {
       "complete_wav_wall_p50_ms": {
-        "session_median": 211.75062500014974,
-        "best": 200.40109999990818,
-        "worst": 227.02994999963266
+        "session_median": 153.17687549999448,
+        "best": 146.50830850000318,
+        "worst": 166.10011400001667
       },
       "complete_wav_wall_p95_ms": {
-        "session_median": 254.7501000003649,
-        "best": 209.75859999998647,
-        "worst": 273.3457999984239
+        "session_median": 189.54812250001396,
+        "best": 158.98120200000676,
+        "worst": 201.43918899998425
       },
       "server_inference_p50_ms": {
-        "session_median": 188.31875,
-        "best": 170.99999999999997,
-        "worst": 201.973
+        "session_median": 148.5915,
+        "best": 142.121,
+        "worst": 161.275
       },
       "wall_rtf_p50": {
-        "session_median": 0.07516884096561935,
-        "best": 0.07113990060344627,
-        "worst": 0.08059281150146705
+        "session_median": 0.0876799516313649,
+        "best": 0.0838627982255313,
+        "worst": 0.09507734058386758
       },
       "stream_ttfp_p50_ms": {
-        "session_median": 86.4828500002659,
-        "best": 79.40484999971886,
-        "worst": 91.42080000037822
+        "session_median": 67.07727550001152,
+        "best": 64.86635849998379,
+        "worst": 74.54356649998317
       },
       "stream_ttfp_p95_ms": {
-        "session_median": 102.40685000007943,
-        "best": 87.92389999962325,
-        "worst": 109.84170000119775
+        "session_median": 90.85325050000392,
+        "best": 71.7526709999845,
+        "worst": 120.37578799998983
       },
       "stream_keepalive_ttfp_p50_ms": {
-        "session_median": 69.18597499952739,
-        "best": 63.80775000025096,
-        "worst": 72.58304999959364
+        "session_median": 67.95256650002557,
+        "best": 65.45627049999325,
+        "worst": 76.34489250000343
       },
       "stream_keepalive_ttfp_p95_ms": {
-        "session_median": 84.59270000048491,
-        "best": 76.91030000023602,
-        "worst": 99.75649999978486
+        "session_median": 92.01927850000402,
+        "best": 81.64022800002613,
+        "worst": 136.052032000066
       },
       "stream_audible_ttfa_p50_ms": {
-        "session_median": 96.7328500002659,
-        "best": 89.65484999971886,
-        "worst": 101.67080000037822
+        "session_median": 73.70227550001152,
+        "best": 71.49135849998379,
+        "worst": 81.16856649998317
       },
       "stream_audible_ttfa_p95_ms": {
-        "session_median": 112.65685000007943,
-        "best": 98.17389999962325,
-        "worst": 120.09170000119775
+        "session_median": 97.47825050000392,
+        "best": 78.3776709999845,
+        "worst": 127.00078799998981
       },
       "stream_keepalive_audible_ttfa_p50_ms": {
-        "session_median": 79.43597499952739,
-        "best": 74.05775000025096,
-        "worst": 82.83304999959364
+        "session_median": 74.57756650002557,
+        "best": 72.08127049999325,
+        "worst": 82.96989250000343
       },
       "stream_keepalive_audible_ttfa_p95_ms": {
-        "session_median": 94.84270000048491,
-        "best": 87.16030000023602,
-        "worst": 110.00649999978486
+        "session_median": 98.64427850000402,
+        "best": 88.26522800002613,
+        "worst": 142.677032000066
       },
       "gpu_busy_p50_percent": {
         "session_median": 53.0,
-        "best": 51.0,
-        "worst": 56.0
-      },
-      "gpu_busy_p95_percent": {
-        "session_median": 61.0,
-        "best": 59.0,
-        "worst": 62.0
-      }
-    },
-    "roxy-v2proplus": {
-      "complete_wav_wall_p50_ms": {
-        "session_median": 178.47477500026798,
-        "best": 169.38124999978754,
-        "worst": 185.3581999994276
-      },
-      "complete_wav_wall_p95_ms": {
-        "session_median": 222.19905000019935,
-        "best": 195.75450000047567,
-        "worst": 239.06689999967057
-      },
-      "server_inference_p50_ms": {
-        "session_median": 154.68625,
-        "best": 139.831,
-        "worst": 161.4515
-      },
-      "wall_rtf_p50": {
-        "session_median": 0.10216071837450942,
-        "best": 0.09695549513439469,
-        "worst": 0.10610085861444052
-      },
-      "stream_ttfp_p50_ms": {
-        "session_median": 88.3365749996301,
-        "best": 82.13394999984303,
-        "worst": 92.39095000157249
-      },
-      "stream_ttfp_p95_ms": {
-        "session_median": 103.83345000082045,
-        "best": 93.244899999263,
-        "worst": 122.15250000008382
-      },
-      "stream_keepalive_ttfp_p50_ms": {
-        "session_median": 70.39285000018936,
-        "best": 65.16355000076146,
-        "worst": 72.60954999946989
-      },
-      "stream_keepalive_ttfp_p95_ms": {
-        "session_median": 86.97785000003933,
-        "best": 79.95310000023892,
-        "worst": 98.22080000049027
-      },
-      "stream_audible_ttfa_p50_ms": {
-        "session_median": 94.9615749996301,
-        "best": 88.75894999984303,
-        "worst": 99.01595000157249
-      },
-      "stream_audible_ttfa_p95_ms": {
-        "session_median": 110.45845000082045,
-        "best": 99.869899999263,
-        "worst": 128.77750000008382
-      },
-      "stream_keepalive_audible_ttfa_p50_ms": {
-        "session_median": 77.01785000018936,
-        "best": 71.78855000076146,
-        "worst": 79.23454999946989
-      },
-      "stream_keepalive_audible_ttfa_p95_ms": {
-        "session_median": 93.60285000003933,
-        "best": 86.57810000023892,
-        "worst": 104.84580000049027
-      },
-      "gpu_busy_p50_percent": {
-        "session_median": 52.5,
-        "best": 46.0,
+        "best": 50.5,
         "worst": 54.0
       },
       "gpu_busy_p95_percent": {
-        "session_median": 60.0,
-        "best": 58.0,
-        "worst": 62.0
+        "session_median": 56.0,
+        "best": 56.0,
+        "worst": 57.0
       }
     }
   }

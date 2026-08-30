@@ -5,7 +5,7 @@ ARG TORCH_REQUIREMENTS=requirements/torch-cu128.txt
 ARG VCS_REF=unknown
 ARG BUILD_DATE=unknown
 LABEL org.opencontainers.image.title="AnifLive-TTS"
-LABEL org.opencontainers.image.version="1.2.0"
+LABEL org.opencontainers.image.version="1.3.0"
 LABEL org.opencontainers.image.description="First-party TTS runtime for AnifEngine-Voice"
 LABEL org.opencontainers.image.authors="Hiruynk"
 LABEL org.opencontainers.image.vendor="AnifEngine"
@@ -141,6 +141,9 @@ PY
 COPY pyproject.toml README.md LICENSE LICENSING.md THIRD_PARTY_NOTICES.md /app/
 COPY licenses /app/licenses
 COPY src /app/src
+COPY webui /app/webui
+COPY assets/everynight_dance.gif /app/assets/everynight_dance.gif
+COPY assets/THIRD_PARTY_MEDIA.md /app/assets/THIRD_PARTY_MEDIA.md
 COPY minimal_inference /app/minimal_inference
 COPY scripts /app/scripts
 RUN python -m pip install --no-deps /app \
@@ -164,6 +167,6 @@ assert text.english.g2p("AnifLive-TTS speaks English.")
 assert LangSegmenter.getTexts("Hello，初めまして。", default_lang="ja")
 PY
 
-EXPOSE 9880
+EXPOSE 9880 9890
 ENTRYPOINT ["/app/scripts/entrypoint.sh"]
 CMD ["serve"]

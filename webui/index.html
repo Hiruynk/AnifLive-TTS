@@ -1,0 +1,2056 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#09070e">
+  <title>AnifLive-TTS WebUI</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --night: #09070e;
+      --night-soft: #100c17;
+      --panel: rgba(23,17,31,.9);
+      --panel-strong: rgba(31,22,41,.96);
+      --panel-soft: rgba(48,34,59,.58);
+      --text: #faf4fb;
+      --muted: #b2a6ba;
+      --faint: #817588;
+      --line: rgba(225,199,234,.14);
+      --line-strong: rgba(235,194,219,.3);
+      --ivory: #efdbea;
+      --lilac: #bba5dc;
+      --rose: #d890b5;
+      --wine: #8d3155;
+      --candle: #edc98e;
+      --playback-gold: #ffd166;
+      --danger: #ff91a5;
+      --shadow: 0 18px 48px rgba(0,0,0,.28);
+      --radius-lg: 16px;
+      --radius-md: 12px;
+      --radius-sm: 9px;
+    }
+    * { box-sizing: border-box; }
+    html { background: var(--night); }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      overflow-x: hidden;
+      background: var(--night);
+      color: var(--text);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI",
+        "Noto Sans TC", "Noto Sans SC", sans-serif;
+      letter-spacing: 0;
+    }
+    button, textarea, input, select { font: inherit; }
+    button { -webkit-tap-highlight-color: transparent; }
+    main { width: min(1180px, calc(100% - 40px)); margin: 0 auto; padding: 24px 0 48px; }
+    header {
+      position: relative;
+      z-index: 50;
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 28px;
+      padding: 18px 20px;
+      overflow: visible;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-lg);
+      background: var(--panel-strong);
+      box-shadow: 0 12px 34px rgba(0,0,0,.18);
+      animation: surface-enter .34s cubic-bezier(.22,1,.36,1) both;
+    }
+    .brand { display: flex; align-items: center; min-width: 0; gap: 2px; }
+    .title { width: max-content; max-width: 100%; min-width: 0; padding-top: 3px; }
+    .brand-gif {
+      display: block;
+      width: auto;
+      height: 92px;
+      flex: 0 0 auto;
+      margin: -10px 0 -10px -2px;
+      object-fit: contain;
+      pointer-events: none;
+      user-select: none;
+    }
+    h1 {
+      margin: 0;
+      font-family: Georgia, "Times New Roman", "Noto Serif TC", serif;
+      font-size: clamp(26px,3.4vw,38px);
+      font-weight: 600;
+      line-height: 1.08;
+      letter-spacing: 0;
+      white-space: nowrap;
+    }
+    .title-rule {
+      width: 100%;
+      height: 1px;
+      margin-top: 10px;
+      background: linear-gradient(90deg, var(--candle), var(--rose));
+      opacity: .7;
+    }
+    .header-tools { display: flex; flex-direction: column; align-items: flex-end; gap: 10px; }
+    .locale-picker { position: relative; z-index: 2147483646; }
+    .locale-button {
+      display: flex;
+      align-items: center;
+      min-width: 154px;
+      min-height: 40px;
+      gap: 9px;
+      padding: 0 12px;
+      border: 1px solid var(--line-strong);
+      border-radius: var(--radius-sm);
+      background: rgba(31,22,41,.96);
+      color: var(--text);
+      transition: border-color .15s ease, background .15s ease, box-shadow .15s ease;
+      cursor: pointer;
+      outline: none;
+    }
+    .locale-button:hover,
+    .locale-button:focus-visible,
+    .locale-button[aria-expanded="true"] {
+      border-color: rgba(237,201,142,.6);
+      background: rgba(48,34,59,.72);
+      box-shadow: 0 0 0 3px rgba(237,201,142,.08);
+    }
+    .locale-icon {
+      display: grid;
+      width: 24px;
+      height: 24px;
+      place-items: center;
+      color: var(--candle);
+    }
+    .locale-icon svg { width: 19px; height: 19px; fill: none; stroke: currentColor; stroke-width: 1.55; }
+    #localeCurrent { flex: 1; text-align: left; font-size: 13px; font-weight: 650; }
+    .chevron {
+      width: 8px;
+      height: 8px;
+      border-right: 1px solid var(--muted);
+      border-bottom: 1px solid var(--muted);
+      transform: rotate(45deg) translateY(-2px);
+      transition: transform .15s ease;
+    }
+    .locale-button[aria-expanded="true"] .chevron { transform: rotate(225deg) translate(-1px,-1px); }
+    .model-button[aria-expanded="true"] .chevron { transform: rotate(225deg) translate(-1px,-1px); }
+    .locale-menu {
+      position: absolute;
+      z-index: 2147483647;
+      top: calc(100% + 7px);
+      right: 0;
+      width: 194px;
+      padding: 6px;
+      border: 1px solid rgba(231,189,215,.3);
+      border-radius: 11px;
+      background: rgba(20,14,27,.985);
+      box-shadow: 0 18px 42px rgba(0,0,0,.5);
+      backdrop-filter: blur(18px);
+      transform-origin: top right;
+      animation: menu-enter .16s cubic-bezier(.22,1,.36,1) both;
+    }
+    .locale-menu[hidden] { display: none; }
+    .locale-option {
+      display: flex;
+      align-items: center;
+      width: 100%;
+      min-height: 40px;
+      gap: 10px;
+      padding: 0 11px;
+      border: 0;
+      border-radius: 7px;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      outline: none;
+      text-align: left;
+    }
+    .locale-option::before {
+      width: 7px;
+      height: 7px;
+      flex: 0 0 auto;
+      border: 1px solid var(--faint);
+      border-radius: 50%;
+      content: "";
+    }
+    .locale-option:hover, .locale-option:focus-visible { background: rgba(187,165,220,.1); color: var(--text); }
+    .locale-option[aria-selected="true"] {
+      background: rgba(141,49,85,.3);
+      color: var(--ivory);
+    }
+    .locale-option[aria-selected="true"]::before {
+      border-color: var(--candle);
+      background: var(--candle);
+    }
+    .badges { display: flex; flex-wrap: wrap; justify-content: flex-end; max-width: 600px; gap: 5px; }
+    .badge {
+      max-width: 260px;
+      overflow: hidden;
+      padding: 4px 7px;
+      border: 0;
+      border-left: 1px solid var(--line);
+      border-radius: 0;
+      background: transparent;
+      color: var(--muted);
+      font-size: 10px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .badge.ready {
+      border-color: rgba(216,144,181,.4);
+      background: rgba(141,49,85,.18);
+      color: var(--ivory);
+      padding-inline: 8px;
+    }
+    .workspace { display: grid; grid-template-columns: minmax(0,1fr) 340px; gap: 16px; padding-top: 16px; }
+    .editor, .side-panel, .table-wrap {
+      border: 1px solid var(--line);
+      background: var(--panel);
+      box-shadow: 0 10px 30px rgba(0,0,0,.14);
+    }
+    .editor { position: relative; z-index: 20; overflow: visible; padding: 20px; border-radius: var(--radius-lg); }
+    .editor { animation: surface-enter .38s .04s cubic-bezier(.22,1,.36,1) both; }
+    .voice-row {
+      position: relative;
+      display: grid;
+      grid-template-columns: 90px minmax(180px,1fr);
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+    .field-label { color: var(--muted); font-size: 11px; font-weight: 650; letter-spacing: 0; text-transform: uppercase; }
+    .model-picker { position: relative; z-index: 1000; }
+    .model-button {
+      display: flex;
+      align-items: center;
+      width: 100%;
+      min-height: 42px;
+      gap: 12px;
+      padding: 0 14px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-sm);
+      background: rgba(10,8,14,.46);
+      color: var(--text);
+      cursor: pointer;
+      outline: none;
+      text-align: left;
+      transition: border-color .15s ease, background .15s ease, box-shadow .15s ease;
+    }
+    #modelCurrent { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .model-button:hover,
+    .model-button:focus-visible,
+    .model-button[aria-expanded="true"],
+    input:focus {
+      border-color: rgba(216,144,181,.6);
+      background-color: rgba(31,22,41,.7);
+      box-shadow: 0 0 0 3px rgba(216,144,181,.08);
+    }
+    .model-menu {
+      position: absolute;
+      z-index: 1001;
+      top: calc(100% + 7px);
+      right: 0;
+      left: 0;
+      max-height: 260px;
+      overflow-y: auto;
+      padding: 6px;
+      border: 1px solid var(--line-strong);
+      border-radius: 11px;
+      background: rgba(20,14,27,.99);
+      box-shadow: 0 18px 42px rgba(0,0,0,.5);
+      backdrop-filter: blur(18px);
+      transform-origin: top center;
+      animation: menu-enter .16s cubic-bezier(.22,1,.36,1) both;
+    }
+    .model-menu[hidden] { display: none; }
+    .model-option {
+      display: flex;
+      align-items: center;
+      width: 100%;
+      min-height: 40px;
+      gap: 10px;
+      padding: 0 11px;
+      border: 0;
+      border-radius: 7px;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      outline: none;
+      text-align: left;
+    }
+    .model-option::before {
+      width: 7px;
+      height: 7px;
+      flex: 0 0 auto;
+      border: 1px solid var(--faint);
+      border-radius: 50%;
+      content: "";
+    }
+    .model-option:hover, .model-option:focus-visible { background: rgba(187,165,220,.1); color: var(--text); }
+    .model-option[aria-selected="true"] { background: rgba(141,49,85,.3); color: var(--ivory); }
+    .model-option[aria-selected="true"]::before { border-color: var(--candle); background: var(--candle); }
+    .annotation-editor {
+      position: relative;
+      width: 100%;
+      min-height: 210px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-sm);
+      background: rgba(8,6,12,.62);
+      transition: border-color .15s ease, background .15s ease, box-shadow .15s ease;
+    }
+    .annotation-editor:focus-within {
+      border-color: rgba(216,144,181,.6);
+      background-color: rgba(31,22,41,.7);
+      box-shadow: 0 0 0 3px rgba(216,144,181,.08);
+    }
+    .annotation-editor textarea,
+    .annotation-mirror-content,
+    .playback-mirror-content {
+      width: 100%;
+      min-height: 210px;
+      padding: 17px;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      tab-size: 4;
+      font-size: 15px;
+      line-height: var(--annotation-line-height,2.5);
+    }
+    .annotation-editor textarea {
+      position: relative;
+      z-index: 2;
+      display: block;
+      resize: vertical;
+      border: 0;
+      outline: none;
+      background: transparent;
+      color: transparent;
+      -webkit-text-fill-color: transparent;
+      caret-color: var(--candle);
+    }
+    .annotation-editor:not(.enhanced) textarea {
+      color: var(--text);
+      -webkit-text-fill-color: var(--text);
+    }
+    .annotation-editor textarea::placeholder {
+      color: var(--faint);
+      -webkit-text-fill-color: var(--faint);
+    }
+    .annotation-editor textarea::selection { background: rgba(87,184,255,.26); }
+    .annotation-mirror {
+      position: absolute;
+      z-index: 1;
+      inset: 0;
+      overflow: hidden;
+      border-radius: inherit;
+      pointer-events: none;
+    }
+    .annotation-mirror-content { color: var(--text); }
+    .playback-mirror-content {
+      position: absolute;
+      inset: 0;
+      color: transparent;
+      pointer-events: none;
+    }
+    .playback-active-character {
+      color: var(--playback-gold);
+      text-shadow: 0 0 9px rgba(255,209,102,.26);
+    }
+    .annotation-run {
+      text-decoration-line: underline;
+      text-decoration-color: var(--annotation-color);
+      text-decoration-thickness: 2px;
+      text-underline-offset: 5px;
+    }
+    .annotation-captions {
+      position: absolute;
+      z-index: 3;
+      inset: 0;
+      overflow: hidden;
+      border-radius: inherit;
+      pointer-events: none;
+    }
+    .annotation-caption {
+      position: absolute;
+      display: block;
+      max-width: 220px;
+      height: 17px;
+      overflow: hidden;
+      padding: 1px 3px;
+      border: 0;
+      border-radius: 3px;
+      background: transparent;
+      color: var(--annotation-color);
+      font-size: 10px;
+      line-height: 15px;
+      text-align: center;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      pointer-events: auto;
+      cursor: pointer;
+      text-shadow: 0 1px 2px rgba(0,0,0,.9);
+    }
+    .annotation-caption:hover,
+    .annotation-caption:focus-visible { background: transparent; outline: 1px solid currentColor; }
+    .annotation-underline-hit {
+      position: absolute;
+      height: 8px;
+      padding: 0;
+      border: 0;
+      background: transparent;
+      cursor: pointer;
+      pointer-events: auto;
+    }
+    .expression-menu {
+      position: absolute;
+      z-index: 12;
+      display: grid;
+      width: min(390px, calc(100vw - 32px));
+      max-height: 260px;
+      grid-template-columns: repeat(2,minmax(0,1fr));
+      gap: 3px;
+      overflow-y: auto;
+      padding: 6px;
+      border: 1px solid var(--line-strong);
+      border-radius: 8px;
+      background: rgba(20,15,28,.98);
+      box-shadow: 0 16px 36px rgba(0,0,0,.34);
+      animation: menu-enter .14s cubic-bezier(.22,1,.36,1) both;
+    }
+    .expression-menu[hidden] { display: none; }
+    .expression-option {
+      display: flex;
+      min-width: 0;
+      min-height: 36px;
+      align-items: center;
+      gap: 8px;
+      padding: 0 9px;
+      border: 0;
+      border-radius: 6px;
+      background: transparent;
+      color: var(--muted);
+      text-align: left;
+      cursor: pointer;
+    }
+    .expression-option:hover,
+    .expression-option:focus-visible { background: rgba(255,255,255,.07); color: var(--text); outline: none; }
+    .expression-option-dot,
+    .expression-card-dot {
+      width: 8px;
+      height: 8px;
+      flex: 0 0 auto;
+      border-radius: 50%;
+      background: var(--annotation-color);
+      box-shadow: 0 0 0 2px rgba(255,255,255,.06);
+    }
+    .expression-field {
+      display: block;
+      margin-top: 12px;
+    }
+    .expression-label {
+      display: block;
+      margin-bottom: 7px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 650;
+    }
+    .expression-cards {
+      display: flex;
+      width: 100%;
+      min-width: 0;
+      min-height: 52px;
+      flex-wrap: wrap;
+      align-items: center;
+      align-content: center;
+      gap: 7px;
+      padding: 9px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(8,6,12,.48);
+    }
+    .expression-empty {
+      display: flex;
+      min-height: 32px;
+      align-items: center;
+      gap: 8px;
+      padding: 0 4px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .expression-empty::before {
+      width: 7px;
+      height: 7px;
+      border: 1px solid var(--faint);
+      border-radius: 50%;
+      content: "";
+    }
+    .expression-card {
+      position: relative;
+      display: inline-flex;
+      max-width: 100%;
+      min-width: 0;
+      min-height: 34px;
+      align-items: center;
+      gap: 4px;
+      padding: 2px 4px 2px 9px;
+      border: 1px solid var(--line);
+      border-bottom: 2px solid var(--annotation-color);
+      border-radius: 999px;
+      background: rgba(35,39,45,.84);
+      transition: border-color .15s ease, background .15s ease, box-shadow .15s ease;
+    }
+    .expression-card:hover,
+    .expression-card:focus-within {
+      z-index: 30;
+      background: rgba(48,53,60,.92);
+      box-shadow: 0 0 0 2px rgba(255,255,255,.035);
+    }
+    .expression-card.invalid { border-color: rgba(255,145,165,.64); }
+    .expression-card-head {
+      display: contents;
+    }
+    .expression-card-text {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip: rect(0 0 0 0);
+      clip-path: inset(50%);
+      white-space: nowrap;
+    }
+    .expression-remove {
+      width: 26px;
+      height: 26px;
+      flex: 0 0 auto;
+      border: 0;
+      border-radius: 50%;
+      background: transparent;
+      color: var(--faint);
+      font-size: 19px;
+      line-height: 1;
+      cursor: pointer;
+    }
+    .expression-remove:hover,
+    .expression-remove:focus-visible { background: rgba(255,255,255,.07); color: var(--text); outline: none; }
+    .expression-card-picker { position: relative; min-width: 0; }
+    .expression-card-button {
+      display: inline-flex;
+      max-width: 100%;
+      min-height: 28px;
+      align-items: center;
+      justify-content: center;
+      gap: 9px;
+      padding: 4px 7px 4px 10px;
+      border: 0;
+      border-radius: 999px;
+      outline: none;
+      background: transparent;
+      color: var(--text);
+      font-size: 13px;
+      font-weight: 600;
+      line-height: 1.35;
+      text-align: center;
+      cursor: pointer;
+      transition: border-color .15s ease, background .15s ease, box-shadow .15s ease;
+    }
+    .expression-card-button:hover,
+    .expression-card-button:focus-visible,
+    .expression-card-button[aria-expanded="true"] {
+      background: rgba(8,6,12,.38);
+      box-shadow: 0 0 0 2px rgba(255,255,255,.075);
+    }
+    .expression-card-button-label {
+      min-width: 0;
+      overflow: visible;
+      text-align: center;
+      white-space: nowrap;
+    }
+    .expression-card-chevron {
+      width: 7px;
+      height: 7px;
+      flex: 0 0 auto;
+      margin-top: -4px;
+      border-right: 1.5px solid var(--faint);
+      border-bottom: 1.5px solid var(--faint);
+      transform: rotate(45deg);
+      transition: transform .15s ease, margin-top .15s ease, border-color .15s ease;
+    }
+    .expression-card-button:hover .expression-card-chevron,
+    .expression-card-button:focus-visible .expression-card-chevron { border-color: var(--text); }
+    .expression-card-button[aria-expanded="true"] .expression-card-chevron {
+      margin-top: 4px;
+      transform: rotate(225deg);
+    }
+    .expression-card-menu {
+      position: absolute;
+      z-index: 1002;
+      top: calc(100% + 8px);
+      max-height: 258px;
+      overflow-y: auto;
+      padding: 6px;
+      border: 1px solid var(--line-strong);
+      border-radius: 10px;
+      background: rgba(20,14,27,.99);
+      box-shadow: 0 18px 42px rgba(0,0,0,.5);
+      backdrop-filter: blur(18px);
+      transform-origin: top center;
+      animation: menu-enter .16s cubic-bezier(.22,1,.36,1) both;
+    }
+    .expression-card-menu[hidden] { display: none; }
+    .expression-card-menu-option {
+      display: flex;
+      width: 100%;
+      min-height: 38px;
+      align-items: center;
+      gap: 10px;
+      padding: 0 10px;
+      border: 0;
+      border-radius: 7px;
+      outline: none;
+      background: transparent;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 600;
+      text-align: left;
+      cursor: pointer;
+    }
+    .expression-card-menu-option:hover,
+    .expression-card-menu-option:focus-visible { background: rgba(187,165,220,.1); color: var(--text); }
+    .expression-card-menu-option[aria-selected="true"] { background: rgba(141,49,85,.3); color: var(--ivory); }
+    .expression-card-menu-swatch {
+      width: 15px;
+      height: 2px;
+      flex: 0 0 auto;
+      border-radius: 1px;
+      background: var(--option-color);
+      box-shadow: 0 0 8px color-mix(in srgb,var(--option-color) 40%,transparent);
+    }
+    .expression-card-meta {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip: rect(0 0 0 0);
+      clip-path: inset(50%);
+      white-space: nowrap;
+    }
+    .lang-row {
+      position: relative;
+      display: flex;
+      width: 100%;
+      max-width: 100%;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+      margin: 14px 0;
+    }
+    .language-options {
+      display: inline-flex;
+      max-width: 100%;
+      flex-wrap: wrap;
+      gap: 3px;
+      padding: 3px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-sm);
+      background: rgba(10,8,14,.42);
+    }
+    .lang {
+      min-height: 34px;
+      padding: 0 12px;
+      border: 1px solid transparent;
+      border-radius: 6px;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      outline: none;
+      transition: border-color .15s, color .15s, background .15s;
+    }
+    .lang:hover, .lang:focus-visible { background: rgba(48,34,59,.58); color: var(--text); }
+    .lang.active {
+      border-color: rgba(237,201,142,.5);
+      background: rgba(141,49,85,.78);
+      color: #fff7f8;
+      box-shadow: 0 1px 3px rgba(0,0,0,.2);
+      font-weight: 650;
+      animation: selection-settle .18s ease both;
+    }
+    .download-audio {
+      display: inline-flex;
+      min-height: 34px;
+      flex: 0 0 auto;
+      align-items: center;
+      justify-content: center;
+      gap: 7px;
+      margin-left: auto;
+      padding: 0 11px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: rgba(48,34,59,.38);
+      color: var(--muted);
+      cursor: pointer;
+      outline: none;
+      font-size: 12px;
+      font-weight: 650;
+      transition: border-color .15s, color .15s, background .15s, transform .15s;
+    }
+    .download-audio:hover:not(:disabled),
+    .download-audio:focus-visible {
+      border-color: rgba(237,201,142,.5);
+      background: rgba(141,49,85,.24);
+      color: var(--ivory);
+    }
+    .download-audio:active:not(:disabled),
+    .lang:active,
+    .locale-button:active,
+    .model-button:active,
+    .stop:active:not(:disabled) { transform: translateY(1px) scale(.99); }
+    .download-icon {
+      display: block;
+      width: 15px;
+      height: 15px;
+      overflow: visible;
+      fill: none;
+      stroke: currentColor;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      stroke-width: 1.7;
+      transform-origin: center;
+    }
+    .download-audio.is-downloading {
+      border-color: rgba(237,201,142,.5);
+      background: rgba(141,49,85,.32);
+      color: var(--ivory);
+    }
+    .download-audio.is-downloading .download-icon { animation: download-pulse .65s ease both; }
+    @keyframes download-pulse {
+      0% { opacity: 1; transform: translateY(0); }
+      38% { opacity: 0; transform: translateY(5px); }
+      39% { opacity: 0; transform: translateY(-4px); }
+      100% { opacity: 1; transform: translateY(0); }
+    }
+    .actions { position: relative; display: flex; align-items: stretch; gap: 10px; }
+    .primary, .stop { min-height: 46px; border-radius: var(--radius-sm); cursor: pointer; font-weight: 700; outline: none; transition: border-color .15s, background .15s, transform .15s, box-shadow .15s; }
+    .primary {
+      position: relative;
+      flex: 1;
+      border: 1px solid rgba(237,201,142,.36);
+      background: linear-gradient(115deg, #9b3e65, #815a9c 66%, #b78aaa);
+      color: #fff9fb;
+      box-shadow: 0 13px 28px rgba(82,31,60,.32), inset 0 1px rgba(255,255,255,.16);
+    }
+    .primary:hover:not(:disabled) { filter: brightness(1.06); transform: translateY(-1px); }
+    .primary:focus-visible, .stop:focus-visible { box-shadow: 0 0 0 3px rgba(237,201,142,.16); }
+    .stop { width: 48px; border: 1px solid var(--line); background: rgba(42,31,52,.56); color: var(--ivory); }
+    .stop:hover:not(:disabled) { border-color: var(--line-strong); background: rgba(48,34,59,.78); }
+    button:disabled, textarea:disabled { opacity: .42; cursor: not-allowed; transform: none; }
+    .status { min-height: 20px; margin-top: 12px; color: var(--muted); font-size: 11px; line-height: 1.55; }
+    .status.live { color: var(--rose); }
+    .status.error { color: var(--danger); }
+    .progress { height: 2px; margin-top: 7px; overflow: hidden; border-radius: 2px; background: rgba(236,214,232,.07); }
+    .progress > div { width: 0; height: 100%; border-radius: inherit; background: var(--rose); }
+    .progress.active > div { width: 48%; animation: drift 1.35s ease-in-out infinite; }
+    @keyframes drift { from { transform: translateX(-110%); } to { transform: translateX(315%); } }
+    .side-panel { overflow: hidden; border-radius: var(--radius-lg); animation: surface-enter .38s .08s cubic-bezier(.22,1,.36,1) both; }
+    .side-title {
+      display: flex;
+      align-items: center;
+      min-height: 50px;
+      gap: 9px;
+      padding: 0 17px;
+      border-bottom: 1px solid var(--line);
+      color: var(--ivory);
+      font-family: Georgia, "Times New Roman", "Noto Serif TC", serif;
+      font-size: 14px;
+      font-weight: 600;
+    }
+    .side-title::before {
+      width: 2px;
+      height: 16px;
+      border-radius: 1px;
+      background: var(--candle);
+      content: "";
+    }
+    .metrics { display: grid; grid-template-columns: 1fr 1fr; }
+    .metric {
+      min-height: 92px;
+      padding: 14px 15px;
+      border-bottom: 1px solid var(--line);
+      background: transparent;
+    }
+    .metric:nth-child(odd) { border-right: 1px solid var(--line); }
+    .metric:nth-last-child(-n + 2) { border-bottom: 0; }
+    .metric span { display: block; min-height: 28px; color: var(--faint); font-size: 10px; font-weight: 600; line-height: 1.35; letter-spacing: 0; }
+    .metric strong {
+      display: block;
+      margin-top: 7px;
+      color: var(--ivory);
+      font-family: "SFMono-Regular", Consolas, monospace;
+      font-size: 17px;
+      font-weight: 600;
+      font-variant-numeric: tabular-nums;
+      letter-spacing: 0;
+    }
+    .history { margin-top: 18px; animation: surface-enter .38s .12s cubic-bezier(.22,1,.36,1) both; }
+    .history-heading { display: flex; align-items: center; gap: 12px; margin: 0 0 10px; }
+    .history h2 { margin: 0; color: var(--ivory); font-size: 13px; font-weight: 650; letter-spacing: 0; }
+    .history-heading::after { height: 1px; flex: 1; background: var(--line); content: ""; }
+    .table-wrap { overflow-x: auto; border-radius: var(--radius-md); }
+    table { width: 100%; min-width: 790px; border-collapse: collapse; }
+    th, td { padding: 11px 14px; border-bottom: 1px solid var(--line); text-align: right; font-size: 11px; font-variant-numeric: tabular-nums; }
+    th { background: rgba(46,33,56,.34); color: var(--faint); font-weight: 650; letter-spacing: 0; }
+    td { color: #d9d0dd; }
+    th:first-child, td:first-child {
+      max-width: 350px;
+      overflow: hidden;
+      text-align: left;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    tbody tr:last-child td { border-bottom: 0; }
+    tbody tr:hover td { background: rgba(187,165,220,.045); }
+    @keyframes surface-enter {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    @keyframes menu-enter {
+      from { opacity: 0; transform: translateY(-5px) scale(.985); }
+      to { opacity: 1; transform: translateY(0) scale(1); }
+    }
+    @keyframes selection-settle {
+      0% { transform: scale(.97); }
+      100% { transform: scale(1); }
+    }
+    @media (max-width: 880px) {
+      header { flex-direction: column; gap: 16px; }
+      .header-tools { width: 100%; align-items: stretch; }
+      .locale-picker { align-self: flex-end; }
+      .badges { justify-content: flex-start; max-width: none; }
+      .workspace { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 560px) {
+      main { width: min(100% - 24px,1180px); padding-top: 12px; }
+      header { gap: 15px; padding: 16px; border-radius: var(--radius-lg); }
+      h1 { font-size: clamp(18px,5.8vw,31px); }
+      .brand { gap: 0; }
+      .brand-gif { height: clamp(44px,14vw,58px); margin: -6px 0 -6px -1px; }
+      .editor { padding: 16px; border-radius: var(--radius-lg); }
+      .voice-row { grid-template-columns: 1fr; gap: 7px; }
+      .expression-card-button { max-width: calc(100vw - 112px); }
+      .expression-menu { grid-template-columns: 1fr; }
+      .annotation-caption { max-width: 170px; }
+      .locale-picker, .locale-button, .locale-menu { width: 100%; }
+      .badge { max-width: 100%; }
+      .lang-row { display: flex; }
+      .language-options { display: flex; width: 100%; }
+      .lang { min-height: 44px; flex: 1 1 calc(33.333% - 3px); padding-inline: 8px; }
+      .download-audio { width: 100%; min-height: 46px; margin-left: 0; }
+      .model-button, .locale-button, .model-option, .locale-option { min-height: 44px; }
+      .primary, .stop { min-height: 48px; }
+      .metrics { grid-template-columns: 1fr; }
+      .metric { min-height: 78px; border-right: 0 !important; }
+      .metric:nth-last-child(2) { border-bottom: 1px solid var(--line); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        scroll-behavior: auto !important;
+        animation-duration: .001ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: .001ms !important;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div class="brand">
+        <div class="title">
+          <h1>AnifLive-TTS WebUI</h1>
+          <div class="title-rule" aria-hidden="true"></div>
+        </div>
+        <img class="brand-gif" src="/assets/everynight_dance.gif" alt="" aria-hidden="true">
+      </div>
+      <div class="header-tools">
+        <div class="locale-picker" id="localePicker">
+          <button class="locale-button" id="localeButton" type="button"
+            aria-haspopup="listbox" aria-expanded="false" aria-controls="localeMenu"
+            data-i18n-aria-label="localeButtonAria">
+            <span class="locale-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" focusable="false">
+                <circle cx="12" cy="12" r="9"></circle>
+                <path d="M3 12h18M12 3c2.4 2.5 3.7 5.5 3.7 9S14.4 18.5 12 21M12 3c-2.4 2.5-3.7 5.5-3.7 9s1.3 6.5 3.7 9"></path>
+              </svg>
+            </span>
+            <span id="localeCurrent">繁體中文</span>
+            <span class="chevron" aria-hidden="true"></span>
+          </button>
+          <div class="locale-menu" id="localeMenu" role="listbox"
+            data-i18n-aria-label="localeMenuAria" hidden>
+            <button class="locale-option" type="button" role="option" data-locale="en"
+              aria-selected="false" tabindex="-1">English</button>
+            <button class="locale-option" type="button" role="option" data-locale="zh-Hant"
+              aria-selected="true" tabindex="-1">繁體中文</button>
+            <button class="locale-option" type="button" role="option" data-locale="zh-Hans"
+              aria-selected="false" tabindex="-1">简体中文</button>
+          </div>
+        </div>
+        <div class="badges">
+          <span class="badge" id="readyBadge" data-i18n="checkingService">檢查服務</span>
+          <span class="badge" id="versionBadge">API v1</span>
+          <span class="badge" id="backendBadge">TensorRT 11</span>
+          <span class="badge" id="gpuBadge">GPU</span>
+        </div>
+      </div>
+    </header>
+
+    <section class="workspace">
+      <div class="editor">
+        <div class="voice-row">
+          <label class="field-label" for="modelButton" data-i18n="voice">音色</label>
+          <div class="model-picker" id="modelPicker">
+            <button class="model-button" id="modelButton" type="button" disabled
+              aria-haspopup="listbox" aria-expanded="false" aria-controls="modelMenu"
+              data-i18n-aria-label="modelAria">
+              <span id="modelCurrent">--</span>
+              <span class="chevron" aria-hidden="true"></span>
+            </button>
+            <div class="model-menu" id="modelMenu" role="listbox"
+              data-i18n-aria-label="modelAria" hidden></div>
+          </div>
+        </div>
+        <div class="annotation-editor" id="annotationEditor">
+          <div class="annotation-mirror" id="annotationMirror" aria-hidden="true">
+            <div class="annotation-mirror-content" id="annotationMirrorContent"></div>
+          </div>
+          <textarea id="text" maxlength="1000" disabled
+            data-i18n-placeholder="textPlaceholder"
+            data-i18n-aria-label="textAria">今日はいい天気ですね。</textarea>
+          <div class="annotation-captions" id="annotationCaptions"></div>
+          <div class="expression-menu" id="expressionMenu" role="listbox"
+            data-i18n-aria-label="expressionMenuAria" hidden></div>
+        </div>
+        <div class="expression-field">
+          <span class="expression-label" data-i18n="expressionLabel">情感要求</span>
+          <div class="expression-cards" id="expressionCards"></div>
+        </div>
+        <div class="lang-row" id="languages" role="group"
+          data-i18n-aria-label="ttsLanguageAria">
+          <div class="language-options">
+            <button class="lang active" type="button" data-language="ja" data-i18n="ttsLanguageJa">日語</button>
+            <button class="lang" type="button" data-language="zh" data-i18n="ttsLanguageZh">普通話</button>
+            <button class="lang" type="button" data-language="yue" data-i18n="ttsLanguageYue">廣東話</button>
+            <button class="lang" type="button" data-language="en" data-i18n="ttsLanguageEn">英語</button>
+            <button class="lang" type="button" data-language="ko" data-i18n="ttsLanguageKo">韓語</button>
+          </div>
+          <button class="download-audio" id="downloadAudio" type="button" disabled
+            data-i18n-aria-label="downloadAudioAria">
+            <svg class="download-icon" viewBox="0 0 18 18" aria-hidden="true" focusable="false">
+              <path d="M9 2.5v8.2m-3-3 3 3 3-3M3.5 14.5h11"></path>
+            </svg>
+            <span id="downloadAudioLabel" data-i18n="downloadAudio">下載音訊</span>
+          </button>
+        </div>
+        <div class="actions">
+          <button class="primary" id="play" type="button" disabled><span data-i18n="play">立即播放</span></button>
+          <button class="stop" id="stop" type="button" disabled
+            data-i18n-title="stop" data-i18n-aria-label="stop">■</button>
+        </div>
+        <div class="status" id="status" aria-live="polite"></div>
+        <div class="progress" id="progress" aria-hidden="true"><div></div></div>
+      </div>
+
+      <aside class="side-panel">
+        <div class="side-title" data-i18n="currentRequest">目前請求</div>
+        <div class="metrics">
+          <div class="metric"><span data-i18n="metricTtfa">有效音訊 TTFA</span><strong id="ttfa">--</strong></div>
+          <div class="metric"><span data-i18n="metricUpstream">上游首包延遲</span><strong id="upstream">--</strong></div>
+          <div class="metric"><span data-i18n="metricArrival">估算可聽延遲</span><strong id="audible">--</strong></div>
+          <div class="metric"><span data-i18n="metricComplete">完整音訊接收</span><strong id="complete">--</strong></div>
+          <div class="metric"><span data-i18n="metricDuration">合成音訊時長</span><strong id="duration">--</strong></div>
+          <div class="metric"><span data-i18n="metricRtf">端到端 RTF</span><strong id="rtf">--</strong></div>
+          <div class="metric"><span data-i18n="metricProxy">首包傳輸開銷</span><strong id="proxy">--</strong></div>
+          <div class="metric"><span data-i18n="metricUnderruns">播放緩衝欠載</span><strong id="underruns">0</strong></div>
+        </div>
+      </aside>
+    </section>
+
+    <section class="history">
+      <div class="history-heading"><h2 data-i18n="recentFive">最近五次</h2></div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th data-i18n="historyContent">內容</th>
+              <th data-i18n="historyVoice">音色</th>
+              <th data-i18n="historyLanguage">語言</th>
+              <th data-i18n="historyTtfa">可聽 TTFA</th>
+              <th data-i18n="historyArrival">資料抵達</th>
+              <th data-i18n="historyComplete">完整回應</th>
+              <th>RTF</th>
+            </tr>
+          </thead>
+          <tbody id="history"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <script src="/assets/playback_model.js?v=1.3.0-expression-2"></script>
+  <script src="/assets/annotation_editor.js?v=1.3.0-expression-2"></script>
+  <script>
+    const SAMPLE_RATE = 32000;
+    const LOCALE_KEY = "aniflive.uiLocale";
+    const SUPPORTED_LOCALES = ["en", "zh-Hant", "zh-Hans"];
+    const MAX_ANNOTATIONS = 31;
+    const ANNOTATION_COLORS = [
+      "#41d6c3", "#57b8ff", "#4f86ff", "#7bd88f", "#b6d957", "#f2cf63",
+      "#ff9f5c", "#ff7c7c", "#c58cff", "#56d1ff", "#70dfad", "#f49ad4"
+    ];
+    const PROFILE_LABELS = {
+      affectionate: { en: "Affectionate", ja: "愛情を込めて", ko: "다정하게", yue: "溫柔", "zh-Hant": "溫柔", "zh-Hans": "温柔" },
+      aggrieved: { en: "Aggrieved", ja: "悔しげ", ko: "억울하게", yue: "委屈", "zh-Hant": "委屈", "zh-Hans": "委屈" },
+      battle: { en: "Battle-ready", ja: "激しく", ko: "격앙되게", yue: "激昂", "zh-Hant": "激昂", "zh-Hans": "激昂" },
+      languid: { en: "Languid", ja: "気だるく", ko: "나른하게", yue: "慵懶", "zh-Hant": "慵懶", "zh-Hans": "慵懒" },
+      neutral: { en: "Calm", ja: "穏やか", ko: "차분하게", yue: "平靜", "zh-Hant": "平靜", "zh-Hans": "平静" },
+      relieved: { en: "Relieved", ja: "安堵して", ko: "안도하며", yue: "欣慰", "zh-Hant": "欣慰", "zh-Hans": "欣慰" },
+      reproachful: { en: "Reproachful", ja: "責めるように", ko: "책망하듯", yue: "責備", "zh-Hant": "責備", "zh-Hans": "责备" },
+      "self-deprecating": { en: "Self-deprecating", ja: "自嘲気味に", ko: "자조적으로", yue: "自嘲", "zh-Hant": "自嘲", "zh-Hans": "自嘲" },
+      shy: { en: "Shy", ja: "恥ずかしそうに", ko: "수줍게", yue: "害羞", "zh-Hant": "害羞", "zh-Hans": "害羞" }
+    };
+    const messages = {
+      en: {
+        documentTitle: "AnifLive-TTS WebUI",
+        localeButtonAria: "Change interface language",
+        localeMenuAria: "Interface language",
+        localeName: "English",
+        checkingService: "Checking service",
+        ready: "Ready",
+        voice: "Voice",
+        modelAria: "Select voice",
+        textAria: "Text to synthesize",
+        textPlaceholder: "Enter the text you want to synthesize",
+        expressionLabel: "Expression",
+        expressionAria: "Natural-language expression request",
+        expressionPlaceholder: "For example: gently shy, strongly relieved, or neutral",
+        expressionUnavailable: "This voice has no controlled expression profiles",
+        expressionMenuAria: "Expression for selected text",
+        expressionNeutral: "Calm · remove marking",
+        expressionEmpty: "Calm",
+        expressionRemove: "Remove expression from selected text",
+        expressionResolving: "Resolving expression...",
+        expressionResolved: "{profile} · intensity {intensity}",
+        expressionUnsupportedLanguage: "This expression is unavailable for {language}",
+        expressionInvalid: "Expression needs correction",
+        expressionLimit: "A maximum of 31 expression ranges is supported",
+        expressionUnsafeBoundary: "Select complete clauses and place expression changes after punctuation",
+        ttsLanguageAria: "Speech language",
+        ttsLanguageJa: "Japanese",
+        ttsLanguageZh: "Mandarin",
+        ttsLanguageYue: "Cantonese",
+        ttsLanguageEn: "English",
+        ttsLanguageKo: "Korean",
+        downloadAudio: "Download audio",
+        downloadingAudio: "Downloading...",
+        downloadAudioAria: "Download the completed audio",
+        play: "Play now",
+        stop: "Stop playback",
+        currentRequest: "Current request",
+        metricTtfa: "TTFA (first effective audio)",
+        metricUpstream: "Upstream first-packet latency",
+        metricArrival: "Estimated audible latency",
+        metricComplete: "Full audio received",
+        metricDuration: "Synthesized audio duration",
+        metricRtf: "End-to-end RTF",
+        metricProxy: "First-packet transport overhead",
+        metricUnderruns: "Playback buffer underruns",
+        recentFive: "Recent five",
+        historyContent: "Content",
+        historyVoice: "Voice",
+        historyLanguage: "Language",
+        historyTtfa: "Effective-audio TTFA",
+        historyArrival: "Estimated audible latency",
+        historyComplete: "Full audio received",
+        noTests: "No tests yet",
+        activeModel: "active",
+        statusChecking: "Verifying the AnifLive-TTS API...",
+        statusStopped: "Stopped",
+        statusEnterText: "Enter text to synthesize",
+        statusGenerating: "AnifLive-TTS is generating the first audio segment...",
+        statusStreaming: "Streaming {model}",
+        statusStoppedReady: "Playback stopped. The service is ready for the next request.",
+        statusReceived: "Received {duration} seconds of audio. Queued playback will continue.",
+        statusCancelled: "Playback and inference cancelled",
+        statusSwitching: "Unloading {current} and loading {target}. Only one voice remains loaded at a time...",
+        statusActivated: "{model} is loaded exclusively and ready to play",
+        statusApiReady: "AnifLive-TTS v{version} is ready · Current voice: {model}",
+        errorTensorRt: "The response did not use the required TensorRT 11 execution path",
+        errorIncompletePcm: "The PCM stream ended with an incomplete sample",
+        errorNoAudibleAudio: "The stream contained no audible audio",
+        errorServiceNotReady: "The service is not ready yet",
+        errorInvalidRequest: "The speech request is invalid",
+        errorInvalidResponse: "AnifLive-TTS returned an invalid audio response",
+        errorBusy: "The previous request is still being cancelled. Please retry shortly.",
+        errorModelUnavailable: "The selected voice is not available locally",
+        errorExpression: "The expression request could not be resolved: {detail}",
+        errorConnection: "Unable to connect to AnifLive-TTS",
+        errorUnknown: "Request failed: {detail}"
+      },
+      "zh-Hant": {
+        documentTitle: "AnifLive-TTS WebUI",
+        localeButtonAria: "切換介面語言",
+        localeMenuAria: "介面語言",
+        localeName: "繁體中文",
+        checkingService: "檢查服務",
+        ready: "已就緒",
+        voice: "音色",
+        modelAria: "選擇音色",
+        textAria: "要合成的文字",
+        textPlaceholder: "輸入要合成的文字",
+        expressionLabel: "情感要求",
+        expressionAria: "以自然語言描述情感要求",
+        expressionPlaceholder: "例如：輕微害羞、非常欣慰，或保持自然",
+        expressionUnavailable: "此音色沒有可用的情感控制設定",
+        expressionMenuAria: "為選取文字設定情感",
+        expressionNeutral: "平靜 · 移除標記",
+        expressionEmpty: "平靜",
+        expressionRemove: "移除這段文字的情感",
+        expressionResolving: "正在識別情感...",
+        expressionResolved: "{profile} · 強度 {intensity}",
+        expressionUnsupportedLanguage: "此情感不支援{language}",
+        expressionInvalid: "請修正情感描述",
+        expressionLimit: "最多可設定 31 段情感",
+        expressionUnsafeBoundary: "請選取完整子句，情感切換必須位於標點符號之後",
+        ttsLanguageAria: "語音語言",
+        ttsLanguageJa: "日語",
+        ttsLanguageZh: "普通話",
+        ttsLanguageYue: "廣東話",
+        ttsLanguageEn: "英語",
+        ttsLanguageKo: "韓語",
+        downloadAudio: "下載音訊",
+        downloadingAudio: "正在下載...",
+        downloadAudioAria: "下載已完成的音訊",
+        play: "立即播放",
+        stop: "停止播放",
+        currentRequest: "目前請求",
+        metricTtfa: "有效音訊 TTFA",
+        metricUpstream: "上游首包延遲",
+        metricArrival: "估算可聽延遲",
+        metricComplete: "完整音訊接收",
+        metricDuration: "合成音訊時長",
+        metricRtf: "端到端 RTF",
+        metricProxy: "首包傳輸開銷",
+        metricUnderruns: "播放緩衝欠載",
+        recentFive: "最近五次",
+        historyContent: "內容",
+        historyVoice: "音色",
+        historyLanguage: "語言",
+        historyTtfa: "有效音訊 TTFA",
+        historyArrival: "估算可聽延遲",
+        historyComplete: "完整音訊接收",
+        noTests: "尚未測試",
+        activeModel: "使用中",
+        statusChecking: "正在確認 AnifLive-TTS API...",
+        statusStopped: "已停止",
+        statusEnterText: "請輸入要合成的文字",
+        statusGenerating: "AnifLive-TTS 正在產生首段音訊...",
+        statusStreaming: "正在串流播放 {model}",
+        statusStoppedReady: "已停止播放，服務已可接受下一個請求",
+        statusReceived: "已接收 {duration} 秒音訊，播放佇列仍會繼續至結束",
+        statusCancelled: "已停止播放，推理亦已取消",
+        statusSwitching: "正在徹底卸載 {current} 並載入 {target}，期間不會同時載入兩套音色...",
+        statusActivated: "{model} 已完成獨佔載入，可以立即播放",
+        statusApiReady: "AnifLive-TTS v{version} 已就緒 · 目前音色：{model}",
+        errorTensorRt: "回應不是指定的 TensorRT 11 執行路徑",
+        errorIncompletePcm: "PCM 串流以不完整取樣結束",
+        errorNoAudibleAudio: "串流未包含可聽音訊",
+        errorServiceNotReady: "服務尚未準備完成",
+        errorInvalidRequest: "語音請求內容無效",
+        errorInvalidResponse: "AnifLive-TTS 回傳了無效的音訊回應",
+        errorBusy: "上一個請求仍在取消中，請稍後重試",
+        errorModelUnavailable: "所選音色未安裝於本機",
+        errorExpression: "無法識別情感要求：{detail}",
+        errorConnection: "無法連線至 AnifLive-TTS",
+        errorUnknown: "請求失敗：{detail}"
+      },
+      "zh-Hans": {
+        documentTitle: "AnifLive-TTS WebUI",
+        localeButtonAria: "切换界面语言",
+        localeMenuAria: "界面语言",
+        localeName: "简体中文",
+        checkingService: "检查服务",
+        ready: "已就绪",
+        voice: "音色",
+        modelAria: "选择音色",
+        textAria: "要合成的文字",
+        textPlaceholder: "输入要合成的文字",
+        expressionLabel: "情感要求",
+        expressionAria: "用自然语言描述情感要求",
+        expressionPlaceholder: "例如：轻微害羞、非常欣慰，或保持自然",
+        expressionUnavailable: "此音色没有可用的情感控制设置",
+        expressionMenuAria: "为选中文字设置情感",
+        expressionNeutral: "平静 · 移除标记",
+        expressionEmpty: "平静",
+        expressionRemove: "移除这段文字的情感",
+        expressionResolving: "正在识别情感...",
+        expressionResolved: "{profile} · 强度 {intensity}",
+        expressionUnsupportedLanguage: "此情感不支持{language}",
+        expressionInvalid: "请修正情感描述",
+        expressionLimit: "最多可设置 31 段情感",
+        expressionUnsafeBoundary: "请选择完整子句，情感切换必须位于标点符号之后",
+        ttsLanguageAria: "语音语言",
+        ttsLanguageJa: "日语",
+        ttsLanguageZh: "普通话",
+        ttsLanguageYue: "粤语",
+        ttsLanguageEn: "英语",
+        ttsLanguageKo: "韩语",
+        downloadAudio: "下载音频",
+        downloadingAudio: "正在下载...",
+        downloadAudioAria: "下载已完成的音频",
+        play: "立即播放",
+        stop: "停止播放",
+        currentRequest: "当前请求",
+        metricTtfa: "有效音频 TTFA",
+        metricUpstream: "上游首包延迟",
+        metricArrival: "估算可听延迟",
+        metricComplete: "完整音频接收",
+        metricDuration: "合成音频时长",
+        metricRtf: "端到端 RTF",
+        metricProxy: "首包传输开销",
+        metricUnderruns: "播放缓冲欠载",
+        recentFive: "最近五次",
+        historyContent: "内容",
+        historyVoice: "音色",
+        historyLanguage: "语言",
+        historyTtfa: "有效音频 TTFA",
+        historyArrival: "估算可听延迟",
+        historyComplete: "完整音频接收",
+        noTests: "尚未测试",
+        activeModel: "使用中",
+        statusChecking: "正在确认 AnifLive-TTS API...",
+        statusStopped: "已停止",
+        statusEnterText: "请输入要合成的文字",
+        statusGenerating: "AnifLive-TTS 正在生成首段音频...",
+        statusStreaming: "正在流式播放 {model}",
+        statusStoppedReady: "已停止播放，服务已可接受下一个请求",
+        statusReceived: "已接收 {duration} 秒音频，播放队列仍会继续至结束",
+        statusCancelled: "已停止播放，推理也已取消",
+        statusSwitching: "正在彻底卸载 {current} 并载入 {target}，期间不会同时载入两套音色...",
+        statusActivated: "{model} 已完成独占载入，可以立即播放",
+        statusApiReady: "AnifLive-TTS v{version} 已就绪 · 当前音色：{model}",
+        errorTensorRt: "响应没有使用指定的 TensorRT 11 执行路径",
+        errorIncompletePcm: "PCM 数据流以不完整采样结束",
+        errorNoAudibleAudio: "数据流中没有可听音频",
+        errorServiceNotReady: "服务尚未准备完成",
+        errorInvalidRequest: "语音请求内容无效",
+        errorInvalidResponse: "AnifLive-TTS 返回了无效的音频响应",
+        errorBusy: "上一个请求仍在取消中，请稍后重试",
+        errorModelUnavailable: "所选音色未安装在本机",
+        errorExpression: "无法识别情感要求：{detail}",
+        errorConnection: "无法连接到 AnifLive-TTS",
+        errorUnknown: "请求失败：{detail}"
+      }
+    };
+
+    const el = id => document.getElementById(id);
+    const escapeHtml = value => String(value).replace(/[&<>"]/g, char =>
+      ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"})[char]);
+
+    function detectLocale() {
+      let saved = "";
+      try { saved = localStorage.getItem(LOCALE_KEY) || ""; } catch (_) {}
+      if (SUPPORTED_LOCALES.includes(saved)) return saved;
+      const locale = (navigator.languages?.[0] || navigator.language || "").toLowerCase();
+      if (locale.startsWith("en")) return "en";
+      if (locale.includes("hans") || locale.startsWith("zh-cn") || locale.startsWith("zh-sg")) return "zh-Hans";
+      if (
+        locale.includes("hant") ||
+        locale.startsWith("zh-tw") ||
+        locale.startsWith("zh-hk") ||
+        locale.startsWith("zh-mo")
+      ) return "zh-Hant";
+      return "zh-Hant";
+    }
+
+    const state = {
+      locale: detectLocale(),
+      language: "ja",
+      model: "",
+      models: [],
+      expressions: { enabled: false, profiles: [], policies: [] },
+      annotationsValid: true,
+      apiVersion: "",
+      switching: false,
+      controller: null,
+      audio: null,
+      sources: [],
+      nextStart: 0,
+      runId: 0,
+      history: [],
+      muted: false,
+      download: null,
+      playback: null,
+      status: { key: "statusChecking", kind: "", vars: {} }
+    };
+
+    const t = (key, vars = {}) => {
+      const template = messages[state.locale]?.[key] ?? messages["zh-Hant"][key] ?? key;
+      return Object.entries(vars).reduce(
+        (result, [name, value]) => result.replaceAll(`{${name}}`, String(value)),
+        template
+      );
+    };
+    const fmtMs = value => Number.isFinite(value) ? `${value.toFixed(1)} ms` : "--";
+
+    function renderStatus() {
+      el("status").textContent = t(state.status.key, state.status.vars);
+      el("status").className = `status ${state.status.kind}`;
+    }
+    function setStatus(key, kind = "", vars = {}) {
+      state.status = { key, kind, vars };
+      renderStatus();
+    }
+    function profileLabel(profile) {
+      return PROFILE_LABELS[profile]?.[state.locale]
+        || String(profile || "").replaceAll("-", " ").replace(/\b\w/g, value => value.toUpperCase());
+    }
+    function profileColor(profile) {
+      const knownProfiles = Object.keys(PROFILE_LABELS);
+      const known = knownProfiles.indexOf(profile);
+      if (known >= 0) return ANNOTATION_COLORS[known % ANNOTATION_COLORS.length];
+      const unknownProfiles = (Array.isArray(state.expressions.profiles) ? state.expressions.profiles : [])
+        .map(record => record?.id)
+        .filter(id => typeof id === "string" && !knownProfiles.includes(id))
+        .sort();
+      const slot = knownProfiles.length + Math.max(0, unknownProfiles.indexOf(profile));
+      if (slot < ANNOTATION_COLORS.length) return ANNOTATION_COLORS[slot];
+      let hue = (slot * 137.508 + 11) % 360;
+      if ((hue >= 280 && hue <= 360) || (hue >= 34 && hue <= 58)) hue = (hue + 92) % 270;
+      return `hsl(${hue.toFixed(1)} 74% 68%)`;
+    }
+    async function resolveExpressionPrompt(prompt) {
+      const response = await fetch("/api/resolve-expression", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt }),
+        cache: "no-store"
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+      return data;
+    }
+    function updatePlayAvailability() {
+      el("play").disabled = Boolean(
+        state.switching || !state.model || state.controller || !state.annotationsValid
+      );
+    }
+    const annotationEditor = new globalThis.AnifLiveTTSAnnotationEditor({
+      editor: el("annotationEditor"),
+      textarea: el("text"),
+      mirror: el("annotationMirror"),
+      mirrorContent: el("annotationMirrorContent"),
+      captions: el("annotationCaptions"),
+      menu: el("expressionMenu"),
+      cards: el("expressionCards"),
+      translate: t,
+      profileLabel,
+      profileColor,
+      resolvePrompt: resolveExpressionPrompt,
+      languageName: ttsLanguageName,
+      maxAnnotations: MAX_ANNOTATIONS,
+      onValidityChange: valid => {
+        state.annotationsValid = valid;
+        updatePlayAvailability();
+      },
+      onStatus: (key, kind) => setStatus(key, kind)
+    });
+    function renderModels() {
+      el("modelCurrent").textContent = state.model || "--";
+      const menu = el("modelMenu");
+      menu.replaceChildren();
+      state.models.forEach(model => {
+        const option = document.createElement("button");
+        option.className = "model-option";
+        option.type = "button";
+        option.role = "option";
+        option.tabIndex = -1;
+        option.dataset.model = model.id;
+        option.setAttribute("aria-selected", String(model.id === state.model));
+        option.textContent = `${model.id}${model.id === state.model ? ` · ${t("activeModel")}` : ""}`;
+        option.addEventListener("click", () => chooseModel(model.id));
+        option.addEventListener("keydown", handleModelOptionKeydown);
+        menu.append(option);
+      });
+      el("modelButton").disabled = state.switching || state.models.length < 2;
+    }
+    function ttsLanguageName(code) {
+      return t({ ja: "ttsLanguageJa", zh: "ttsLanguageZh", yue: "ttsLanguageYue",
+        en: "ttsLanguageEn", ko: "ttsLanguageKo" }[code] || "ttsLanguageEn");
+    }
+    function renderHistory() {
+      const body = el("history");
+      if (!state.history.length) {
+        body.innerHTML = `<tr><td colspan="7">${t("noTests")}</td></tr>`;
+        return;
+      }
+      body.innerHTML = state.history.map(row =>
+        `<tr><td title="${escapeHtml(row.text)}">${escapeHtml(row.text)}</td><td>${escapeHtml(row.model)}</td><td>${ttsLanguageName(row.language)}</td><td>${fmtMs(row.activeChunkArrival)}</td><td>${fmtMs(row.audible)}</td><td>${fmtMs(row.complete)}</td><td>${row.rtf.toFixed(4)}</td></tr>`
+      ).join("");
+    }
+    function applyTranslations() {
+      document.documentElement.lang = state.locale;
+      document.title = t("documentTitle");
+      document.querySelectorAll("[data-i18n]").forEach(node => { node.textContent = t(node.dataset.i18n); });
+      document.querySelectorAll("[data-i18n-aria-label]").forEach(node => {
+        node.setAttribute("aria-label", t(node.dataset.i18nAriaLabel));
+      });
+      document.querySelectorAll("[data-i18n-title]").forEach(node => {
+        node.setAttribute("title", t(node.dataset.i18nTitle));
+      });
+      document.querySelectorAll("[data-i18n-placeholder]").forEach(node => {
+        node.setAttribute("placeholder", t(node.dataset.i18nPlaceholder));
+      });
+      el("localeCurrent").textContent = t("localeName");
+      document.querySelectorAll(".locale-option").forEach(option => {
+        option.setAttribute("aria-selected", String(option.dataset.locale === state.locale));
+      });
+      annotationEditor.setLocale();
+      if (state.models.length) renderModels();
+      if (el("readyBadge").classList.contains("ready")) el("readyBadge").textContent = t("ready");
+      renderHistory();
+      renderStatus();
+    }
+    function setLocale(locale) {
+      if (!SUPPORTED_LOCALES.includes(locale)) return;
+      state.locale = locale;
+      try { localStorage.setItem(LOCALE_KEY, locale); } catch (_) {}
+      applyTranslations();
+      closeLocaleMenu();
+      el("localeButton").focus();
+    }
+
+    const localeOptions = Array.from(document.querySelectorAll(".locale-option"));
+    function openLocaleMenu(focusTarget = "selected") {
+      el("localeMenu").hidden = false;
+      el("localeButton").setAttribute("aria-expanded", "true");
+      const selected = Math.max(0, localeOptions.findIndex(option => option.dataset.locale === state.locale));
+      localeOptions[focusTarget === "last" ? localeOptions.length - 1 : selected].focus();
+    }
+    function closeLocaleMenu() {
+      el("localeMenu").hidden = true;
+      el("localeButton").setAttribute("aria-expanded", "false");
+    }
+    el("localeButton").addEventListener("click", () => {
+      if (el("localeMenu").hidden) {
+        closeModelMenu();
+        openLocaleMenu();
+      }
+      else closeLocaleMenu();
+    });
+    el("localeButton").addEventListener("keydown", event => {
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+        openLocaleMenu(event.key === "ArrowUp" ? "last" : "selected");
+      }
+    });
+    localeOptions.forEach((option, index) => {
+      option.addEventListener("click", () => setLocale(option.dataset.locale));
+      option.addEventListener("keydown", event => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          setLocale(option.dataset.locale);
+          return;
+        }
+        let target = -1;
+        if (event.key === "ArrowDown") target = (index + 1) % localeOptions.length;
+        if (event.key === "ArrowUp") target = (index - 1 + localeOptions.length) % localeOptions.length;
+        if (event.key === "Home") target = 0;
+        if (event.key === "End") target = localeOptions.length - 1;
+        if (target >= 0) {
+          event.preventDefault();
+          localeOptions[target].focus();
+        } else if (event.key === "Escape") {
+          event.preventDefault();
+          closeLocaleMenu();
+          el("localeButton").focus();
+        }
+      });
+    });
+
+    function modelOptions() {
+      return Array.from(document.querySelectorAll(".model-option"));
+    }
+    function openModelMenu(focusTarget = "selected") {
+      if (el("modelButton").disabled) return;
+      closeLocaleMenu();
+      el("modelMenu").hidden = false;
+      el("modelButton").setAttribute("aria-expanded", "true");
+      const options = modelOptions();
+      const selected = Math.max(0, options.findIndex(option => option.dataset.model === state.model));
+      options[focusTarget === "last" ? options.length - 1 : selected]?.focus();
+    }
+    function closeModelMenu() {
+      el("modelMenu").hidden = true;
+      el("modelButton").setAttribute("aria-expanded", "false");
+    }
+    function chooseModel(target) {
+      closeModelMenu();
+      el("modelButton").focus();
+      if (!target || target === state.model || state.switching) return;
+      switchModel(target);
+    }
+    function handleModelOptionKeydown(event) {
+      const options = modelOptions();
+      const index = options.indexOf(event.currentTarget);
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        chooseModel(event.currentTarget.dataset.model);
+        return;
+      }
+      let target = -1;
+      if (event.key === "ArrowDown") target = (index + 1) % options.length;
+      if (event.key === "ArrowUp") target = (index - 1 + options.length) % options.length;
+      if (event.key === "Home") target = 0;
+      if (event.key === "End") target = options.length - 1;
+      if (target >= 0) {
+        event.preventDefault();
+        options[target].focus();
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        closeModelMenu();
+        el("modelButton").focus();
+      }
+    }
+    el("modelButton").addEventListener("click", () => {
+      if (el("modelMenu").hidden) openModelMenu();
+      else closeModelMenu();
+    });
+    el("modelButton").addEventListener("keydown", event => {
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+        openModelMenu(event.key === "ArrowUp" ? "last" : "selected");
+      }
+    });
+    document.addEventListener("click", event => {
+      if (!el("localePicker").contains(event.target)) closeLocaleMenu();
+      if (!el("modelPicker").contains(event.target)) closeModelMenu();
+    });
+
+    function clearSources() {
+      for (const source of state.sources) {
+        try { source.stop(); } catch (_) {}
+        source.disconnect();
+      }
+      state.sources = [];
+      state.nextStart = 0;
+    }
+    function clearPlaybackIndicator() {
+      if (state.playback?.animationFrame) {
+        cancelAnimationFrame(state.playback.animationFrame);
+      }
+      state.playback = null;
+      annotationEditor.clearPlaybackRange();
+    }
+    function renderPlaybackIndicator() {
+      const playback = state.playback;
+      if (!playback || playback.runId !== state.runId || state.muted) {
+        annotationEditor.clearPlaybackRange();
+        return;
+      }
+      if (!Number.isFinite(playback.firstAudibleContextTime)) {
+        annotationEditor.clearPlaybackRange();
+      } else {
+        const outputLatency = playback.context.outputLatency
+          || playback.context.baseLatency
+          || 0;
+        const audibleNow = playback.context.currentTime - outputLatency;
+        const elapsed = audibleNow - playback.firstAudibleContextTime;
+        const range = playback.acousticTimeline
+          ? globalThis.AnifLiveTTSPlaybackModel.activeTextRangeAtAudioTime(
+            playback.timeline,
+            playback.acousticTimeline,
+            elapsed
+          )
+          : (
+            elapsed >= 0
+              ? globalThis.AnifLiveTTSPlaybackModel.activeTextRange(
+                playback.timeline,
+                0
+              )
+              : null
+          );
+        if (range) annotationEditor.setPlaybackRange(range.start, range.end);
+        else annotationEditor.clearPlaybackRange();
+        if (
+          playback.responseComplete
+          && Number.isFinite(playback.actualDurationSeconds)
+          && elapsed >= playback.actualDurationSeconds
+        ) {
+          clearPlaybackIndicator();
+          el("stop").disabled = true;
+          return;
+        }
+      }
+      if (state.playback === playback) {
+        playback.animationFrame = requestAnimationFrame(renderPlaybackIndicator);
+      }
+    }
+    function startPlaybackIndicator(text, language, context, runId) {
+      clearPlaybackIndicator();
+      state.playback = {
+        runId,
+        context,
+        timeline: globalThis.AnifLiveTTSPlaybackModel.buildTextTimeline(text, language),
+        acousticTimeline: null,
+        firstAudibleContextTime: NaN,
+        lastAudibleContextTime: NaN,
+        receivedDurationSeconds: 0,
+        actualDurationSeconds: NaN,
+        responseComplete: false,
+        animationFrame: 0
+      };
+      renderPlaybackIndicator();
+    }
+    function stopCurrent(statusKey = "statusStopped") {
+      state.runId += 1;
+      const hadActiveRequest = Boolean(state.controller);
+      if (state.controller) state.controller.abort();
+      state.controller = null;
+      if (hadActiveRequest) {
+        void fetch("/api/cancel", {
+          method: "POST",
+          cache: "no-store",
+          keepalive: true
+        }).catch(() => {});
+      }
+      state.muted = true;
+      clearSources();
+      clearPlaybackIndicator();
+      updatePlayAvailability();
+      el("stop").disabled = true;
+      el("progress").classList.remove("active");
+      if (statusKey) setStatus(statusKey);
+    }
+    async function getAudioContext() {
+      if (!state.audio) state.audio = new AudioContext({ latencyHint: "interactive", sampleRate: SAMPLE_RATE });
+      if (state.audio.state === "suspended") await state.audio.resume();
+      return state.audio;
+    }
+    function writeAscii(view, offset, value) {
+      for (let index = 0; index < value.length; index++) view.setUint8(offset + index, value.charCodeAt(index));
+    }
+    function createWavBlob(chunks, pcmBytes) {
+      const buffer = new ArrayBuffer(44 + pcmBytes);
+      const view = new DataView(buffer);
+      writeAscii(view, 0, "RIFF");
+      view.setUint32(4, 36 + pcmBytes, true);
+      writeAscii(view, 8, "WAVE");
+      writeAscii(view, 12, "fmt ");
+      view.setUint32(16, 16, true);
+      view.setUint16(20, 1, true);
+      view.setUint16(22, 1, true);
+      view.setUint32(24, SAMPLE_RATE, true);
+      view.setUint32(28, SAMPLE_RATE * 2, true);
+      view.setUint16(32, 2, true);
+      view.setUint16(34, 16, true);
+      writeAscii(view, 36, "data");
+      view.setUint32(40, pcmBytes, true);
+      const output = new Uint8Array(buffer);
+      let offset = 44;
+      for (const chunk of chunks) {
+        output.set(chunk, offset);
+        offset += chunk.byteLength;
+      }
+      return new Blob([buffer], { type: "audio/wav" });
+    }
+    function clearDownloadAudio() {
+      state.download = null;
+      const button = el("downloadAudio");
+      button.disabled = true;
+      button.classList.remove("is-downloading");
+      button.removeAttribute("aria-busy");
+      el("downloadAudioLabel").textContent = t("downloadAudio");
+    }
+    function downloadFileName(model, language) {
+      const safeModel = String(model || "voice").replace(/[^a-z0-9._-]+/gi, "-").replace(/^-+|-+$/g, "") || "voice";
+      const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+      return `aniflive-${safeModel}-${language}-${stamp}.wav`;
+    }
+    function downloadCompletedAudio() {
+      if (!state.download) return;
+      const button = el("downloadAudio");
+      const label = el("downloadAudioLabel");
+      button.classList.remove("is-downloading");
+      void button.offsetWidth;
+      button.classList.add("is-downloading");
+      button.setAttribute("aria-busy", "true");
+      label.textContent = t("downloadingAudio");
+      const url = URL.createObjectURL(state.download.blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = state.download.fileName;
+      document.body.append(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+      window.setTimeout(() => {
+        button.classList.remove("is-downloading");
+        button.removeAttribute("aria-busy");
+        label.textContent = t("downloadAudio");
+      }, 700);
+    }
+    function firstAudibleSample(channel) {
+      const frameSamples = Math.max(1, Math.round(SAMPLE_RATE * .010));
+      const threshold = 10 ** (-45 / 20);
+      for (let begin = 0; begin < channel.length; begin += frameSamples) {
+        const end = Math.min(channel.length, begin + frameSamples);
+        let energy = 0;
+        for (let index = begin; index < end; index++) energy += channel[index] * channel[index];
+        if (Math.sqrt(energy / Math.max(1, end - begin)) > threshold) {
+          for (let index = begin; index < end; index++) {
+            if (Math.abs(channel[index]) > threshold) return index;
+          }
+          return begin;
+        }
+      }
+      return -1;
+    }
+    function lastAudibleSample(channel) {
+      const frameSamples = Math.max(1, Math.round(SAMPLE_RATE * .010));
+      const threshold = 10 ** (-45 / 20);
+      for (let end = channel.length; end > 0; end -= frameSamples) {
+        const begin = Math.max(0, end - frameSamples);
+        let energy = 0;
+        for (let index = begin; index < end; index++) energy += channel[index] * channel[index];
+        if (Math.sqrt(energy / Math.max(1, end - begin)) > threshold) {
+          for (let index = end - 1; index >= begin; index--) {
+            if (Math.abs(channel[index]) > threshold) return index;
+          }
+          return end - 1;
+        }
+      }
+      return -1;
+    }
+    function schedulePcm(context, bytes, metrics) {
+      const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+      const samples = bytes.byteLength / 2;
+      const channel = new Float32Array(samples);
+      for (let i = 0; i < samples; i++) channel[i] = view.getInt16(i * 2, true) / 32768;
+      const buffer = context.createBuffer(1, samples, SAMPLE_RATE);
+      buffer.copyToChannel(channel, 0);
+      const source = context.createBufferSource();
+      source.buffer = buffer;
+      source.connect(context.destination);
+      const now = context.currentTime;
+      if (!state.nextStart) state.nextStart = now + metrics.prebufferMs / 1000;
+      if (state.nextStart < now) {
+        metrics.underruns += 1;
+        state.nextStart = now + .004;
+      }
+      const scheduledStart = state.nextStart;
+      source.start(scheduledStart);
+      state.nextStart += samples / SAMPLE_RATE;
+      state.sources.push(source);
+      source.onended = () => {
+        state.sources = state.sources.filter(item => item !== source);
+        source.disconnect();
+        if (!state.sources.length && !state.controller) {
+          el("stop").disabled = true;
+        }
+      };
+      const first = firstAudibleSample(channel);
+      const last = lastAudibleSample(channel);
+      return {
+        firstAudibleSample: first,
+        lastAudibleSample: last,
+        firstAudibleContextTime: first < 0 ? NaN : scheduledStart + first / SAMPLE_RATE,
+        lastAudibleContextTime: last < 0 ? NaN : scheduledStart + last / SAMPLE_RATE
+      };
+    }
+    function showMetrics(m) {
+      el("ttfa").textContent = fmtMs(m.activeChunkArrival);
+      el("upstream").textContent = fmtMs(m.upstream);
+      el("audible").textContent = fmtMs(m.audible);
+      el("complete").textContent = fmtMs(m.complete);
+      el("duration").textContent = Number.isFinite(m.duration) ? `${m.duration.toFixed(3)} s` : "--";
+      el("rtf").textContent = Number.isFinite(m.rtf) ? m.rtf.toFixed(4) : "--";
+      el("proxy").textContent = fmtMs(m.proxy);
+      el("underruns").textContent = String(m.underruns || 0);
+    }
+    function addHistory(text, model, language, metrics) {
+      state.history.unshift({ text, model, language, ...metrics });
+      state.history = state.history.slice(0, 5);
+      renderHistory();
+    }
+    function localizedError(error) {
+      if (error?.i18nKey) return { key: error.i18nKey, vars: error.i18nVars || {} };
+      const detail = error?.message || String(error || "");
+      if (/still cancelling|仍在取消|仍在結束/.test(detail)) return { key: "errorBusy" };
+      if (/not available locally|未安裝|未安装/.test(detail)) return { key: "errorModelUnavailable" };
+      if (/expression profile|expression request|controlled expressions|No expression/i.test(detail)) {
+        return { key: "errorExpression", vars: { detail } };
+      }
+      if (/body must|must not be empty|language must|limited to/i.test(detail)) return { key: "errorInvalidRequest" };
+      if (/rejected|無法切換|stream ended|empty PCM|headers failed|invalid prebuffer/i.test(detail)) {
+        return { key: "errorInvalidResponse" };
+      }
+      if (/connection|連線|连接|fetch/i.test(detail)) return { key: "errorConnection" };
+      return { key: "errorUnknown", vars: { detail } };
+    }
+    function i18nError(key, vars = {}) {
+      const error = new Error(key);
+      error.i18nKey = key;
+      error.i18nVars = vars;
+      return error;
+    }
+
+    async function play() {
+      if (state.switching || !state.model) return;
+      if (state.controller) stopCurrent("");
+      const sourceText = el("text").value;
+      const text = sourceText.trim();
+      if (!text) { setStatus("statusEnterText", "error"); return; }
+      let segments = null;
+      try {
+        segments = annotationEditor.buildSegments();
+      } catch (error) {
+        setStatus("errorExpression", "error", { detail: String(error?.message || error) });
+        return;
+      }
+      clearDownloadAudio();
+      state.runId += 1;
+      clearSources();
+      const runId = state.runId;
+      const context = await getAudioContext();
+      const controller = new AbortController();
+      state.controller = controller;
+      state.muted = false;
+      startPlaybackIndicator(sourceText, state.language, context, runId);
+      el("play").disabled = true;
+      const metrics = {
+        activeChunkArrival: NaN, transportTtfa: NaN, upstream: NaN, audible: NaN,
+        complete: NaN, duration: NaN, rtf: NaN, proxy: NaN, underruns: 0, prebufferMs: 32
+      };
+      showMetrics(metrics);
+      el("stop").disabled = false;
+      el("progress").classList.add("active");
+      setStatus("statusGenerating", "live");
+      const started = performance.now();
+      let totalBytes = 0;
+      let pcmBytes = 0;
+      const pcmChunks = [];
+      let carry = null;
+      let firstAudibleContextTime = NaN;
+      try {
+        const response = await fetch("/api/speech", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(segments
+            ? { segments, language: state.language, model: state.model }
+            : { text, language: state.language, model: state.model }),
+          signal: controller.signal,
+          cache: "no-store"
+        });
+        if (!response.ok) {
+          const detail = await response.json().catch(() => ({}));
+          throw new Error(detail.error || `HTTP ${response.status}`);
+        }
+        if (
+          response.headers.get("x-tensorrt-backend") !== "TensorRT-11" ||
+          response.headers.get("x-pytorch-fallback") !== "false"
+        ) throw i18nError("errorTensorRt");
+        metrics.upstream = Number(response.headers.get("x-upstream-ttfa-ms"));
+        metrics.prebufferMs = Number(response.headers.get("x-tts-recommended-prebuffer-ms")) || 32;
+        const reader = response.body.getReader();
+        while (true) {
+          const { value, done } = await reader.read();
+          if (runId !== state.runId) return;
+          if (done) break;
+          if (!value || !value.byteLength) continue;
+          const chunkArrivalMs = performance.now() - started;
+          if (!Number.isFinite(metrics.transportTtfa)) {
+            metrics.transportTtfa = chunkArrivalMs;
+            metrics.proxy = Math.max(0, metrics.transportTtfa - metrics.upstream);
+          }
+          totalBytes += value.byteLength;
+          let chunk = value;
+          if (carry !== null) {
+            const joined = new Uint8Array(value.byteLength + 1);
+            joined[0] = carry;
+            joined.set(value, 1);
+            chunk = joined;
+            carry = null;
+          }
+          if (chunk.byteLength % 2) {
+            carry = chunk[chunk.byteLength - 1];
+            chunk = chunk.subarray(0, chunk.byteLength - 1);
+          }
+          if (chunk.byteLength) {
+            const savedChunk = chunk.slice();
+            pcmChunks.push(savedChunk);
+            pcmBytes += savedChunk.byteLength;
+          }
+          if (chunk.byteLength && !state.muted) {
+            const timing = schedulePcm(context, chunk, metrics);
+            if (
+              !Number.isFinite(firstAudibleContextTime)
+              && Number.isFinite(timing.firstAudibleContextTime)
+            ) {
+              firstAudibleContextTime = timing.firstAudibleContextTime;
+              if (state.playback?.runId === runId) {
+                state.playback.firstAudibleContextTime = firstAudibleContextTime;
+              }
+              metrics.activeChunkArrival = chunkArrivalMs;
+              const outputLatency = (context.outputLatency || context.baseLatency || 0) * 1000;
+              metrics.audible = performance.now() - started
+                + Math.max(0, firstAudibleContextTime - context.currentTime) * 1000
+                + outputLatency;
+              setStatus("statusStreaming", "live", { model: state.model });
+            }
+            if (state.playback?.runId === runId) {
+              if (Number.isFinite(timing.lastAudibleContextTime)) {
+                state.playback.lastAudibleContextTime = Math.max(
+                  Number.isFinite(state.playback.lastAudibleContextTime)
+                    ? state.playback.lastAudibleContextTime
+                    : timing.lastAudibleContextTime,
+                  timing.lastAudibleContextTime
+                );
+              }
+              state.playback.receivedDurationSeconds = pcmBytes / 2 / SAMPLE_RATE;
+            }
+            showMetrics(metrics);
+          }
+        }
+        if (carry !== null) throw i18nError("errorIncompletePcm");
+        if (!Number.isFinite(metrics.activeChunkArrival)) throw i18nError("errorNoAudibleAudio");
+        metrics.complete = performance.now() - started;
+        metrics.duration = totalBytes / 2 / SAMPLE_RATE;
+        metrics.rtf = metrics.complete / 1000 / metrics.duration;
+        if (state.playback?.runId === runId) {
+          const acoustic = globalThis.AnifLiveTTSPlaybackModel.buildPcmActivityTimeline(
+            pcmChunks,
+            SAMPLE_RATE
+          );
+          state.playback.acousticTimeline = (
+            globalThis.AnifLiveTTSPlaybackModel.alignTextTimelineToAudio(
+              state.playback.timeline,
+              acoustic
+            )
+          );
+          state.playback.responseComplete = true;
+          if (
+            Number.isFinite(state.playback.firstAudibleContextTime)
+            && Number.isFinite(state.playback.lastAudibleContextTime)
+          ) {
+            state.playback.actualDurationSeconds = Math.max(
+              1 / SAMPLE_RATE,
+              state.playback.lastAudibleContextTime
+                - state.playback.firstAudibleContextTime
+                + 1 / SAMPLE_RATE
+            );
+          }
+        }
+        showMetrics(metrics);
+        state.download = {
+          blob: createWavBlob(pcmChunks, pcmBytes),
+          fileName: downloadFileName(state.model, state.language)
+        };
+        el("downloadAudio").disabled = false;
+        addHistory(text, state.model, state.language, metrics);
+        setStatus(state.muted ? "statusStoppedReady" : "statusReceived", "", {
+          duration: metrics.duration.toFixed(2)
+        });
+      } catch (error) {
+        clearPlaybackIndicator();
+        if (error.name !== "AbortError") {
+          const translated = localizedError(error);
+          setStatus(translated.key, "error", translated.vars || {});
+        }
+      } finally {
+        if (runId === state.runId) {
+          state.controller = null;
+          updatePlayAvailability();
+          el("stop").disabled = state.sources.length === 0;
+          el("progress").classList.remove("active");
+        }
+      }
+    }
+
+    document.querySelectorAll(".lang").forEach(button => button.addEventListener("click", () => {
+      document.querySelectorAll(".lang").forEach(item => item.classList.remove("active"));
+      button.classList.add("active");
+      state.language = button.dataset.language;
+      annotationEditor.setLanguage(state.language);
+    }));
+    el("play").addEventListener("click", play);
+    el("stop").addEventListener("click", () => stopCurrent("statusCancelled"));
+    el("downloadAudio").addEventListener("click", downloadCompletedAudio);
+    el("text").addEventListener("input", clearPlaybackIndicator);
+    el("text").addEventListener("keydown", event => {
+      if (event.key === "Enter" && !event.shiftKey) {
+        event.preventDefault();
+        play();
+      }
+    });
+    function applyStatus(data) {
+      const health = data.health;
+      state.models = Array.isArray(data.models) ? data.models : [];
+      state.model = health.model;
+      state.expressions = data.expressions || { enabled: false, profiles: [], policies: [] };
+      state.apiVersion = data.api_version || "";
+      renderModels();
+      el("readyBadge").textContent = t("ready");
+      el("readyBadge").classList.add("ready");
+      el("versionBadge").textContent = `API v${data.api_version}`;
+      el("backendBadge").textContent = `${health.backend} · ${health.engine_count} engines`;
+      el("gpuBadge").textContent = health.gpu?.name || "GPU ready";
+      annotationEditor.setDisabled(false);
+      annotationEditor.setCatalog(state.expressions, state.language);
+      updatePlayAvailability();
+      el("modelButton").disabled = state.models.length < 2;
+    }
+    async function switchModel(target) {
+      if (!target || target === state.model || state.switching) return;
+      stopCurrent("");
+      state.switching = true;
+      closeModelMenu();
+      el("modelButton").disabled = true;
+      annotationEditor.setDisabled(true);
+      el("play").disabled = true;
+      el("progress").classList.add("active");
+      setStatus("statusSwitching", "live", { current: state.model, target });
+      try {
+        const response = await fetch("/api/models/activate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ model: target }),
+          cache: "no-store"
+        });
+        const data = await response.json();
+        if (!response.ok || !data.ready) throw new Error(data.error || `HTTP ${response.status}`);
+        applyStatus(data);
+        setStatus("statusActivated", "", { model: state.model });
+      } catch (error) {
+        renderModels();
+        const translated = localizedError(error);
+        setStatus(translated.key, "error", translated.vars || {});
+      } finally {
+        state.switching = false;
+        el("progress").classList.remove("active");
+        annotationEditor.setDisabled(false);
+        updatePlayAvailability();
+        el("modelButton").disabled = state.models.length < 2;
+      }
+    }
+
+    applyTranslations();
+    fetch("/api/status", { cache: "no-store" }).then(async response => {
+      const data = await response.json();
+      if (!response.ok || !data.ready) {
+        if (data.error) throw new Error(data.error);
+        throw i18nError("errorServiceNotReady");
+      }
+      applyStatus(data);
+      setStatus("statusApiReady", "", { model: state.model, version: state.apiVersion });
+    }).catch(error => {
+      const translated = localizedError(error);
+      setStatus(translated.key, "error", translated.vars || {});
+    });
+  </script>
+</body>
+</html>

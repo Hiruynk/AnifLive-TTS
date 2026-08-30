@@ -44,6 +44,14 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 
+from aniflive_tts.errors import PackageValidationError
+from aniflive_tts.expression import (
+    ConditioningPolicy,
+    ExpressionCatalog,
+    ExpressionSegment,
+    has_safe_expression_boundary,
+    load_expression_catalog,
+)
 from aniflive_tts.runtime_control import WarmRetentionController
 
 
@@ -54,7 +62,7 @@ logging.basicConfig(
 )
 
 SERVICE_NAME = "AnifLive-TTS"
-SERVICE_VERSION = "1.2.0"
+SERVICE_VERSION = "1.3.0"
 MODEL_ID = os.environ.get("ANIFLIVE_TTS_MODEL_ID", "unconfigured")
 VOICE_ID = os.environ.get("ANIFLIVE_TTS_VOICE_PROFILE", "default")
 REFERENCE_TEXT = os.environ.get("ANIFLIVE_TTS_REFERENCE_TEXT", "")
@@ -177,6 +185,7 @@ class RuntimeSettings:
     engine_dir: Path
     bert_path: Path
     reference_wav: Path
+    profile_manifest: Path
 
     @classmethod
     def from_env(cls) -> "RuntimeSettings":
@@ -196,11 +205,16 @@ class RuntimeSettings:
         reference_wav = os.environ.get(
             "ANIFLIVE_TTS_REFERENCE_WAV", "/data/models/active/voices/default/reference.wav"
         )
+        reference_path = Path(reference_wav).expanduser().resolve()
+        profile_manifest = os.environ.get(
+            "ANIFLIVE_TTS_PROFILE_MANIFEST", str(reference_path.parent / "profile.json")
+        )
         return cls(
             source_dir=Path(source_dir).expanduser().resolve(),
             engine_dir=Path(engine_dir).expanduser().resolve(),
             bert_path=Path(bert_path).expanduser().resolve(),
-            reference_wav=Path(reference_wav).expanduser().resolve(),
+            reference_wav=reference_path,
+            profile_manifest=Path(profile_manifest).expanduser().resolve(),
         )
 
 
@@ -216,6 +230,11 @@ class SynthesisOptions:
     noise_scale: float
     cut_punc: str
     seed: int
+    expression_enabled: bool = False
+    expression_profile: str | None = None
+    expression_intensity: float = 0.5
+    expression_policy: ConditioningPolicy = ConditioningPolicy.FULL_SWITCH
+    expression_segments: tuple[ExpressionSegment, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -430,10 +449,58 @@ def _natural_segment_content_length(segment: str) -> int:
 
 
 def _has_natural_inference_boundary(segment: str) -> bool:
-    if segment.endswith(("\n\n", "\r\n\r\n")):
-        return True
-    ending = segment.rstrip().rstrip("".join(BOUNDARY_CLOSERS))
-    return bool(ending) and ending[-1] in SAFE_INFERENCE_BOUNDARIES
+    return has_safe_expression_boundary(segment)
+
+
+def _expression_control_key(segment: ExpressionSegment) -> tuple[Any, ...]:
+    """Return the synthesis-relevant expression identity for one segment."""
+
+    if not segment.enabled:
+        return (False,)
+    return (
+        True,
+        segment.profile,
+        float(segment.intensity),
+        segment.policy,
+    )
+
+
+def _coalesce_expression_segments(
+    segments: list[ExpressionSegment] | tuple[ExpressionSegment, ...],
+) -> list[ExpressionSegment]:
+    """Merge adjacent text that uses the same generic expression controls."""
+
+    merged: list[ExpressionSegment] = []
+    for segment in segments:
+        if merged and _expression_control_key(merged[-1]) == _expression_control_key(segment):
+            previous = merged[-1]
+            merged[-1] = ExpressionSegment(
+                text=previous.text + segment.text,
+                enabled=previous.enabled,
+                profile=previous.profile,
+                intensity=previous.intensity,
+                policy=previous.policy,
+            )
+            continue
+        merged.append(segment)
+    return merged
+
+
+def _validate_expression_segment_boundaries(
+    segments: list[ExpressionSegment] | tuple[ExpressionSegment, ...],
+) -> None:
+    """Reject style switches that would synthesize an incomplete phrase alone."""
+
+    for index, (current, following) in enumerate(zip(segments, segments[1:])):
+        if _expression_control_key(current) == _expression_control_key(following):
+            continue
+        if _has_natural_inference_boundary(current.text):
+            continue
+        raise RequestError(
+            "Expression changes must follow a speech-safe punctuation boundary "
+            "(comma, period, semicolon, question mark, or exclamation mark); "
+            f"segments[{index}] ends inside a phrase"
+        )
 
 
 def _merge_short_natural_segments(
@@ -474,15 +541,16 @@ def _merge_short_natural_segments(
     return merged
 
 
-def _recommended_stream_prebuffer_ms(segments: list[str]) -> int:
+def _recommended_stream_prebuffer_ms(
+    segments: list[str],
+    *,
+    short_prebuffer_ms: int = STREAM_RECOMMENDED_PREBUFFER_MS,
+    long_prebuffer_ms: int = STREAM_LONG_RECOMMENDED_PREBUFFER_MS,
+) -> int:
     long_stream = len(segments) > 1 or any(
         len(segment) > STREAM_LONG_SEGMENT_CHAR_THRESHOLD for segment in segments
     )
-    return (
-        STREAM_LONG_RECOMMENDED_PREBUFFER_MS
-        if long_stream
-        else STREAM_RECOMMENDED_PREBUFFER_MS
-    )
+    return long_prebuffer_ms if long_stream else short_prebuffer_ms
 
 
 def _pcm16_wav(sample_rate: int, audio: np.ndarray) -> bytes:
@@ -538,6 +606,7 @@ class TensorRTService:
         self._sample_rate: int | None = None
         self._engine_manifest: dict[str, Any] = {}
         self._warmup: dict[str, Any] | None = None
+        self._expression_catalog: ExpressionCatalog | None = None
         self._warm_retention: WarmRetentionController | None = None
         self._segment_char_limit = PROFILE_SEGMENT_CHAR_LIMITS["small"]
         # TensorRT execution contexts remain serialized per active voice.  The
@@ -546,6 +615,7 @@ class TensorRTService:
         self._request_slot = threading.BoundedSemaphore(1)
         self._active_guard = threading.Lock()
         self._active_requests = 0
+        self._active_stream_cancel: threading.Event | None = None
 
     @property
     def ready(self) -> bool:
@@ -556,6 +626,16 @@ class TensorRTService:
         if self._sample_rate is None:
             raise TensorRTRuntimeError("TensorRT pipeline is not loaded")
         return self._sample_rate
+
+    def recommended_stream_prebuffer_ms(self, segments: list[str]) -> int:
+        if self._expression_catalog is None:
+            return _recommended_stream_prebuffer_ms(segments)
+        policy = self._expression_catalog.playback_policy
+        return _recommended_stream_prebuffer_ms(
+            segments,
+            short_prebuffer_ms=policy.short_prebuffer_ms,
+            long_prebuffer_ms=policy.long_prebuffer_ms,
+        )
 
     def load(self) -> None:
         """Validate and load TensorRT only; never switch to Torch/ONNX inference."""
@@ -628,6 +708,7 @@ class TensorRTService:
                 logger=LOGGER,
             )
             self._streamer.prepare_reference()
+            self._load_expression_references()
             self._streamer.warm_frontends()
             self._run_strict_warmup()
             self._warm_retention = WarmRetentionController(
@@ -676,6 +757,7 @@ class TensorRTService:
         self._streamer = None
         self._sample_rate = None
         self._warmup = None
+        self._expression_catalog = None
         self._segment_char_limit = PROFILE_SEGMENT_CHAR_LIMITS["small"]
         if self._torch is not None:
             try:
@@ -698,9 +780,23 @@ class TensorRTService:
         request_seed = self._effective_seed(options.seed)
         try:
             with self._inference_lock:
-                segments = self._segments(options)
+                plan = self._segment_plan(options)
+                segments = [segment.text for segment in plan]
+                conditioning = None
+                conditionings = None
+                if options.expression_segments:
+                    conditionings = [
+                        self._conditioning_for(
+                            segment, text_language=options.text_language
+                        )
+                        for segment in plan
+                    ]
+                else:
+                    conditioning = self._conditioning(options)
                 outputs = list(self._streamer.iter_audio(
                     segments=segments,
+                    conditioning=conditioning,
+                    conditionings=conditionings,
                     text_language=options.text_language,
                     top_k=options.top_k,
                     top_p=options.top_p,
@@ -720,13 +816,24 @@ class TensorRTService:
             raise TensorRTRuntimeError("TensorRT produced no audio chunks")
         postprocess_started = time.perf_counter()
         audio = np.concatenate(outputs).astype(np.float32, copy=False)
-        audio = audio - np.mean(audio, dtype=np.float64)
-        peak = float(np.max(np.abs(audio)))
-        if peak > 1e-5:
-            audio = audio / peak * 0.9
+        output_gain = self._expression_output_gain(options)
+        if output_gain is None:
+            audio = audio - np.mean(audio, dtype=np.float64)
+            peak = float(np.max(np.abs(audio)))
+            if peak > 1e-5:
+                audio = audio / peak * 0.9
+            output_contract = "v1.2-complete-normalized"
+        else:
+            if output_gain != 1.0:
+                audio = audio * output_gain
+            output_contract = (
+                "shared-raw" if output_gain == 1.0 else "shared-fixed-gain"
+            )
         payload = _pcm16_wav(self._sample_rate, audio)
         profile = dict(self._streamer.last_profile or {})
         profile["audio_postprocess_seconds"] = time.perf_counter() - postprocess_started
+        profile["expression_output_contract"] = output_contract
+        profile["expression_output_gain"] = output_gain or 1.0
         return SynthesisResult(
             wav=payload,
             sample_rate=self._sample_rate,
@@ -745,7 +852,10 @@ class TensorRTService:
         self._begin_request()
         chunks: queue.Queue[bytes | BaseException | None] = queue.Queue(maxsize=3)
         cancelled = threading.Event()
+        with self._active_guard:
+            self._active_stream_cancel = cancelled
         request_seed = self._effective_seed(options.seed)
+        output_gain = self._expression_output_gain(options)
 
         def put(item: bytes | BaseException | None) -> bool:
             while not cancelled.is_set():
@@ -759,9 +869,23 @@ class TensorRTService:
         def produce() -> None:
             try:
                 with self._inference_lock:
-                    segments = self._segments(options)
+                    plan = self._segment_plan(options)
+                    segments = [segment.text for segment in plan]
+                    conditioning = None
+                    conditionings = None
+                    if options.expression_segments:
+                        conditionings = [
+                            self._conditioning_for(
+                                segment, text_language=options.text_language
+                            )
+                            for segment in plan
+                        ]
+                    else:
+                        conditioning = self._conditioning(options)
                     for audio in self._streamer.iter_audio(
                         segments=segments,
+                        conditioning=conditioning,
+                        conditionings=conditionings,
                         text_language=options.text_language,
                         top_k=options.top_k,
                         top_p=options.top_p,
@@ -773,6 +897,8 @@ class TensorRTService:
                         cancelled=cancelled,
                         chunk_length=self._streamer.streaming_chunk_length(),
                     ):
+                        if output_gain is not None and output_gain != 1.0:
+                            audio = audio * output_gain
                         payload = _pcm16_bytes(audio)
                         if payload and not put(payload):
                             return
@@ -780,12 +906,18 @@ class TensorRTService:
                 put(error)
             finally:
                 put(None)
+                with self._active_guard:
+                    if self._active_stream_cancel is cancelled:
+                        self._active_stream_cancel = None
                 self._end_request()
 
         worker = threading.Thread(target=produce, name="aniflive-tts-trt-stream", daemon=True)
         try:
             worker.start()
         except BaseException:
+            with self._active_guard:
+                if self._active_stream_cancel is cancelled:
+                    self._active_stream_cancel = None
             self._end_request()
             raise
 
@@ -807,9 +939,30 @@ class TensorRTService:
 
         return consume()
 
+    def cancel_active_stream(self) -> bool:
+        with self._active_guard:
+            cancelled = self._active_stream_cancel
+        if cancelled is None:
+            return False
+        cancelled.set()
+        return True
+
     @staticmethod
     def _effective_seed(seed: int) -> int:
         return int(seed) if seed >= 0 else secrets.randbelow((1 << 63) - 1)
+
+    @staticmethod
+    def _controlled_expression_requested(options: SynthesisOptions) -> bool:
+        if options.expression_segments:
+            return any(segment.enabled for segment in options.expression_segments)
+        return options.expression_enabled
+
+    def _expression_output_gain(self, options: SynthesisOptions) -> float | None:
+        if not self._controlled_expression_requested(options):
+            return None
+        if self._expression_catalog is None:
+            raise RequestError("Controlled expression is unavailable for the active model package")
+        return self._expression_catalog.output_gain
 
     def _begin_request(self) -> None:
         if not self._request_slot.acquire(blocking=False):
@@ -828,15 +981,191 @@ class TensorRTService:
         with self._active_guard:
             return self._active_requests > 0
 
-    def _segments(self, options: SynthesisOptions) -> list[str]:
-        return _merge_short_natural_segments(
-            _bounded_segments(
-                options.text,
-                options.cut_punc,
-                self._segment_char_limit,
+    def _segment_plan(self, options: SynthesisOptions) -> list[ExpressionSegment]:
+        requested = _coalesce_expression_segments(options.expression_segments or (
+            ExpressionSegment(
+                text=options.text,
+                enabled=options.expression_enabled,
+                profile=options.expression_profile,
+                intensity=options.expression_intensity,
+                policy=options.expression_policy,
             ),
-            self._segment_char_limit,
+        ))
+        plan: list[ExpressionSegment] = []
+        for requested_segment in requested:
+            split = _merge_short_natural_segments(
+                _bounded_segments(
+                    requested_segment.text,
+                    options.cut_punc,
+                    self._segment_char_limit,
+                ),
+                self._segment_char_limit,
+            )
+            plan.extend(
+                ExpressionSegment(
+                    text=text,
+                    enabled=requested_segment.enabled,
+                    profile=requested_segment.profile,
+                    intensity=requested_segment.intensity,
+                    policy=requested_segment.policy,
+                )
+                for text in split
+            )
+        return plan
+
+    def _segments(self, options: SynthesisOptions) -> list[str]:
+        return [segment.text for segment in self._segment_plan(options)]
+
+    @property
+    def expression_available(self) -> bool:
+        return self._expression_catalog is not None
+
+    def expression_metadata(self) -> dict[str, Any]:
+        if self._expression_catalog is None:
+            return {
+                "enabled": False,
+                "default": None,
+                "profiles": [],
+                "policies": [],
+            }
+        return {
+            "enabled": True,
+            **self._expression_catalog.public_metadata(),
+            "policies": [policy.value for policy in ConditioningPolicy],
+        }
+
+    def preferred_expression_policy(
+        self,
+        *,
+        profile: str | None = None,
+        intensity: float = 0.5,
+        language: str | None = None,
+    ) -> ConditioningPolicy:
+        if self._expression_catalog is None:
+            return ConditioningPolicy.FULL_SWITCH
+        if profile is not None and language is not None:
+            return self._expression_catalog.policy_for(
+                profile=profile,
+                intensity=intensity,
+                language=language.removeprefix("all_"),
+            )
+        return self._expression_catalog.preferred_policy
+
+    def validate_expression(self, options: SynthesisOptions) -> None:
+        selections = _coalesce_expression_segments(options.expression_segments or (
+            ExpressionSegment(
+                text=options.text,
+                enabled=options.expression_enabled,
+                profile=options.expression_profile,
+                intensity=options.expression_intensity,
+                policy=options.expression_policy,
+            ),
+        ))
+        if options.expression_segments:
+            _validate_expression_segment_boundaries(selections)
+        for selection in selections:
+            self._validate_expression_segment(selection, options.text_language)
+
+    def _validate_expression_segment(
+        self, selection: ExpressionSegment, text_language: str
+    ) -> None:
+        if not selection.enabled:
+            return
+        if self._expression_catalog is None:
+            raise RequestError("Controlled expression is unavailable for the active model package")
+        profile = selection.profile or self._expression_catalog.default_profile
+        try:
+            self._expression_catalog.select(
+                profile=profile,
+                intensity=selection.intensity,
+                language=text_language.removeprefix("all_"),
+            )
+        except (KeyError, PackageValidationError) as error:
+            raise RequestError(f"Unknown expression profile: {profile!r}") from error
+
+    def _conditioning_for(
+        self, selection: ExpressionSegment, *, text_language: str
+    ):
+        if self._streamer is None:
+            raise TensorRTRuntimeError("TensorRT pipeline is not loaded")
+        if not selection.enabled:
+            return self._streamer.reference_bank.conditioning(
+                reference_id=self._streamer.reference_bank.identity_id,
+                policy=ConditioningPolicy.FULL_SWITCH,
+            )
+        if self._expression_catalog is None:
+            raise RequestError("Controlled expression is unavailable for the active model package")
+        selected = self._expression_catalog.select(
+            profile=selection.profile or self._expression_catalog.default_profile,
+            intensity=selection.intensity,
+            language=text_language.removeprefix("all_"),
         )
+        return self._streamer.reference_bank.conditioning(
+            reference_id=selected.id,
+            policy=selection.policy,
+        )
+
+    def _conditioning(self, options: SynthesisOptions):
+        if self._streamer is None:
+            raise TensorRTRuntimeError("TensorRT pipeline is not loaded")
+        if not options.expression_enabled:
+            return self._streamer.reference_bank.conditioning(
+                reference_id=self._streamer.reference_bank.identity_id,
+                policy=ConditioningPolicy.FULL_SWITCH,
+            )
+        return self._conditioning_for(
+            ExpressionSegment(
+                text=options.text,
+                enabled=True,
+                profile=options.expression_profile,
+                intensity=options.expression_intensity,
+                policy=options.expression_policy,
+            ),
+            text_language=options.text_language,
+        )
+
+    def _load_expression_references(self) -> None:
+        if self._streamer is None or not self.settings.profile_manifest.is_file():
+            return
+        profile = _read_json(self.settings.profile_manifest, "voice profile manifest")
+        catalog = load_expression_catalog(
+            profile_dir=self.settings.profile_manifest.parent,
+            profile_manifest=profile,
+        )
+        if catalog is None:
+            return
+        identity_audio = self.settings.reference_wav.resolve()
+        for descriptor in catalog.profiles:
+            if descriptor.id in self._streamer.reference_bank.references:
+                continue
+            if (
+                descriptor.reference_audio.resolve() == identity_audio
+                and descriptor.reference_text == REFERENCE_TEXT
+                and descriptor.reference_language == REFERENCE_LANGUAGE
+            ):
+                self._streamer.reference_bank.alias(
+                    alias_id=descriptor.id,
+                    reference_id=self._streamer.reference_bank.identity_id,
+                )
+                continue
+            self._streamer.prepare_reference_profile(
+                reference_id=descriptor.id,
+                reference_wav=descriptor.reference_audio,
+                reference_text=descriptor.reference_text,
+                reference_language=descriptor.reference_language,
+                normalize_semantic_onset=(
+                    catalog.runtime_policy.normalize_reference_semantic_onset
+                ),
+                semantic_onset_threshold_dbfs=(
+                    catalog.runtime_policy.reference_semantic_onset_threshold_dbfs
+                ),
+                semantic_onset_retain_ms=(
+                    catalog.runtime_policy.reference_semantic_onset_retain_ms
+                ),
+            )
+        self._expression_catalog = catalog
+        self._streamer.expression_runtime_policy = catalog.runtime_policy
+        LOGGER.info("Prepared %d expression references", len(catalog.profiles))
 
     def health(self) -> dict[str, Any]:
         gpu: dict[str, Any] | None = None
@@ -875,6 +1204,7 @@ class TensorRTService:
                 "configured": bool(REFERENCE_TEXT),
                 "language": REFERENCE_LANGUAGE,
             },
+            "expression": self.expression_metadata(),
             "request_segment_char_limit": self._segment_char_limit,
             "streaming": {
                 "enabled": self._streamer is not None,
@@ -910,6 +1240,7 @@ class TensorRTService:
             self.settings.source_dir / "run_trt_inference.py",
             self.settings.bert_path,
             self.settings.reference_wav,
+            self.settings.profile_manifest,
             self.settings.engine_dir / "config.json",
             self.settings.engine_dir / "engine-manifest.json",
             *(self.settings.engine_dir / f"{name}.engine" for name in REQUIRED_ENGINES),
@@ -1028,6 +1359,36 @@ class RuntimeServiceManager:
         return self._service.sample_rate
 
     @property
+    def expression_available(self) -> bool:
+        return self._service.expression_available
+
+    def expression_metadata(self) -> dict[str, Any]:
+        with self._switch_lock:
+            return self._service.expression_metadata()
+
+    def preferred_expression_policy(
+        self,
+        *,
+        profile: str | None = None,
+        intensity: float = 0.5,
+        language: str | None = None,
+    ) -> ConditioningPolicy:
+        with self._switch_lock:
+            return self._service.preferred_expression_policy(
+                profile=profile,
+                intensity=intensity,
+                language=language,
+            )
+
+    def recommended_stream_prebuffer_ms(self, segments: list[str]) -> int:
+        with self._switch_lock:
+            return self._service.recommended_stream_prebuffer_ms(segments)
+
+    def validate_expression(self, options: SynthesisOptions) -> None:
+        with self._switch_lock:
+            self._service.validate_expression(options)
+
+    @property
     def _sample_rate(self) -> int | None:
         return self._service._sample_rate
 
@@ -1064,6 +1425,10 @@ class RuntimeServiceManager:
             # stream_pcm reserves the one request slot before returning, so a
             # later activation observes the active producer and is rejected.
             return self._service.stream_pcm(options)
+
+    def cancel_active_stream(self) -> bool:
+        with self._switch_lock:
+            return self._service.cancel_active_stream()
 
     def prepare_stream(
         self, options: SynthesisOptions, requested_model: str | None
@@ -1243,14 +1608,115 @@ def _assert_fixed_reference(values: Mapping[str, Any]) -> None:
         raise RequestError("inp_refs is not supported by a fixed voice profile")
 
 
+def _expression_policy(value: Any, field: str) -> ConditioningPolicy:
+    try:
+        return ConditioningPolicy(value)
+    except (TypeError, ValueError) as error:
+        raise RequestError(
+            f"{field} must be one of: "
+            + ", ".join(policy.value for policy in ConditioningPolicy)
+        ) from error
+
+
+def _expression_segments(
+    value: Any,
+    *,
+    default_enabled: bool,
+    default_profile: str | None,
+    default_intensity: float,
+    default_policy: ConditioningPolicy | None,
+    language: str | None = None,
+) -> tuple[ExpressionSegment, ...]:
+    if value is None:
+        return ()
+    if not isinstance(value, list) or not value:
+        raise RequestError("segments must be a non-empty array")
+    if len(value) > 64:
+        raise RequestError("segments is limited to 64 items")
+    result: list[ExpressionSegment] = []
+    total_characters = 0
+    for index, item in enumerate(value):
+        label = f"segments[{index}]"
+        if not isinstance(item, Mapping):
+            raise RequestError(f"{label} must be an object")
+        unknown = set(item) - {"text", "expression"}
+        if unknown:
+            raise RequestError(f"{label} contains unsupported fields: {', '.join(sorted(unknown))}")
+        text = item.get("text")
+        if not isinstance(text, str):
+            raise RequestError(f"{label}.text must be a string")
+        if not text.strip():
+            raise RequestError(f"Missing required parameter: {label}.text")
+        total_characters += len(text)
+        expression = item.get("expression")
+        if expression is None:
+            expression = {}
+        if not isinstance(expression, Mapping):
+            raise RequestError(f"{label}.expression must be an object")
+        unknown_expression = set(expression) - {
+            "enabled",
+            "profile",
+            "intensity",
+            "policy",
+        }
+        if unknown_expression:
+            raise RequestError(
+                f"{label}.expression contains unsupported fields: "
+                + ", ".join(sorted(unknown_expression))
+            )
+        enabled = _boolean(
+            expression.get("enabled"),
+            f"{label}.expression.enabled",
+            default_enabled,
+        )
+        profile = _optional_string(
+            expression.get("profile", default_profile),
+            f"{label}.expression.profile",
+        )
+        intensity = _number(
+            expression.get("intensity"),
+            f"{label}.expression.intensity",
+            default_intensity,
+            minimum=0.0,
+            maximum=1.0,
+        )
+        if "policy" in expression:
+            policy = _expression_policy(
+                expression.get("policy"), f"{label}.expression.policy"
+            )
+        elif default_policy is not None:
+            policy = default_policy
+        elif enabled:
+            policy = SERVICE.preferred_expression_policy(
+                profile=profile,
+                intensity=intensity,
+                language=language,
+            )
+        else:
+            policy = ConditioningPolicy.FULL_SWITCH
+        result.append(
+            ExpressionSegment(
+                text=text,
+                enabled=enabled,
+                profile=profile,
+                intensity=intensity,
+                policy=policy,
+            )
+        )
+    if total_characters > MAX_TEXT_CHARS:
+        raise RequestError(f"segments text is limited to {MAX_TEXT_CHARS} characters")
+    return tuple(_coalesce_expression_segments(result))
+
+
 def _options_from_values(
     values: Mapping[str, Any], *, text_field: str, language_field: str
 ) -> SynthesisOptions:
     _assert_fixed_reference(values)
+    raw_expression_segments = values.get("_expression_segments")
     text = _optional_string(values.get(text_field), text_field)
-    if text is None:
+    if text is None and raw_expression_segments is None:
         raise RequestError(f"Missing required parameter: {text_field}")
-    if len(text) > MAX_TEXT_CHARS:
+    if text is not None and len(text) > MAX_TEXT_CHARS:
         raise RequestError(f"{text_field} is limited to {MAX_TEXT_CHARS} characters")
 
     text_language = _normalise_language(values.get(language_field), language_field)
@@ -1299,8 +1765,40 @@ def _options_from_values(
         maximum=10.0,
     )
     seed = _integer(values.get("seed"), "seed", int(DEFAULTS["seed"]), minimum=-1)
-    return SynthesisOptions(
-        text=text,
+    expression_enabled = _boolean(
+        values.get("_expression_enabled"), "expression.enabled", False
+    )
+    expression_profile = _optional_string(
+        values.get("_expression_profile"), "expression.profile"
+    )
+    expression_intensity = _number(
+        values.get("_expression_intensity"),
+        "expression.intensity",
+        0.5,
+        minimum=0.0,
+        maximum=1.0,
+    )
+    explicit_expression_policy = (
+        _expression_policy(values.get("_expression_policy"), "expression.policy")
+        if "_expression_policy" in values
+        else None
+    )
+    expression_policy = explicit_expression_policy or SERVICE.preferred_expression_policy(
+        profile=expression_profile,
+        intensity=expression_intensity,
+        language=text_language,
+    )
+    parsed_expression_segments = _expression_segments(
+        raw_expression_segments,
+        default_enabled=expression_enabled,
+        default_profile=expression_profile,
+        default_intensity=expression_intensity,
+        default_policy=explicit_expression_policy,
+        language=text_language,
+    )
+    resolved_text = text or "".join(segment.text for segment in parsed_expression_segments)
+    options = SynthesisOptions(
+        text=resolved_text,
         text_language=text_language,
         top_k=top_k,
         top_p=top_p,
@@ -1310,7 +1808,29 @@ def _options_from_values(
         noise_scale=noise_scale,
         cut_punc=cut_punc,
         seed=seed,
+        expression_enabled=expression_enabled,
+        expression_profile=expression_profile,
+        expression_intensity=expression_intensity,
+        expression_policy=expression_policy,
+        expression_segments=parsed_expression_segments,
     )
+    SERVICE.validate_expression(options)
+    return options
+
+
+def _effective_first_context_tokens(options: SynthesisOptions) -> int:
+    controlled = options.expression_enabled or any(
+        segment.enabled for segment in options.expression_segments
+    )
+    if not controlled:
+        return 17
+    runtime_policy = SERVICE.expression_metadata().get("runtime_policy")
+    if not isinstance(runtime_policy, Mapping):
+        return 17
+    try:
+        return max(17, int(runtime_policy.get("first_context_tokens", 17)))
+    except (TypeError, ValueError):
+        return 17
 
 
 async def _tts_response(
@@ -1324,6 +1844,7 @@ async def _tts_response(
         options = _options_from_values(
             values, text_field=text_field, language_field=language_field
         )
+        first_context_tokens = _effective_first_context_tokens(options)
         streaming = _boolean(values.get("stream"), "stream", False)
         response_format = (
             _optional_string(values.get("response_format"), "response_format")
@@ -1338,7 +1859,9 @@ async def _tts_response(
             request_segments, pcm, sample_rate, response_model = SERVICE.prepare_stream(
                 options, requested_model
             )
-            recommended_prebuffer_ms = _recommended_stream_prebuffer_ms(request_segments)
+            recommended_prebuffer_ms = SERVICE.recommended_stream_prebuffer_ms(
+                request_segments
+            )
             return StreamingResponse(
                 pcm,
                 media_type="application/octet-stream",
@@ -1358,6 +1881,9 @@ async def _tts_response(
                     ),
                     "X-TTS-Queue-Ms": "0.000",
                     "X-TTS-Pause-Mode": "adaptive",
+                    "X-TTS-Expression": options.expression_profile or "native",
+                    "X-TTS-Expression-Policy": options.expression_policy.value,
+                    "X-TTS-First-Context-Tokens": str(first_context_tokens),
                     "Cache-Control": "no-store",
                 },
             )
@@ -1394,6 +1920,11 @@ async def _tts_response(
             "X-TTS-Seed": str(options.seed),
             "X-TTS-Queue-Ms": "0.000",
             "X-TTS-Pause-Mode": "adaptive",
+            "X-TTS-Expression": options.expression_profile or "native",
+            "X-TTS-Expression-Policy": options.expression_policy.value,
+            "X-TTS-First-Context-Tokens": str(
+                int(result.profile.get("first_context_tokens", first_context_tokens))
+            ),
             "X-TTS-Stage-Text-Seconds": f"{float(result.profile.get('text_processing_seconds', 0.0)):.6f}",
             "X-TTS-Stage-GPT-Encoder-Seconds": f"{float(result.profile.get('gpt_encoder_seconds', 0.0)):.6f}",
             "X-TTS-Stage-GPT-Decode-Seconds": f"{float(result.profile.get('gpt_decode_seconds', 0.0)):.6f}",
@@ -1451,7 +1982,7 @@ async def lifespan(_: FastAPI):
 app = FastAPI(
     title="AnifLive-TTS API",
     version=SERVICE_VERSION,
-    description="Low-latency multilingual AnifLive-TTS v1.2 service backed by TensorRT 11.",
+    description="Low-latency multilingual AnifLive-TTS v1.3 service backed by TensorRT 11.",
     lifespan=lifespan,
 )
 
@@ -1522,7 +2053,16 @@ async def legacy_tts_post(request: Request) -> Response:
 async def openai_speech(request: Request) -> Response:
     try:
         body = await _read_json_body(request)
-        if "text" in body or "voice_profile" in body or "generation" in body:
+        if (
+            "text" in body
+            or "segments" in body
+            or "voice_profile" in body
+            or "generation" in body
+        ):
+            has_text = _optional_string(body.get("text"), "text") is not None
+            has_segments = body.get("segments") is not None
+            if has_text == has_segments:
+                raise RequestError("Exactly one of text or segments must be provided")
             model = _optional_string(body.get("model"), "model") or MODEL_ID
             if model != MODEL_ID:
                 raise RequestError(f"model must match the active model {MODEL_ID!r}")
@@ -1532,16 +2072,15 @@ async def openai_speech(request: Request) -> Response:
             expression = body.get("expression") or {}
             if not isinstance(expression, dict):
                 raise RequestError("expression must be an object")
-            if _boolean(expression.get("enabled"), "expression.enabled", False):
-                return JSONResponse(
-                    {
-                        "error": {
-                            "code": "expression_not_implemented",
-                            "message": "Controlled expression is reserved but not implemented in v1",
-                        }
-                    },
-                    status_code=501,
-                )
+            body["_expression_enabled"] = _boolean(
+                expression.get("enabled"), "expression.enabled", False
+            )
+            body["_expression_profile"] = expression.get("profile")
+            body["_expression_intensity"] = expression.get("intensity", 0.5)
+            if "policy" in expression:
+                body["_expression_policy"] = expression["policy"]
+            if has_segments:
+                body["_expression_segments"] = body.get("segments")
             generation = body.get("generation") or {}
             if not isinstance(generation, dict):
                 raise RequestError("generation must be an object")
@@ -1573,6 +2112,7 @@ async def openai_speech(request: Request) -> Response:
 
 @app.get("/v1/capabilities")
 async def capabilities() -> dict[str, Any]:
+    expression = SERVICE.expression_metadata()
     return {
         "service": SERVICE_NAME,
         "version": SERVICE_VERSION,
@@ -1583,8 +2123,9 @@ async def capabilities() -> dict[str, Any]:
         "streaming": {"pcm16": True, "wav": False},
         "expression": {
             "native": True,
-            "controlled_profiles": False,
+            "controlled_profiles": expression["enabled"],
             "continuous_vector": False,
+            "segmented": expression["enabled"],
         },
         "pytorch_fallback": False,
         "adaptive_punctuation_segments": True,
@@ -1595,6 +2136,22 @@ async def capabilities() -> dict[str, Any]:
 @app.get("/health")
 async def health() -> dict[str, Any]:
     return SERVICE.health()
+
+
+@app.get("/v1/expressions")
+async def list_expressions() -> dict[str, Any]:
+    return {
+        "object": "list",
+        **SERVICE.expression_metadata(),
+    }
+
+
+@app.post("/v1/audio/cancel")
+async def cancel_audio() -> dict[str, Any]:
+    return {
+        "cancelled": SERVICE.cancel_active_stream(),
+        "model": MODEL_ID,
+    }
 
 
 @app.get("/model/config")

@@ -27,5 +27,8 @@ case "${command}" in
   benchmark)
     exec python /app/scripts/benchmark_readme.py "$@"
     ;;
+  webui)
+    exec python -m aniflive_tts webui "$@"
+    ;;
   *) exec "${command}" "$@" ;;
 esac

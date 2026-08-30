@@ -70,13 +70,53 @@ def main() -> int:
     parser.add_argument("--port", type=int, default=9882)
     parser.add_argument("--model", required=True)
     parser.add_argument("--voice-profile", default="default")
+    parser.add_argument("--expression-profile", default="languid-1")
+    parser.add_argument("--expected-first-context-tokens", type=int, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--report", type=Path, required=True)
     args = parser.parse_args()
     args.output_dir.mkdir(parents=True, exist_ok=True)
     args.report.parent.mkdir(parents=True, exist_ok=True)
 
-    report: dict[str, Any] = {"schema": 1, "languages": {}, "adapters": {}}
+    report: dict[str, Any] = {
+        "schema": 2,
+        "languages": {},
+        "expression_languages": {},
+        "adapters": {},
+    }
+
+    status, _, payload = call(args.host, args.port, "/health")
+    health = json.loads(payload)
+    if status != 200 or not health.get("ready") or health.get("model") != args.model:
+        raise RuntimeError(f"Health contract failed: HTTP {status}: {health!r}")
+    status, _, payload = call(args.host, args.port, "/model/config")
+    config = json.loads(payload)
+    expected_config = {
+        "model": args.model,
+        "version": "v2ProPlus",
+        "backend": "TensorRT-11",
+        "engine_count": 9,
+        "pytorch_fallback": False,
+    }
+    for field, expected in expected_config.items():
+        if config.get(field) != expected:
+            raise RuntimeError(
+                f"Model config {field} mismatch: {config.get(field)!r} != {expected!r}"
+            )
+    status, _, payload = call(args.host, args.port, "/v1/expressions")
+    expressions = json.loads(payload)
+    expression_ids = {item["id"] for item in expressions.get("profiles", [])}
+    if status != 200 or args.expression_profile not in expression_ids:
+        raise RuntimeError("Expression catalog does not expose the requested profile")
+    if expressions.get("preferred_policy") != "semantic-style":
+        raise RuntimeError("Expression catalog preferred policy is not semantic-style")
+    report["runtime"] = {
+        "health": health,
+        "config": config,
+        "expression_profile": args.expression_profile,
+        "preferred_policy": expressions["preferred_policy"],
+        "first_context_tokens": expressions["runtime_policy"]["first_context_tokens"],
+    }
     for language, text in LANGUAGE_CASES.items():
         request = {
             "model": args.model,
@@ -105,31 +145,76 @@ def main() -> int:
             "pytorch_fallback": False,
             **metadata,
         }
+        stream_request = {**request, "stream": True}
+        status, headers, pcm = call(
+            args.host,
+            args.port,
+            "/v1/audio/speech",
+            method="POST",
+            body=stream_request,
+        )
+        if status != 200 or not pcm or len(pcm) % 2:
+            raise RuntimeError(
+                f"{language} streaming PCM failed: HTTP {status}, bytes={len(pcm)}"
+            )
+        if headers.get("x-tensorrt-backend") != "TensorRT-11":
+            raise RuntimeError(f"{language} stream did not report TensorRT-11")
+        if headers.get("x-pytorch-fallback") != "false":
+            raise RuntimeError(f"{language} stream reported a fallback")
+        if headers.get("x-tts-first-context-tokens") != "17":
+            raise RuntimeError(f"{language} neutral stream changed the v1.2 context")
+        stream_path = args.output_dir / f"canonical-{language}-stream.wav"
+        stream_rate = int(headers["x-tts-sample-rate"])
+        write_pcm_wav(stream_path, pcm, stream_rate)
+        report["languages"][language]["stream"] = {
+            "path": str(stream_path),
+            "transport": headers.get("x-tts-stream"),
+            "sample_rate": stream_rate,
+            "pcm_bytes": len(pcm),
+            "sha256": hashlib.sha256(pcm).hexdigest(),
+            "first_context_tokens": 17,
+        }
 
-    ja_request = {
-        "model": args.model,
-        "voice_profile": args.voice_profile,
-        "text": LANGUAGE_CASES["ja"],
-        "language": "ja",
-        "stream": True,
-        "generation": {"top_k": 15, "top_p": 1.0, "temperature": 1.0, "seed": 1234},
-    }
-    status, headers, pcm = call(
-        args.host, args.port, "/v1/audio/speech", method="POST", body=ja_request
-    )
-    if status != 200 or not pcm or len(pcm) % 2:
-        raise RuntimeError(f"Streaming PCM validation failed: HTTP {status}, bytes={len(pcm)}")
-    stream_path = args.output_dir / "canonical-ja-stream.wav"
-    stream_rate = int(headers["x-tts-sample-rate"])
-    write_pcm_wav(stream_path, pcm, stream_rate)
-    report["stream"] = {
-        "status": status,
-        "path": str(stream_path),
-        "transport": headers.get("x-tts-stream"),
-        "sample_rate": stream_rate,
-        "pcm_bytes": len(pcm),
-        "sha256": hashlib.sha256(pcm).hexdigest(),
-    }
+        controlled_request = {
+            **stream_request,
+            "expression": {
+                "enabled": True,
+                "profile": args.expression_profile,
+                "intensity": 1.0,
+            },
+        }
+        status, headers, controlled_pcm = call(
+            args.host,
+            args.port,
+            "/v1/audio/speech",
+            method="POST",
+            body=controlled_request,
+        )
+        if status != 200 or not controlled_pcm or len(controlled_pcm) % 2:
+            raise RuntimeError(
+                f"{language} controlled stream failed: HTTP {status}, "
+                f"bytes={len(controlled_pcm)}"
+            )
+        if headers.get("x-tts-expression-policy") != "semantic-style":
+            raise RuntimeError(f"{language} did not inherit semantic-style")
+        if headers.get("x-tts-expression") != args.expression_profile:
+            raise RuntimeError(f"{language} expression profile header mismatch")
+        if headers.get("x-tts-first-context-tokens") != str(
+            args.expected_first_context_tokens
+        ):
+            raise RuntimeError(f"{language} first-context policy header mismatch")
+        if headers.get("x-tensorrt-backend") != "TensorRT-11":
+            raise RuntimeError(f"{language} controlled stream is not TensorRT-11")
+        if headers.get("x-pytorch-fallback") != "false":
+            raise RuntimeError(f"{language} controlled stream reported a fallback")
+        report["expression_languages"][language] = {
+            "status": status,
+            "profile": headers["x-tts-expression"],
+            "policy": headers["x-tts-expression-policy"],
+            "first_context_tokens": int(headers["x-tts-first-context-tokens"]),
+            "pcm_bytes": len(controlled_pcm),
+            "sha256": hashlib.sha256(controlled_pcm).hexdigest(),
+        }
 
     legacy = {
         "text": LANGUAGE_CASES["ja"],
@@ -150,21 +235,6 @@ def main() -> int:
         args.host, args.port, "/v1/audio/speech", method="POST", body=openai
     )
     report["adapters"]["openai_input_voice"] = {"status": status, **validate_wav(payload)}
-
-    expression = {
-        "model": args.model,
-        "voice_profile": args.voice_profile,
-        "text": LANGUAGE_CASES["ja"],
-        "language": "ja",
-        "expression": {"enabled": True, "profile": "happy", "intensity": 0.7},
-    }
-    status, _, payload = call(
-        args.host, args.port, "/v1/audio/speech", method="POST", body=expression
-    )
-    error = json.loads(payload)
-    if status != 501 or error.get("error", {}).get("code") != "expression_not_implemented":
-        raise RuntimeError("Expression reservation contract failed")
-    report["expression"] = {"status": status, "code": error["error"]["code"]}
 
     status, _, payload = call(
         args.host,

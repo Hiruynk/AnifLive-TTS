@@ -487,6 +487,12 @@ def build_report(
             "top_k": 15,
             "top_p": 1.0,
             "temperature": 1.0,
+            "expression": {
+                "enabled": args.expression_profile is not None,
+                "profile": args.expression_profile,
+                "intensity": args.expression_intensity,
+                "policy": args.expression_policy,
+            },
         },
         "methodology": {
             "sessions": args.sessions,
@@ -508,8 +514,12 @@ def build_report(
                 "barrier time is outside every measured request"
             ),
             "model_session_order": (
-                "session-major; multiple models are alternated within each session "
-                "index and activation time is outside measured requests"
+                "session-major; one configured model is measured in every session"
+                if len(models) == 1
+                else (
+                    "session-major; multiple models are alternated within each session "
+                    "index and activation time is outside measured requests"
+                )
             ),
             "ttfp_definition": (
                 "client wall-clock time from sending the HTTP request until reading "
@@ -522,7 +532,11 @@ def build_report(
             ),
             "audible_threshold_dbfs": AUDIBLE_THRESHOLD_DBFS,
             "audible_frame_ms": AUDIBLE_FRAME_MS,
-            "headline_statistic": "median of all model-session-level statistics",
+            "headline_statistic": (
+                "median of all session-level statistics"
+                if len(models) == 1
+                else "median of all model-session-level statistics"
+            ),
         },
         "environment": {
             "gpu": health.get("gpu"),
@@ -587,6 +601,22 @@ def parse_args() -> argparse.Namespace:
         help="Model id to benchmark; repeat to aggregate multiple voice packages.",
     )
     parser.add_argument("--voice-profile")
+    parser.add_argument(
+        "--expression-profile",
+        help="Prepared symbolic expression profile; arbitrary paths and URLs are not accepted.",
+    )
+    parser.add_argument("--expression-intensity", type=float, default=0.7)
+    parser.add_argument(
+        "--expression-policy",
+        choices=(
+            "full-switch",
+            "identity-lock",
+            "semantic-style",
+            "acoustic-style",
+            "sv-only",
+        ),
+        default="semantic-style",
+    )
     parser.add_argument("--text", default="今日はいい天気ですね。")
     parser.add_argument("--language", default="ja")
     parser.add_argument("--sessions", type=int, default=10)
@@ -596,7 +626,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--gpu-sample-interval", type=float, default=0.1)
     parser.add_argument("--timeout", type=float, default=180)
     parser.add_argument("--locale", choices=tuple(METRIC_LABELS), default="en")
-    parser.add_argument("--release", default="1.2.0")
+    parser.add_argument("--release", default="1.3.0")
     parser.add_argument("--report", type=Path, default=Path("reports/benchmark.json"))
     parser.add_argument("--markdown", type=Path, default=Path("reports/benchmark.md"))
     args = parser.parse_args()
@@ -604,6 +634,8 @@ def parse_args() -> argparse.Namespace:
         parser.error("sessions and runs must be positive; warmup must be non-negative")
     if args.gpu_index < 0 or args.gpu_sample_interval <= 0 or args.timeout <= 0:
         parser.error("GPU index must be non-negative and intervals/timeouts must be positive")
+    if not 0.0 <= args.expression_intensity <= 1.0:
+        parser.error("expression intensity must be between 0 and 1")
     if not args.path.startswith("/"):
         parser.error("path must start with '/'")
     return args
@@ -637,6 +669,13 @@ def main() -> int:
                 "seed": 1234,
             },
         }
+        if args.expression_profile is not None:
+            base["expression"] = {
+                "enabled": True,
+                "profile": args.expression_profile,
+                "intensity": args.expression_intensity,
+                "policy": args.expression_policy,
+            }
         request_bodies[model] = (
             json.dumps({**base, "stream": False}, ensure_ascii=False).encode(
                 "utf-8"

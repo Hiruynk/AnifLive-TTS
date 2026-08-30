@@ -8,7 +8,7 @@ services:
       args:
         CUDA_BASE_IMAGE: ${CUDA_BASE_IMAGE:-nvidia/cuda:12.8.1-cudnn-runtime-ubuntu24.04@sha256:9175fa92f96de35a8cfb9493f0dfcf9435c7a597e9d95ad41d2cae382a95e3f9}
         TORCH_REQUIREMENTS: ${TORCH_REQUIREMENTS:-requirements/torch-cu128.txt}
-    image: ${ANIFLIVE_TTS_IMAGE:-aniflive-tts:1.2.0-cu128}
+    image: ${ANIFLIVE_TTS_IMAGE:-aniflive-tts:1.3.0-cu128}
     container_name: aniflive-tts
     init: true
     gpus: all
