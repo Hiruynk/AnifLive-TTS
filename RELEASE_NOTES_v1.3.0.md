@@ -45,9 +45,7 @@ streaming playback, and live latency metrics.
 - API version: `1.3.0`
 - Backend: TensorRT 11, FP16
 - Languages: `zh`, `yue`, `en`, `ja`, `ko`
-- Release container tag: `ghcr.io/hiruynk/aniflive-tts:1.3.0-cu128`
-- Compatibility profile: `cu126`; publish its tag only after release-workflow
-  and target-host validation
+- Docker profiles: `cu128` by default, with `cu126` as a compatibility build
 
 The canonical public performance report uses Roxy only. Miku remains outside
 the performance headline while its model-specific long-form streaming behavior
@@ -95,8 +93,7 @@ SemanticPiece／EABPE、FastStart 及本次 D16 區塊擴散方案未通過各�
 - API 版本：`1.3.0`
 - 後端：TensorRT 11、FP16
 - 語言：`zh`、`yue`、`en`、`ja`、`ko`
-- 發行容器標籤：`ghcr.io/hiruynk/aniflive-tts:1.3.0-cu128`
-- 相容配置：`cu126`；必須通過發行流程及目標主機驗收後才發布其標籤
+- Docker 配置：預設使用 `cu128`，另提供 `cu126` 相容建置
 
 公開性能主數據只採用 Roxy。Miku 的模型特定長句串流現象仍在獨立調查，
 因此不納入性能主數據。

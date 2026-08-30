@@ -4,7 +4,7 @@ AnifLive-TTS publishes separate `cu126` and `cu128` images. A tag is a
 convenient name, not an immutable identity. Production deployments should pin
 the digest recorded by the release workflow.
 
-For each profile, download the matching
+For each published container profile, download the matching
 `RELEASE-METADATA-AnifLive-TTS-v1.3.0-<profile>.json` and
 `SBOM-AnifLive-TTS-v1.3.0-<profile>.spdx.json` and
 `TRIVY-AnifLive-TTS-v1.3.0-<profile>.json` release assets, then verify:

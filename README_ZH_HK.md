@@ -436,4 +436,4 @@ v1 目前只對 V2ProPlus 作出正式支援承諾；其他 GPT-SoVITS 版本仍
 
 AnifLive-TTS 是 AnifEngine-Voice 的第一方 TTS。其當前聲學實作建立於 [GPT-SoVITS](https://github.com/RVC-Boss/GPT-SoVITS)、[GPT-SoVITS Minimal Inference](https://github.com/GPT-SoVITS-Devel/GPT-SoVITS_minimal_inference) 與 [GPT-SoVITS C++](https://github.com/GPT-SoVITS-Devel/GPT-SoVITS-cpp) 的研究與工程成果之上。特別感謝 GPT-SoVITS 原作者 **花儿不哭** 及其他 GPT-SoVITS 貢獻者。
 
-AnifLive-TTS 原創程式碼採用 [PolyForm Noncommercial 1.0.0](LICENSE) 授權；商業使用須另行取得 Hiruynk 的書面商業授權。GPT-SoVITS 衍生部分保留 MIT，Minimal Inference 衍生部分及適用的 GPT-SoVITS C++ 參考部分保留 Apache-2.0；第三方依賴適用各自條款。詳見 [授權說明](LICENSING.md)、[第三方授權聲明](THIRD_PARTY_NOTICES.md)，以及 v1.3.0 Release 附帶的 cu126／cu128 映像衍生 SPDX SBOM。
+AnifLive-TTS 原創程式碼採用 [PolyForm Noncommercial 1.0.0](LICENSE) 授權；商業使用須另行取得 Hiruynk 的書面商業授權。GPT-SoVITS 衍生部分保留 MIT，Minimal Inference 衍生部分及適用的 GPT-SoVITS C++ 參考部分保留 Apache-2.0；第三方依賴適用各自條款。詳見 [授權說明](LICENSING.md)及[第三方授權聲明](THIRD_PARTY_NOTICES.md)。
