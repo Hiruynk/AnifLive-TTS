@@ -205,8 +205,10 @@ the [v1.2 semantic experiment record](docs/research/v1.2-semantic-experiments.md
 |---|---|---|
 | Reference-directed expression control | Passed objective, compatibility, and blind-listening gates | Adopted |
 | Hard-token acoustic lookahead with MTP future context | Cross-model quality and end-to-end latency gates were not met | Not adopted |
+| Early-exit Transformer self-draft | Even one draft token made the first-17 path 50-61% slower because drafting cost exceeded the verification savings | Not adopted |
 | Recurrent speculative decoding | Reduced target NFE, but drafter and verifier overhead limited wall-time benefit | Not adopted |
 | SemanticPiece / EABPE | Sequence compression did not concentrate in the first 17 TTFA-critical tokens | Not adopted |
+| Retrieval-based speculative decoding | The offline oracle found no candidate that met all first-17 coverage gates | Not adopted |
 | FastStart distilled/pruned Transformer | Continuation and refill reliability gates were not met | Not adopted |
 | D16 block diffusion | The evaluated low-rank adaptation did not pass the semantic-quality gate | Not adopted |
 
