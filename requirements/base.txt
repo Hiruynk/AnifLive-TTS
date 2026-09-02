@@ -8,7 +8,7 @@ tqdm==4.67.1
 psutil==6.1.1
 packaging==24.2
 ffmpeg-python==0.2.0
-transformers==5.5.0
+transformers==5.10.1
 tokenizers==0.22.2
 huggingface-hub==1.28.0
 sentencepiece==0.2.1
