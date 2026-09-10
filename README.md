@@ -22,7 +22,7 @@ AnifLive-TTS is the first-party TTS for AnifEngine-Voice, born from a practical 
 
 I therefore chose GPT-SoVITS as the foundation, reworked its inference internals, and made **low latency** and **high audio quality** the core goals of AnifLive-TTS. 🤓👆
 
-v1.4 ships with complete V2ProPlus support; future releases will extend the same API and model-package contract to more GPT-SoVITS model generations.
+v1 launches with complete V2ProPlus support; future releases will extend the same API and model-package contract to more GPT-SoVITS model generations.
 
 ## Highlights
 
@@ -39,7 +39,7 @@ v1.4 ships with complete V2ProPlus support; future releases will extend the same
 
 https://github.com/user-attachments/assets/0be5a03d-94a9-4d33-b05f-6bae6fb3cc40
 
-The local WebUI shown in the demo is included in v1.4 and starts with `run_webui.bat` after the API is ready.
+The local WebUI shown in the demo is included in v1.3 and starts with `run_webui.bat` after the API is ready.
 
 ## Performance Benchmarks
 
@@ -47,7 +47,7 @@ The local WebUI shown in the demo is included in v1.4 and starts with `run_webui
 > **Environment:** RTX 5070 Ti 16 GB / driver 596.36 / CUDA runtime 12.8 /
 > PyTorch 2.7.0+cu128 / TensorRT 11.2.1.2 / FP16
 
-The v1.4 performance reference below retains the historical Roxy measurements. The recorded workload uses one external Roxy V2ProPlus voice package with fixed text, seed, and sampling parameters. It runs 10 sessions; every session performs 10 warmups, 100 complete-WAV requests, 100 streaming requests over new connections, and 100 streaming requests over one persistent connection. The headline is the median across the 10 session-level statistics. The range shows session variation. Miku is excluded from the performance headline because its known model-specific streaming behavior is being investigated separately.
+The canonical v1.3 workload uses one external Roxy V2ProPlus voice package with fixed text, seed, and sampling parameters. It runs 10 sessions; every session performs 10 warmups, 100 complete-WAV requests, 100 streaming requests over new connections, and 100 streaming requests over one persistent connection. The headline is the median across the 10 session-level statistics. The range shows session variation. Miku is excluded from the performance headline because its known model-specific streaming behavior is being investigated separately.
 
 Formal requests run at concurrency 1. New-connection rows open a local HTTP/1.1 connection per request; keep-alive rows reuse one separately warmed connection per session. First-packet latency ends when the client reads the first server-emitted PCM chunk. Audible TTFA uses the first PCM sample above -45 dBFS within the earliest active 10 ms RMS frame and is constrained by that chunk's arrival time. Device output latency is not included.
 
@@ -104,7 +104,7 @@ Defaults are 10 sessions per model, 10 warm-up requests per session, 100 complet
 
 | Repository / system | Metric | Latency | Test conditions | Source |
 |---|---|---:|---|---|
-| **AnifLive-TTS v1.4 reference** | **Audible TTFA P50** | **74.578 ms** 🚀 | **RTX 5070 Ti; persistent HTTP/1.1; 10 Roxy sessions** | **[Local measurement](benchmarks/README_BENCHMARK_SUMMARY.json)** |
+| **AnifLive-TTS v1.3** | **Audible TTFA P50** | **74.578 ms** 🚀 | **RTX 5070 Ti; persistent HTTP/1.1; 10 Roxy sessions** | **[Local measurement](benchmarks/README_BENCHMARK_SUMMARY.json)** |
 | GPT-SoVITS C++ TRT Stream | First packet | 460 ms | RTX 2080 Ti 22 GB | [GPT-SoVITS C++](https://github.com/GPT-SoVITS-Devel/GPT-SoVITS-cpp#-performance-benchmarks) |
 | GPT-SoVITS Minimal Inference ONNX Stream | First token | 1,000 ms | RTX 2080 Ti 22 GB; FP16 | [Minimal Inference](https://github.com/GPT-SoVITS-Devel/GPT-SoVITS_minimal_inference#-performance-benchmarks) |
 | GPT-SoVITS Minimal Inference TRT fitted | First token | 2,022 ms | RTX 2080 Ti 22 GB; FP16 | [Minimal Inference](https://github.com/GPT-SoVITS-Devel/GPT-SoVITS_minimal_inference#-performance-benchmarks) |
@@ -115,7 +115,7 @@ Defaults are 10 sessions per model, 10 warm-up requests per session, 100 complet
 |---|---:|---|---|---|
 | GPT-SoVITS V2ProPlus | 0.014 | PyTorch parallel inference | RTX 4090; about four minutes of output | [RVC-Boss/GPT-SoVITS](https://github.com/RVC-Boss/GPT-SoVITS#features) |
 | GPT-SoVITS V2ProPlus | 0.028 | PyTorch parallel inference | RTX 4060 Ti | [RVC-Boss/GPT-SoVITS](https://github.com/RVC-Boss/GPT-SoVITS#features) |
-| **AnifLive-TTS v1.4 reference** | **0.087680** | **TensorRT 11 FP16** | **RTX 5070 Ti; 10 Roxy sessions** | **[Local measurement](benchmarks/README_BENCHMARK_SUMMARY.json)** |
+| **AnifLive-TTS v1.3** | **0.087680** | **TensorRT 11 FP16** | **RTX 5070 Ti; 10 Roxy sessions** | **[Local measurement](benchmarks/README_BENCHMARK_SUMMARY.json)** |
 | GPT-SoVITS C++ TRT | 0.1020 | TensorRT | RTX 2080 Ti 22 GB | [GPT-SoVITS C++](https://github.com/GPT-SoVITS-Devel/GPT-SoVITS-cpp#-performance-benchmarks) |
 | GPT-SoVITS Minimal Inference TRT fitted | 0.2096 | TensorRT fitted | RTX 2080 Ti 22 GB; FP16 | [Minimal Inference](https://github.com/GPT-SoVITS-Devel/GPT-SoVITS_minimal_inference#-performance-benchmarks) |
 
@@ -127,7 +127,7 @@ This is not a controlled benchmark. Except for AnifLive-TTS, every value is repo
 
 | System | Metric | Latency | Statistic | Test conditions | Source |
 |---|---|---:|---|---|---|
-| **AnifLive-TTS v1.4 reference** | **Audible TTFA** | **74.578 ms** 🚀 | **P50** | **RTX 5070 Ti; persistent HTTP/1.1; 10 Roxy sessions** | **[Local measurement](benchmarks/README_BENCHMARK_SUMMARY.json)** |
+| **AnifLive-TTS v1.3** | **Audible TTFA** | **74.578 ms** 🚀 | **P50** | **RTX 5070 Ti; persistent HTTP/1.1; 10 Roxy sessions** | **[Local measurement](benchmarks/README_BENCHMARK_SUMMARY.json)** |
 | Qwen3-TTS-12Hz-0.6B | First-packet latency | 97 ms | Concurrency 1 | Single accelerator; 320 ms speech packet | [Qwen3-TTS Technical Report](https://arxiv.org/abs/2601.15621) |
 | Fish Audio S2 | TTFA | About 100 ms | Project-published value | H200; single GPU | [Fish Audio S2](https://github.com/fishaudio/fish-speech#performance) |
 | Chatterbox-Flash (D=32, α=0.75) | TTFP | 103 ms | Concurrency 1; 50 utterances | H100 | [Chatterbox-Flash paper](https://arxiv.org/abs/2605.30748) |
@@ -141,7 +141,7 @@ IndexTTS 2.0/2.5 and VoxCPM2 do not publish first-audio latency under a comparab
 | System | RTF | Runtime / model | Test conditions | Source |
 |---|---:|---|---|---|
 | Chatterbox-Flash (D=32, α=0.75) | 0.076 | Block diffusion | H100; concurrency 1; 50 utterances | [Chatterbox-Flash paper](https://arxiv.org/abs/2605.30748) |
-| **AnifLive-TTS v1.4 reference** | **0.087680** | **TensorRT 11 FP16** | **RTX 5070 Ti; 10 Roxy sessions** | **[Local measurement](benchmarks/README_BENCHMARK_SUMMARY.json)** |
+| **AnifLive-TTS v1.3** | **0.087680** | **TensorRT 11 FP16** | **RTX 5070 Ti; 10 Roxy sessions** | **[Local measurement](benchmarks/README_BENCHMARK_SUMMARY.json)** |
 | Chatterbox-Flash (default D=16, α=0.5) | 0.107 | Block diffusion | H100; concurrency 1; 50 utterances | [Chatterbox-Flash paper](https://arxiv.org/abs/2605.30748) |
 | CosyVoice3 | 0.1091 | TRT-LLM; offline batch 1 | L20 | [QwenAudio/CosyVoice](https://github.com/QwenAudio/CosyVoice/blob/main/runtime/triton_trtllm/README.Cosyvoice3.md#benchmark-with-offline-inference-mode) |
 | CosyVoice2 | 0.1228 | TRT-LLM | L20; concurrency 1; client-server | [QwenAudio/CosyVoice](https://github.com/QwenAudio/CosyVoice/blob/main/runtime/triton_trtllm/README.Cosyvoice2.DiT.md#benchmark-with-client-server-mode) |
@@ -156,7 +156,7 @@ AnifLive-TTS pre-packages voice profiles and reference conditioning for persiste
 ## Deterministic Quality Preservation
 
 > [!NOTE]
-> **Quality gate**　Each controlled-expression stream is compared with its complete-WAV output at the same seed and settings. Neutral complete WAV, streaming PCM, and semantic outputs are also checked against the immutable historical baseline. These objective checks do not replace subjective listening.
+> **Quality gate**　Each controlled-expression stream is compared with its complete-WAV output at the same seed and settings. Neutral complete WAV, streaming PCM, and semantic outputs are also checked against the immutable v1.2 baseline. These objective checks do not replace subjective listening.
 
 | Voice package | Japanese expression rows | Minimum log-mel | Minimum speaker cosine | Maximum duration difference | Underruns |
 |---|---:|---:|---:|---:|---:|
@@ -167,7 +167,7 @@ These rows describe private local validation overlays only. Their expression
 references, transcripts, and character media are not included in the public
 source, image, or release bundle.
 
-The post-policy five-language long/short matrix passed 20/20 rows per model. Its controlled-expression minima were `0.999660` log-mel and `0.988638` speaker cosine for Miku, and `0.998827` and `0.993495` for Roxy. Neutral complete WAV, streaming PCM, complete semantics, and streaming semantics remain exactly equal to the historical baseline for both packages across `zh`, `yue`, `en`, `ja`, and `ko`.
+The post-policy five-language long/short matrix passed 20/20 rows per model. Its controlled-expression minima were `0.999660` log-mel and `0.988638` speaker cosine for Miku, and `0.998827` and `0.993495` for Roxy. Neutral complete WAV, streaming PCM, complete semantics, and streaming semantics remain exactly equal to v1.2 for both packages across `zh`, `yue`, `en`, `ja`, and `ko`.
 
 Six independent short, long, and mixed-expression blind pairs produced five no-difference decisions, one preference for the Roxy complete output, and no reported artifact. The hard gates remain log-mel cosine `>=0.99`, speaker cosine `>=0.98`, and duration difference `<=3%`.
 
@@ -178,14 +178,14 @@ Six independent short, long, and mixed-expression blind pairs produced five no-d
 - A sampling CUDA Graph captures softmax, multinomial, and gather while preserving RNG semantics.
 - Only the first text segment uses the established 9+8 semantic-token preview; later segments keep the native full-context refill path.
 - EOS checks remain batched every two steps, and the runtime retains its warm state for 25 seconds.
-- Expression references are prepared at model activation and kept GPU-resident; neutral requests preserve the historical baseline output exactly.
+- Expression references are prepared at model activation and kept GPU-resident; neutral requests preserve the v1.2 output exactly.
 - Expression selection and transition settings are package-driven, with no Miku/Roxy runtime branch.
 - Startup warmup and HTTP/1.1 keep-alive avoid request-time setup.
 
 Full GPT-step CUDA Graph capture is currently limited by TensorRT capture
 compatibility. See the [performance engineering record](docs/PERFORMANCE_ENGINEERING.md).
 
-## Architecture Decisions Retained in v1.4
+## Architectures Evaluated for v1.2
 
 | Candidate | Result | Decision |
 |---|---|---|
@@ -197,11 +197,9 @@ compatibility. See the [performance engineering record](docs/PERFORMANCE_ENGINEE
 AnifLive-TTS does not adopt architectural changes solely for theoretical
 efficiency. Experimental semantic backends are promoted only when they
 outperform the production baseline without compromising speech quality. See
-the [historical semantic experiment record](docs/research/architecture-history.md#semantic-backends).
+the [v1.2 semantic experiment record](docs/research/v1.2-semantic-experiments.md).
 
-## Architectures Evaluated for v1.4
-
-Studio adds dataset import and preparation, transcript review, target-speaker extraction, training, checkpoint selection, TensorRT conversion, evaluation and qualified model installation. Its workers run separately from the inference process. Earlier architecture decisions below are retained historical results; the Studio rows describe the v1.4 additions.
+## Architectures Evaluated for v1.3
 
 | Candidate | Result | Decision |
 |---|---|---|
@@ -213,16 +211,23 @@ Studio adds dataset import and preparation, transcript review, target-speaker ex
 | Retrieval-based speculative decoding | The offline oracle found no candidate that met all first-17 coverage gates | Not adopted |
 | FastStart distilled/pruned Transformer | Continuation and refill reliability gates were not met | Not adopted |
 | D16 block diffusion | The evaluated low-rank adaptation did not pass the semantic-quality gate | Not adopted |
+
+These decisions apply to the evaluated AnifLive-TTS V2ProPlus workload, not to every possible implementation of the candidate architectures. See the [v1.3 latency experiment record](docs/research/v1.3-latency-experiments.md) and [expression design record](docs/research/v1.3-reference-expression-design.md).
+
+## Studio Added in v1.4
+
+Studio adds dataset preparation and review, training, checkpoint continuation, TensorRT conversion, evaluation and model installation.
+
+| Feature | Result | Version |
+|---|---|---|
 | Studio dataset preparation and review | Functional workflow verified | Added in v1.4 |
 | Studio training, checkpoint continuation and GPU handoff | Real training and recovery verified | Added in v1.4 |
 | Studio TensorRT conversion, evaluation and model installation | Package and listening gates verified | Added in v1.4 |
 
-These decisions apply to the evaluated AnifLive-TTS V2ProPlus workload, not to every possible implementation of the candidate architectures. See the [historical latency experiment record](docs/research/architecture-history.md#latency) and [expression design record](docs/research/architecture-history.md#expression).
-
 ## Architecture And API
 
 AnifLive-TTS is the first-party FP16 TensorRT 11 speech inference platform for
-AnifEngine-Voice. Its validated v1.4 acoustic backend is `gsv-v2proplus`,
+AnifEngine-Voice. Its first validated v1 acoustic backend is `gsv-v2proplus`,
 with the same contract reserved for future GPT-SoVITS model generations. Python owns the API, five-language frontend, model packages,
 converter, and GPT AR scheduling. CUDA/TensorRT owns all nine model stages,
 GPU sampling, and persistent buffers. One process preloads one active model.
@@ -421,11 +426,14 @@ server rejects mid-phrase switches rather than risk skipped or unclear words:
 
 ## Roadmap
 
-**v1.4**
+**v1.3**
 
 - [x] V2ProPlus model conversion and nine-stage TensorRT 11 inference
 - [x] Five-language API, complete WAV, low-latency PCM streaming, and Docker delivery
 - [x] Package-curated expression profiles, per-segment delivery, and the local WebUI
+
+**v1.4 — Studio**
+
 - [x] Studio dataset preparation, review and target-speaker extraction
 - [x] Studio training, checkpoint continuation, TensorRT conversion and evaluation
 - [x] Studio model installation, job management and GPU handoff
