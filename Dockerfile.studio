@@ -1,0 +1,10 @@
+ARG WORKER_IMAGE=aniflive-tts-workstation-worker:1.4.0-cu128
+FROM docker:cli@sha256:eccaacfeed644c7de222ff047483568cb988dde95476fbaaf10ea2d04921bb66 AS docker-client
+
+FROM ${WORKER_IMAGE}
+LABEL org.opencontainers.image.title="AnifLive-TTS Studio"
+COPY --from=docker-client /usr/local/bin/docker /usr/local/bin/docker
+COPY licenses/docker-cli-LICENSE /usr/share/doc/aniflive-docker-cli/LICENSE
+COPY src/aniflive_tts/ /opt/venv/lib/python3.12/site-packages/aniflive_tts/
+COPY webui/ /app/webui/
+ENTRYPOINT ["python"]

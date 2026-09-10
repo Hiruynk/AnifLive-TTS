@@ -1,0 +1,331 @@
+ARG BASE_IMAGE=aniflive-tts:1.4.0-cu128
+FROM ${BASE_IMAGE}
+
+ARG VERSION=1.4.0
+LABEL org.opencontainers.image.title="AnifLive-TTS Workstation Worker" \
+      org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.authors="Hiruynk" \
+      org.opencontainers.image.licenses="PolyForm-Noncommercial-1.0.0"
+
+COPY requirements/workstation-worker.txt /tmp/workstation-worker.txt
+RUN --mount=type=cache,id=aniflive-worker-pip,target=/root/.cache/pip,sharing=locked \
+    python -m pip install -r /tmp/workstation-worker.txt
+
+# faster-whisper declares the CPU distribution even though both ORT wheels
+# provide the same Python package. Keep only the CUDA implementation after
+# dependency resolution; reinstall because uninstalling the CPU wheel removes
+# files shared with an already-installed GPU wheel.
+RUN --mount=type=cache,id=aniflive-worker-pip,target=/root/.cache/pip,sharing=locked \
+    python -m pip uninstall -y onnxruntime \
+    && python -m pip install --no-deps --force-reinstall onnxruntime-gpu==1.22.0 \
+    && python -c "import onnxruntime as ort; assert ort.__version__ == '1.22.0'; assert 'CUDAExecutionProvider' in ort.get_available_providers()"
+
+RUN --mount=type=cache,id=aniflive-worker-nemo-speech,target=/root/.cache/nemo-speech,sharing=locked \
+    python - <<'PY'
+import hashlib
+import http.client
+from pathlib import Path
+import shutil
+import tarfile
+import time
+import urllib.request
+
+version = "0.1.0"
+expected = "e68628f396489c98fb353e070efaea5bc4977409ae7734fce56c251a79e29147"
+expected_bytes = 107_310_946
+archive = Path(
+    "/root/.cache/nemo-speech/nemo-speech-0.1.0-linux-x86_64-cuda.tar.gz"
+)
+url = (
+    "https://github.com/NVIDIA/NeMo-Speech.cpp/releases/download/"
+    f"v{version}/nemo-speech-{version}-linux-x86_64-cuda.tar.gz"
+)
+for attempt in range(8):
+    try:
+        current = archive.stat().st_size if archive.exists() else 0
+        if current > expected_bytes:
+            archive.unlink()
+            current = 0
+        if current == expected_bytes:
+            break
+        request = urllib.request.Request(url)
+        if current:
+            request.add_header("Range", f"bytes={current}-")
+        with urllib.request.urlopen(request, timeout=300) as response:
+            append = current > 0 and response.status == 206
+            with archive.open("ab" if append else "wb") as output:
+                while block := response.read(1024 * 1024):
+                    output.write(block)
+        if archive.stat().st_size == expected_bytes:
+            break
+        raise RuntimeError(
+            f"NeMo-Speech.cpp archive is incomplete: "
+            f"{archive.stat().st_size}/{expected_bytes} bytes"
+        )
+    except (OSError, RuntimeError, http.client.HTTPException):
+        if attempt == 7:
+            raise
+        time.sleep(2**attempt)
+if archive.stat().st_size != expected_bytes:
+    raise RuntimeError("NeMo-Speech.cpp archive size mismatch")
+digest = hashlib.sha256()
+with archive.open("rb") as stream:
+    while block := stream.read(1024 * 1024):
+        digest.update(block)
+if digest.hexdigest() != expected:
+    raise RuntimeError("NeMo-Speech.cpp archive checksum mismatch")
+
+staging = Path("/tmp/nemo-speech-release")
+staging.mkdir()
+with tarfile.open(archive, "r:gz") as bundle:
+    bundle.extractall(staging, filter="data")
+binaries = list(staging.rglob("bin/nemo-speech"))
+if len(binaries) != 1 or not binaries[0].is_file():
+    raise RuntimeError("NeMo-Speech.cpp archive has an unexpected layout")
+root = binaries[0].parent.parent
+target = Path("/opt/nemo-speech")
+if target.exists():
+    shutil.rmtree(target)
+shutil.move(str(root), target)
+(target / "ANIFLIVE_TTS_NEMO_SPEECH_VERSION").write_text(
+    version + "\n", encoding="ascii"
+)
+shutil.rmtree(staging, ignore_errors=True)
+PY
+RUN test -x /opt/nemo-speech/bin/nemo-speech \
+    && test -f /opt/nemo-speech/ANIFLIVE_TTS_NEMO_SPEECH_VERSION
+ENV PATH="/opt/nemo-speech/bin:${PATH}"
+
+RUN python - <<'PY'
+import hashlib
+from pathlib import Path, PurePosixPath
+import shutil
+import tarfile
+import time
+import urllib.request
+
+revision = "48b1a0169a28582a8984402f82cf438d3bfa6aca"
+expected = "1c967e31777b2b88468af3e7481bcb770ac4d09dd854bdb9ee065d8c8c75fcb6"
+archive = Path("/tmp/gpt-sovits.tar.gz")
+url = f"https://codeload.github.com/RVC-Boss/GPT-SoVITS/tar.gz/{revision}"
+for attempt in range(5):
+    try:
+        with urllib.request.urlopen(url, timeout=180) as response:
+            archive.write_bytes(response.read())
+        break
+    except OSError:
+        if attempt == 4:
+            raise
+        time.sleep(2**attempt)
+if hashlib.sha256(archive.read_bytes()).hexdigest() != expected:
+    raise RuntimeError("GPT-SoVITS source archive checksum mismatch")
+staging = Path("/tmp/gpt-sovits-source")
+staging.mkdir()
+with tarfile.open(archive, "r:gz") as bundle:
+    members = bundle.getmembers()
+    roots = {PurePosixPath(member.name).parts[0] for member in members if member.name}
+    if len(roots) != 1:
+        raise RuntimeError("GPT-SoVITS archive has an unexpected layout")
+    for member in members:
+        path = PurePosixPath(member.name)
+        if path.is_absolute() or ".." in path.parts or member.issym() or member.islnk():
+            raise RuntimeError(f"Unsafe GPT-SoVITS archive member: {member.name}")
+    bundle.extractall(staging, members=members, filter="data")
+source = staging / next(iter(roots))
+target = Path("/opt/aniflive-tts/gpt-sovits")
+if target.exists():
+    shutil.rmtree(target)
+shutil.move(str(source), target)
+(target / "ANIFLIVE_TTS_GPT_SOVITS_REVISION").write_text(revision + "\n", encoding="ascii")
+PY
+
+RUN --mount=type=cache,id=aniflive-worker-clearvoice,target=/root/.cache/clearvoice,sharing=locked \
+    python - <<'PY'
+import hashlib
+import http.client
+from pathlib import Path, PurePosixPath
+import shutil
+import tarfile
+import time
+import urllib.request
+
+revision = "6b3774dc79c46ae8bed2a4fa5f706f0ac8c75c61"
+expected = "f8f8d2f2190b9909b51e91ce886d1c7efedb7349b3ff6d3ab521451165fbd8da"
+expected_bytes = 243_883_122
+archive = Path("/root/.cache/clearvoice/source.tar.gz")
+url = f"https://codeload.github.com/modelscope/ClearerVoice-Studio/tar.gz/{revision}"
+for attempt in range(8):
+    try:
+        current = archive.stat().st_size if archive.exists() else 0
+        if current > expected_bytes:
+            archive.unlink()
+            current = 0
+        if current == expected_bytes:
+            break
+        request = urllib.request.Request(url)
+        if current:
+            request.add_header("Range", f"bytes={current}-")
+        with urllib.request.urlopen(request, timeout=300) as response:
+            append = current > 0 and response.status == 206
+            mode = "ab" if append else "wb"
+            with archive.open(mode) as output:
+                while block := response.read(1024 * 1024):
+                    output.write(block)
+        if archive.stat().st_size == expected_bytes:
+            break
+        raise RuntimeError(
+            f"ClearerVoice-Studio source archive is incomplete: "
+            f"{archive.stat().st_size}/{expected_bytes} bytes"
+        )
+    except (OSError, RuntimeError, http.client.HTTPException):
+        if attempt == 7:
+            raise
+        time.sleep(2**attempt)
+if archive.stat().st_size != expected_bytes:
+    raise RuntimeError("ClearerVoice-Studio source archive size mismatch")
+digest = hashlib.sha256()
+with archive.open("rb") as stream:
+    while block := stream.read(1024 * 1024):
+        digest.update(block)
+if digest.hexdigest() != expected:
+    raise RuntimeError("ClearerVoice-Studio source archive checksum mismatch")
+
+staging = Path("/tmp/clearvoice-source")
+staging.mkdir()
+with tarfile.open(archive, "r:gz") as bundle:
+    members = bundle.getmembers()
+    roots = {PurePosixPath(member.name).parts[0] for member in members if member.name}
+    if len(roots) != 1:
+        raise RuntimeError("ClearerVoice-Studio archive has an unexpected layout")
+    root = next(iter(roots))
+    prefix = PurePosixPath(root, "clearvoice", "clearvoice", "models", "mossformer2_ss")
+    selected = []
+    for member in members:
+        path = PurePosixPath(member.name)
+        if path.is_absolute() or ".." in path.parts or member.issym() or member.islnk():
+            raise RuntimeError(f"Unsafe ClearerVoice-Studio archive member: {member.name}")
+        if path == PurePosixPath(root, "LICENSE") or (
+            path.is_relative_to(prefix) and (member.isdir() or path.suffix == ".py")
+        ):
+            selected.append(member)
+    if not selected:
+        raise RuntimeError("Pinned MossFormer2 source was not found in ClearerVoice-Studio")
+    bundle.extractall(staging, members=selected, filter="data")
+
+extracted = staging / root
+target = Path("/opt/aniflive-tts/clearvoice-source")
+target.mkdir(parents=True)
+(target / "clearvoice" / "models").mkdir(parents=True)
+(target / "clearvoice" / "__init__.py").write_text("", encoding="ascii")
+(target / "clearvoice" / "models" / "__init__.py").write_text("", encoding="ascii")
+shutil.move(
+    str(extracted / "clearvoice" / "clearvoice" / "models" / "mossformer2_ss"),
+    target / "clearvoice" / "models" / "mossformer2_ss",
+)
+shutil.copy2(extracted / "LICENSE", target / "LICENSE")
+(target / "ANIFLIVE_TTS_CLEARVOICE_REVISION").write_text(revision + "\n", encoding="ascii")
+shutil.rmtree(staging)
+PY
+
+COPY pyproject.toml README.md /tmp/aniflive-tts/
+COPY src /tmp/aniflive-tts/src
+RUN python -m pip install --no-deps --no-build-isolation /tmp/aniflive-tts \
+    && rm -rf /tmp/aniflive-tts
+# The base runtime contains the release exporter.  Workstation conversion must
+# use the exporter from the same source revision as its control plane so newly
+# trained checkpoints cannot be handed to stale conversion code.
+COPY minimal_inference /app/minimal_inference
+COPY scripts/benchmark_audio.py scripts/benchmark_readme.py /opt/aniflive-tts/evaluation/
+COPY scripts/workstation-worker /opt/aniflive-tts/bin/workstation-worker
+RUN chmod 0755 /opt/aniflive-tts/bin/workstation-worker \
+    && cd /opt/aniflive-tts/gpt-sovits/GPT_SoVITS \
+    && PYTHONPATH=/opt/aniflive-tts/gpt-sovits:/opt/aniflive-tts/gpt-sovits/GPT_SoVITS \
+       python - <<'PY'
+from pathlib import Path
+import py_compile
+
+import ctranslate2
+import einops
+import faster_whisper
+import funasr
+import pandas
+import pytorch_lightning
+import rotary_embedding_torch
+import tensorboard
+import torchcodec
+import torchmetrics
+import torchinfo
+import torchaudio
+import x_transformers
+from AR.data.data_module import Text2SemanticDataModule
+from AR.models.t2s_lightning_module import Text2SemanticLightningModule
+from module.data_utils import TextAudioSpeakerLoader
+from module.models import SynthesizerTrn
+from aniflive_tts.dataset_pipeline import (
+    load_gpt_sovits_normalizer,
+    normalize_dataset_transcript,
+)
+
+root = Path("/opt/aniflive-tts/gpt-sovits")
+assert (root / "ANIFLIVE_TTS_GPT_SOVITS_REVISION").read_text().strip() == (
+    "48b1a0169a28582a8984402f82cf438d3bfa6aca"
+)
+py_compile.compile(str(root / "GPT_SoVITS/s1_train.py"), doraise=True)
+py_compile.compile(str(root / "GPT_SoVITS/s2_train.py"), doraise=True)
+py_compile.compile("/app/minimal_inference/export_onnx.py", doraise=True)
+assert all(
+    value is not None
+    for value in (
+        ctranslate2,
+        einops,
+        faster_whisper,
+        funasr,
+        pandas,
+        pytorch_lightning,
+        rotary_embedding_torch,
+        tensorboard,
+        torchcodec,
+        torchmetrics,
+        torchinfo,
+        torchaudio,
+        x_transformers,
+        Text2SemanticDataModule,
+        Text2SemanticLightningModule,
+        TextAudioSpeakerLoader,
+        SynthesizerTrn,
+    )
+)
+
+normalizer = load_gpt_sovits_normalizer()
+for language, text in (
+    ("yue", "我今日真係好開心。"),
+    ("zh", "今天天气很好。"),
+    ("ja", "今日は良い天気です。"),
+    ("en", "Today is a good day."),
+    ("ko", "오늘은 좋은 날입니다."),
+):
+    record = normalize_dataset_transcript(text, language, normalizer=normalizer)
+    assert record["language"] == language and record["normalized_text"]
+
+# Torchaudio 2.10 delegates decoding to TorchCodec.  Exercise the exact loader
+# used by GPT-SoVITS speaker-vector preprocessing so a nominally successful
+# worker image cannot ship with a missing or unusable codec backend.
+import math
+import struct
+import wave
+
+probe = Path("/tmp/aniflive-torchcodec-probe.wav")
+with wave.open(str(probe), "wb") as stream:
+    stream.setnchannels(1)
+    stream.setsampwidth(2)
+    stream.setframerate(32000)
+    stream.writeframes(
+        b"".join(
+            struct.pack("<h", int(4096 * math.sin(2 * math.pi * 440 * index / 32000)))
+            for index in range(3200)
+        )
+    )
+waveform, sample_rate = torchaudio.load(probe)
+assert sample_rate == 32000 and tuple(waveform.shape) == (1, 3200)
+probe.unlink()
+PY

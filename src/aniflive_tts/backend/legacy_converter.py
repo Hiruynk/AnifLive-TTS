@@ -15,7 +15,8 @@ import torch
 from onnx import helper, numpy_helper
 
 from .compatibility import ensure_tensorrt11
-from .contracts import ModelPaths, STAGE_IO_CONTRACTS, STAGE_ORDER
+from .contracts import (ModelPaths, STAGE_IO_CONTRACTS, STAGE_ORDER,
+                        stage_outputs_supported, validate_full_logits_output)
 from .profiles import profiles_for
 from .trt_builder import DetailedTensorRTLogger, TensorRTEngineBuilder
 
@@ -329,11 +330,12 @@ def _validate_engine(stage: str, engine_path: Path) -> tuple[dict[str, object], 
             }
         )
     expected_inputs, expected_outputs = STAGE_IO_CONTRACTS[stage]
-    if set(inputs) != set(expected_inputs) or set(outputs) != set(expected_outputs):
+    if set(inputs) != set(expected_inputs) or not stage_outputs_supported(stage, outputs):
         raise RuntimeError(
             f"{stage} engine I/O mismatch: inputs={inputs}, outputs={outputs}, "
             f"expected_inputs={expected_inputs}, expected_outputs={expected_outputs}"
         )
+    validate_full_logits_output(stage, outputs, engine, trt)
     return tuple(description)
 
 

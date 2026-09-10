@@ -53,7 +53,7 @@ def split_text(text):
 # Global TRT Logger
 TRT_LOGGER = trt.Logger(trt.Logger.WARNING)
 
-def sample_topk(topk_values, topk_indices, temperature=1.0, top_k=None, top_p=1.0):
+def sample_topk(topk_values, topk_indices, temperature=1.0, top_k=None, top_p=1.0, generator=None):
     """Sample from the exported top-50 logits with GPT-SoVITS API controls.
 
     The TensorRT graph deliberately exports only its 50 highest logits.  That
@@ -87,9 +87,9 @@ def sample_topk(topk_values, topk_indices, temperature=1.0, top_k=None, top_p=1.
     # For small sizes (K=50), CPU is often faster on Windows due to launch overhead
     if device.type == "cuda":
         # Multinomial is a sync point anyway if we inspect it
-        indices_of_indices = torch.multinomial(probs, num_samples=1)
+        indices_of_indices = torch.multinomial(probs, num_samples=1, generator=generator)
     else:
-        indices_of_indices = torch.multinomial(probs, num_samples=1)
+        indices_of_indices = torch.multinomial(probs, num_samples=1, generator=generator)
         
     samples = torch.gather(topk_indices, -1, indices_of_indices)
     

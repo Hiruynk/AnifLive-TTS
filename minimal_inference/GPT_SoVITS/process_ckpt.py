@@ -1,3 +1,4 @@
+# Modified by AnifLive-TTS in 2026.
 import traceback
 from collections import OrderedDict
 from time import time as ttime
@@ -149,10 +150,23 @@ def get_sovits_version_from_path_fast(sovits_path, *, weights_only=True):
 
 
 def load_sovits_new(sovits_path, *, weights_only=True):
+    safe_globals = None
+    if weights_only:
+        # V2Pro/Plus checkpoints serialize the upstream HParams mapping. Keep
+        # PyTorch's restricted unpickler and admit only that data container.
+        from utils import HParams
+
+        safe_globals = torch.serialization.safe_globals([HParams])
     with open(sovits_path, "rb") as f:
         meta = f.read(2)
         if meta != b"PK":
             data = b"PK" + f.read()
             bio = BytesIO(data)
-            return torch.load(bio, map_location="cpu", weights_only=weights_only)
-    return torch.load(sovits_path, map_location="cpu", weights_only=weights_only)
+            if safe_globals is not None:
+                with safe_globals:
+                    return torch.load(bio, map_location="cpu", weights_only=True)
+            return torch.load(bio, map_location="cpu", weights_only=False)
+    if safe_globals is not None:
+        with safe_globals:
+            return torch.load(sovits_path, map_location="cpu", weights_only=True)
+    return torch.load(sovits_path, map_location="cpu", weights_only=False)

@@ -172,6 +172,22 @@ def validate_checksums(package_dir: Path) -> dict[str, str]:
     return checksums
 
 
+def _compatible_gpu_memory(recorded: Any, current: Any) -> bool:
+    """Allow bounded driver-reserved VRAM variation on an otherwise identical GPU."""
+    values = []
+    for value in (recorded, current):
+        if isinstance(value, bool) or not isinstance(value, (int, str)):
+            return False
+        if isinstance(value, str) and not value.isdecimal():
+            return False
+        number = int(value)
+        if number <= 0:
+            return False
+        values.append(number)
+    difference = abs(values[0] - values[1])
+    return difference <= 64 * 1024 * 1024 and difference * 200 <= min(values)
+
+
 def select_engine_dir(package_dir: Path, manifest: dict[str, Any]) -> Path:
     package_dir = package_dir.resolve()
     expected = manifest.get("active_engine_fingerprint")
@@ -209,7 +225,9 @@ def select_engine_dir(package_dir: Path, manifest: dict[str, Any]) -> Path:
     for key in ENGINE_COMPATIBILITY_KEYS:
         package_value = recorded.get(key)
         runtime_value = runtime[key]
-        if key in {"gpu", "platform_system", "platform_machine"}:
+        if key == "gpu_total_memory_bytes":
+            matches = _compatible_gpu_memory(package_value, runtime_value)
+        elif key in {"gpu", "platform_system", "platform_machine"}:
             matches = str(package_value).strip().casefold() == str(runtime_value).strip().casefold()
         else:
             matches = str(package_value) == str(runtime_value)

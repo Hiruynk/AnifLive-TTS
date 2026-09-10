@@ -51,7 +51,8 @@
       this.pendingSelection = null;
       this.previousText = this.textarea.value;
       this.nextId = 1;
-      this.annotationLineHeight = 2.5;
+      this.annotationBaseLineHeight = this.editor.ownerDocument.body.classList.contains("embedded") ? 2.9 : 2.5;
+      this.annotationLineHeight = this.annotationBaseLineHeight;
       this.resolveTimers = new Map();
       this.resizeObserver = new ResizeObserver(() => this.renderMirror());
       this.resizeObserver.observe(this.textarea);
@@ -476,6 +477,10 @@
     }
 
     renderMirror() {
+      // Match the editing viewport, including space taken by its vertical scrollbar.
+      const width = this.textarea.clientWidth;
+      this.mirrorContent.style.width = `${width}px`;
+      this.playbackContent.style.width = `${width}px`;
       const text = this.textarea.value;
       const fragment = document.createDocumentFragment();
       let cursor = 0;
@@ -557,7 +562,7 @@
           this.captions.append(hit);
         }
         const top = rect.bottom - editorRect.top + 1;
-        if (top < 0 || top > editorRect.height) continue;
+        // Measure every annotation so scrolling does not change the text's line spacing.
         const captionWidth = this.measureCaptionWidth(item.prompt);
         const centeredLeft = rect.left - editorRect.left + (rect.width - captionWidth) / 2;
         const maximumLeft = Math.max(7, editorRect.width - captionWidth - 7);
@@ -597,7 +602,13 @@
         maximumLaneCount = Math.max(maximumLaneCount, lane + 1);
       }
 
-      const requiredLineHeight = 2.5 + (maximumLaneCount - 1) * 1.2;
+      // Include the last caption lane in the textarea's own scrollable content.
+      const bottomSpace = candidates.length ? Math.max(17, maximumLaneCount * 17 + 8) : 17;
+      const bottomValue = `${bottomSpace}px`;
+      if (this.editor.style.getPropertyValue("--annotation-bottom-space") !== bottomValue) {
+        this.editor.style.setProperty("--annotation-bottom-space", bottomValue);
+      }
+      const requiredLineHeight = this.annotationBaseLineHeight + (maximumLaneCount - 1) * 1.2;
       if (Math.abs(requiredLineHeight - this.annotationLineHeight) > 0.01) {
         this.annotationLineHeight = requiredLineHeight;
         this.editor.style.setProperty("--annotation-line-height", String(requiredLineHeight));
@@ -606,6 +617,7 @@
       }
 
       for (const candidate of candidates) {
+        if (candidate.top < 0 || candidate.top > editorRect.height) continue;
         const { item } = candidate;
         const caption = document.createElement("button");
         caption.className = "annotation-caption";
@@ -636,16 +648,6 @@
         return;
       }
       for (const item of this.sortedAnnotations()) this.cards.append(this.expressionCard(item));
-    }
-
-    resizeProfileButton(button) {
-      const label = button.querySelector(".expression-card-button-label");
-      const textWidth = Array.from(label?.textContent || "").reduce(
-        (width, character) => width + (character.codePointAt(0) > 0x7f ? 13 : 7.4),
-        42
-      );
-      const availableWidth = Math.max(96, Math.min(420, this.cards.clientWidth - 48));
-      button.style.width = `${Math.min(availableWidth, Math.max(86, textWidth))}px`;
     }
 
     closeCardMenus(except = null) {
@@ -823,7 +825,6 @@
         }
       });
       this.updateCardState(item, card);
-      global.requestAnimationFrame(() => this.resizeProfileButton(pickerButton));
       return card;
     }
 

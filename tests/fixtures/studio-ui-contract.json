@@ -1,0 +1,2013 @@
+{
+  "controls": [
+    {
+      "module": "shell",
+      "tag": "button",
+      "attributes": {
+        "class": "dock-home nav-item active mobile-primary",
+        "type": "button",
+        "data-view": "overview",
+        "aria-label": "AnifLive-TTS Studio overview",
+        "title": "Overview"
+      }
+    },
+    {
+      "module": "shell",
+      "tag": "button",
+      "attributes": {
+        "class": "nav-item mobile-primary",
+        "type": "button",
+        "data-view": "synthesis",
+        "aria-label": "Synthesis",
+        "title": "Synthesis"
+      }
+    },
+    {
+      "module": "shell",
+      "tag": "button",
+      "attributes": {
+        "class": "nav-item",
+        "type": "button",
+        "data-view": "expressions",
+        "aria-label": "Expressions",
+        "title": "Expressions"
+      }
+    },
+    {
+      "module": "shell",
+      "tag": "button",
+      "attributes": {
+        "class": "nav-item mobile-primary",
+        "type": "button",
+        "data-view": "datasets",
+        "aria-label": "Datasets",
+        "title": "Datasets"
+      }
+    },
+    {
+      "module": "shell",
+      "tag": "button",
+      "attributes": {
+        "class": "nav-item",
+        "type": "button",
+        "data-view": "training",
+        "aria-label": "Training",
+        "title": "Training"
+      }
+    },
+    {
+      "module": "shell",
+      "tag": "button",
+      "attributes": {
+        "class": "nav-item",
+        "type": "button",
+        "data-view": "evaluation",
+        "aria-label": "Evaluation",
+        "title": "Evaluation"
+      }
+    },
+    {
+      "module": "shell",
+      "tag": "button",
+      "attributes": {
+        "class": "nav-item",
+        "type": "button",
+        "data-view": "models",
+        "aria-label": "Models",
+        "title": "Models"
+      }
+    },
+    {
+      "module": "shell",
+      "tag": "button",
+      "attributes": {
+        "class": "nav-item",
+        "type": "button",
+        "data-view": "engines",
+        "aria-label": "TensorRT engines",
+        "title": "TensorRT Engines"
+      }
+    },
+    {
+      "module": "shell",
+      "tag": "button",
+      "attributes": {
+        "class": "nav-item mobile-primary",
+        "type": "button",
+        "data-view": "jobs",
+        "aria-label": "Jobs",
+        "title": "Jobs"
+      }
+    },
+    {
+      "module": "shell",
+      "tag": "button",
+      "attributes": {
+        "class": "nav-item",
+        "type": "button",
+        "data-view": "settings",
+        "aria-label": "Settings",
+        "title": "Settings"
+      }
+    },
+    {
+      "module": "shell",
+      "tag": "button",
+      "attributes": {
+        "id": "mobileMoreButton",
+        "class": "mobile-more-button",
+        "type": "button",
+        "aria-label": "More modules",
+        "title": "More modules"
+      }
+    },
+    {
+      "module": "shell",
+      "tag": "button",
+      "attributes": {
+        "id": "railToggle",
+        "class": "icon-button rail-toggle",
+        "type": "button",
+        "aria-label": "Open module navigation",
+        "title": "Modules"
+      }
+    },
+    {
+      "module": "shell",
+      "tag": "button",
+      "attributes": {
+        "id": "studioLocaleButton",
+        "class": "studio-locale-button",
+        "type": "button",
+        "aria-haspopup": "listbox",
+        "aria-expanded": "false",
+        "aria-controls": "studioLocaleMenu",
+        "aria-label": "Change interface language"
+      }
+    },
+    {
+      "module": "shell",
+      "tag": "button",
+      "attributes": {
+        "class": "studio-locale-option",
+        "type": "button",
+        "role": "option",
+        "data-locale": "en",
+        "data-i18n-static": null,
+        "aria-selected": "true",
+        "tabindex": "-1"
+      }
+    },
+    {
+      "module": "shell",
+      "tag": "button",
+      "attributes": {
+        "class": "studio-locale-option",
+        "type": "button",
+        "role": "option",
+        "data-locale": "zh-Hant",
+        "data-i18n-static": null,
+        "aria-selected": "false",
+        "tabindex": "-1"
+      }
+    },
+    {
+      "module": "shell",
+      "tag": "button",
+      "attributes": {
+        "class": "studio-locale-option",
+        "type": "button",
+        "role": "option",
+        "data-locale": "zh-Hans",
+        "data-i18n-static": null,
+        "aria-selected": "false",
+        "tabindex": "-1"
+      }
+    },
+    {
+      "module": "overview",
+      "tag": "button",
+      "attributes": {
+        "id": "overviewStartModelButton",
+        "class": "overview-start-model",
+        "type": "button"
+      }
+    },
+    {
+      "module": "overview",
+      "tag": "button",
+      "attributes": {
+        "class": "text-button",
+        "data-open-project": null,
+        "type": "button"
+      }
+    },
+    {
+      "module": "overview",
+      "tag": "button",
+      "attributes": {
+        "class": "icon-button",
+        "data-nav-target": "jobs",
+        "type": "button",
+        "aria-label": "Open jobs",
+        "title": "Open jobs"
+      }
+    },
+    {
+      "module": "expressions",
+      "tag": "button",
+      "attributes": {
+        "class": "primary-button",
+        "data-new-expression": null,
+        "type": "button"
+      }
+    },
+    {
+      "module": "expressions",
+      "tag": "button",
+      "attributes": {
+        "class": "text-button",
+        "data-refresh-expressions": null,
+        "type": "button"
+      }
+    },
+    {
+      "module": "expressions",
+      "tag": "input",
+      "attributes": {
+        "id": "expressionDraftId",
+        "type": "hidden"
+      }
+    },
+    {
+      "module": "expressions",
+      "tag": "input",
+      "attributes": {
+        "id": "expressionName",
+        "maxlength": "160",
+        "required": null,
+        "autocomplete": "off"
+      }
+    },
+    {
+      "module": "expressions",
+      "tag": "input",
+      "attributes": {
+        "id": "expressionProfileId",
+        "maxlength": "64",
+        "pattern": "[a-z0-9][a-z0-9._-]{0,63}",
+        "required": null,
+        "autocomplete": "off",
+        "spellcheck": "false"
+      }
+    },
+    {
+      "module": "expressions",
+      "tag": "input",
+      "attributes": {
+        "id": "expressionModelId",
+        "maxlength": "160",
+        "autocomplete": "off",
+        "spellcheck": "false"
+      }
+    },
+    {
+      "module": "expressions",
+      "tag": "input",
+      "attributes": {
+        "id": "expressionReferencePath",
+        "data-path-picker": "file",
+        "data-path-accept": "audio",
+        "maxlength": "1000",
+        "autocomplete": "off",
+        "spellcheck": "false"
+      }
+    },
+    {
+      "module": "expressions",
+      "tag": "textarea",
+      "attributes": {
+        "id": "expressionReferenceTranscript",
+        "rows": "2",
+        "maxlength": "4000"
+      }
+    },
+    {
+      "module": "expressions",
+      "tag": "input",
+      "attributes": {
+        "id": "expressionLanguage",
+        "maxlength": "35",
+        "required": null,
+        "autocomplete": "off",
+        "spellcheck": "false"
+      }
+    },
+    {
+      "module": "expressions",
+      "tag": "input",
+      "attributes": {
+        "id": "expressionEmotion",
+        "maxlength": "120",
+        "required": null,
+        "autocomplete": "off"
+      }
+    },
+    {
+      "module": "expressions",
+      "tag": "input",
+      "attributes": {
+        "id": "expressionIntensity",
+        "type": "range",
+        "min": "0",
+        "max": "1",
+        "step": "0.01",
+        "value": "0.7"
+      }
+    },
+    {
+      "module": "expressions",
+      "tag": "textarea",
+      "attributes": {
+        "id": "expressionDescriptions",
+        "rows": "3",
+        "maxlength": "16032"
+      }
+    },
+    {
+      "module": "expressions",
+      "tag": "input",
+      "attributes": {
+        "id": "expressionValence",
+        "type": "number",
+        "min": "-1",
+        "max": "1",
+        "step": "0.01"
+      }
+    },
+    {
+      "module": "expressions",
+      "tag": "input",
+      "attributes": {
+        "id": "expressionArousal",
+        "type": "number",
+        "min": "-1",
+        "max": "1",
+        "step": "0.01"
+      }
+    },
+    {
+      "module": "expressions",
+      "tag": "input",
+      "attributes": {
+        "id": "expressionDominance",
+        "type": "number",
+        "min": "-1",
+        "max": "1",
+        "step": "0.01"
+      }
+    },
+    {
+      "module": "expressions",
+      "tag": "textarea",
+      "attributes": {
+        "id": "expressionProsody",
+        "rows": "3",
+        "spellcheck": "false"
+      }
+    },
+    {
+      "module": "expressions",
+      "tag": "button",
+      "attributes": {
+        "id": "expressionAnalyzeButton",
+        "class": "row-action",
+        "type": "button",
+        "disabled": null
+      }
+    },
+    {
+      "module": "expressions",
+      "tag": "select",
+      "attributes": {
+        "id": "expressionQualificationEvidence",
+        "aria-label": "Passed expression qualification evidence"
+      }
+    },
+    {
+      "module": "expressions",
+      "tag": "button",
+      "attributes": {
+        "id": "expressionPromoteButton",
+        "class": "row-action",
+        "type": "button",
+        "disabled": null
+      }
+    },
+    {
+      "module": "expressions",
+      "tag": "button",
+      "attributes": {
+        "id": "expressionDeleteButton",
+        "class": "text-button expression-delete-button",
+        "type": "button",
+        "hidden": null
+      }
+    },
+    {
+      "module": "expressions",
+      "tag": "button",
+      "attributes": {
+        "id": "expressionCancelButton",
+        "class": "text-button",
+        "type": "button"
+      }
+    },
+    {
+      "module": "expressions",
+      "tag": "button",
+      "attributes": {
+        "class": "primary-button",
+        "type": "submit"
+      }
+    },
+    {
+      "module": "datasets",
+      "tag": "button",
+      "attributes": {
+        "class": "primary-button",
+        "data-open-project": null,
+        "data-project-kind": "dataset",
+        "type": "button"
+      }
+    },
+    {
+      "module": "datasets",
+      "tag": "button",
+      "attributes": {
+        "id": "datasetPrepareTargetButton",
+        "class": "primary-button",
+        "type": "button",
+        "disabled": null,
+        "hidden": null
+      }
+    },
+    {
+      "module": "datasets",
+      "tag": "button",
+      "attributes": {
+        "id": "datasetImportAcquisitionButton",
+        "class": "row-action",
+        "type": "button",
+        "disabled": null,
+        "hidden": null
+      }
+    },
+    {
+      "module": "datasets",
+      "tag": "button",
+      "attributes": {
+        "id": "datasetProcessButton",
+        "class": "primary-button",
+        "type": "button",
+        "disabled": null
+      }
+    },
+    {
+      "module": "datasets",
+      "tag": "button",
+      "attributes": {
+        "id": "datasetIngestButton",
+        "class": "row-action",
+        "type": "button",
+        "disabled": null,
+        "hidden": null,
+        "aria-hidden": "true",
+        "tabindex": "-1"
+      }
+    },
+    {
+      "module": "datasets",
+      "tag": "button",
+      "attributes": {
+        "id": "datasetImportListButton",
+        "class": "row-action",
+        "type": "button",
+        "disabled": null
+      }
+    },
+    {
+      "module": "datasets",
+      "tag": "button",
+      "attributes": {
+        "id": "datasetRefreshButton",
+        "class": "icon-button",
+        "type": "button",
+        "disabled": null,
+        "aria-label": "Refresh dataset"
+      }
+    },
+    {
+      "module": "datasets",
+      "tag": "button",
+      "attributes": {
+        "id": "datasetProcessImportButton",
+        "class": "row-action",
+        "type": "button",
+        "disabled": null
+      }
+    },
+    {
+      "module": "datasets",
+      "tag": "button",
+      "attributes": {
+        "id": "datasetProcessOpenJob",
+        "class": "text-button",
+        "type": "button"
+      }
+    },
+    {
+      "module": "datasets",
+      "tag": "button",
+      "attributes": {
+        "id": "datasetSplitButton",
+        "class": "row-action",
+        "type": "button",
+        "disabled": null
+      }
+    },
+    {
+      "module": "datasets",
+      "tag": "button",
+      "attributes": {
+        "id": "datasetManifestButton",
+        "class": "row-action",
+        "type": "button",
+        "disabled": null
+      }
+    },
+    {
+      "module": "datasets",
+      "tag": "button",
+      "attributes": {
+        "id": "datasetQualificationReportButton",
+        "class": "row-action",
+        "type": "button",
+        "disabled": null
+      }
+    },
+    {
+      "module": "datasets",
+      "tag": "button",
+      "attributes": {
+        "id": "datasetReviewQueueButton",
+        "class": "row-action",
+        "type": "button",
+        "disabled": null
+      }
+    },
+    {
+      "module": "datasets",
+      "tag": "button",
+      "attributes": {
+        "id": "datasetExpressionCandidatesButton",
+        "class": "row-action",
+        "type": "button",
+        "disabled": null
+      }
+    },
+    {
+      "module": "datasets",
+      "tag": "button",
+      "attributes": {
+        "id": "datasetFreezeButton",
+        "class": "primary-button",
+        "type": "button",
+        "disabled": null
+      }
+    },
+    {
+      "module": "datasets",
+      "tag": "button",
+      "attributes": {
+        "id": "datasetContinueTrainingButton",
+        "class": "secondary-button",
+        "type": "button",
+        "disabled": null
+      }
+    },
+    {
+      "module": "datasets",
+      "tag": "button",
+      "attributes": {
+        "id": "datasetExpressionCandidatesClose",
+        "class": "icon-button",
+        "type": "button",
+        "aria-label": "Close expression candidates"
+      }
+    },
+    {
+      "module": "datasets",
+      "tag": "button",
+      "attributes": {
+        "id": "datasetInspectorClose",
+        "class": "icon-button",
+        "type": "button",
+        "aria-label": "Close dataset item inspector"
+      }
+    },
+    {
+      "module": "datasets",
+      "tag": "button",
+      "attributes": {
+        "id": "datasetAudioToggle",
+        "class": "studio-audio-icon",
+        "type": "button",
+        "aria-label": "Play dataset clip",
+        "title": "Play",
+        "disabled": null
+      }
+    },
+    {
+      "module": "datasets",
+      "tag": "input",
+      "attributes": {
+        "id": "datasetAudioSeek",
+        "type": "range",
+        "min": "0",
+        "max": "1",
+        "step": "0.001",
+        "value": "0",
+        "aria-label": "Dataset clip audio position",
+        "disabled": null
+      }
+    },
+    {
+      "module": "datasets",
+      "tag": "button",
+      "attributes": {
+        "id": "datasetAudioMute",
+        "class": "studio-audio-icon",
+        "type": "button",
+        "aria-label": "Mute dataset clip",
+        "title": "Mute",
+        "disabled": null
+      }
+    },
+    {
+      "module": "datasets",
+      "tag": "textarea",
+      "attributes": {
+        "id": "datasetTranscript",
+        "maxlength": "16000",
+        "rows": "4",
+        "required": null
+      }
+    },
+    {
+      "module": "datasets",
+      "tag": "select",
+      "attributes": {
+        "id": "datasetLanguage",
+        "required": null
+      }
+    },
+    {
+      "module": "datasets",
+      "tag": "input",
+      "attributes": {
+        "id": "datasetSpeaker",
+        "maxlength": "160",
+        "required": null
+      }
+    },
+    {
+      "module": "datasets",
+      "tag": "input",
+      "attributes": {
+        "id": "datasetExpression",
+        "maxlength": "240",
+        "placeholder": "Optional label"
+      }
+    },
+    {
+      "module": "datasets",
+      "tag": "input",
+      "attributes": {
+        "id": "datasetExpressionIntensity",
+        "type": "range",
+        "min": "0",
+        "max": "1",
+        "step": "0.01",
+        "value": "0.7"
+      }
+    },
+    {
+      "module": "datasets",
+      "tag": "input",
+      "attributes": {
+        "id": "datasetValence",
+        "type": "number",
+        "min": "-1",
+        "max": "1",
+        "step": "0.01",
+        "placeholder": "Optional"
+      }
+    },
+    {
+      "module": "datasets",
+      "tag": "input",
+      "attributes": {
+        "id": "datasetArousal",
+        "type": "number",
+        "min": "-1",
+        "max": "1",
+        "step": "0.01",
+        "placeholder": "Optional"
+      }
+    },
+    {
+      "module": "datasets",
+      "tag": "input",
+      "attributes": {
+        "id": "datasetDominance",
+        "type": "number",
+        "min": "-1",
+        "max": "1",
+        "step": "0.01",
+        "placeholder": "Optional"
+      }
+    },
+    {
+      "module": "datasets",
+      "tag": "textarea",
+      "attributes": {
+        "id": "datasetStyleDescription",
+        "maxlength": "2000",
+        "rows": "2",
+        "placeholder": "Optional human-authored style direction"
+      }
+    },
+    {
+      "module": "datasets",
+      "tag": "input",
+      "attributes": {
+        "id": "datasetPropagate",
+        "type": "checkbox",
+        "checked": null
+      }
+    },
+    {
+      "module": "datasets",
+      "tag": "button",
+      "attributes": {
+        "id": "datasetAcceptAudio",
+        "class": "secondary-button",
+        "type": "button"
+      }
+    },
+    {
+      "module": "datasets",
+      "tag": "button",
+      "attributes": {
+        "id": "datasetRejectAudio",
+        "class": "row-action",
+        "type": "button"
+      }
+    },
+    {
+      "module": "datasets",
+      "tag": "button",
+      "attributes": {
+        "id": "datasetAnnotationSave",
+        "class": "row-action",
+        "type": "submit"
+      }
+    },
+    {
+      "module": "datasets",
+      "tag": "button",
+      "attributes": {
+        "id": "datasetTranscriptVerify",
+        "class": "primary-button",
+        "type": "submit",
+        "data-verify-kind": "transcript"
+      }
+    },
+    {
+      "module": "datasets",
+      "tag": "button",
+      "attributes": {
+        "id": "datasetSpeakerVerify",
+        "class": "secondary-button",
+        "type": "button"
+      }
+    },
+    {
+      "module": "datasets",
+      "tag": "button",
+      "attributes": {
+        "id": "datasetExpressionVerify",
+        "class": "secondary-button",
+        "type": "button"
+      }
+    },
+    {
+      "module": "datasets",
+      "tag": "button",
+      "attributes": {
+        "id": "datasetQualityAnalyze",
+        "class": "row-action",
+        "type": "button"
+      }
+    },
+    {
+      "module": "tse",
+      "tag": "button",
+      "attributes": {
+        "class": "primary-button",
+        "data-open-project": null,
+        "data-project-kind": "tse",
+        "type": "button"
+      }
+    },
+    {
+      "module": "tse",
+      "tag": "input",
+      "attributes": {
+        "id": "tseSource",
+        "data-path-picker": "file",
+        "data-path-accept": "media",
+        "maxlength": "1000",
+        "spellcheck": "false",
+        "required": null,
+        "placeholder": "Absolute local audio path"
+      }
+    },
+    {
+      "module": "tse",
+      "tag": "input",
+      "attributes": {
+        "id": "tseReference",
+        "data-path-picker": "file",
+        "data-path-accept": "audio",
+        "maxlength": "1000",
+        "spellcheck": "false",
+        "required": null,
+        "placeholder": "Absolute local reference path"
+      }
+    },
+    {
+      "module": "tse",
+      "tag": "input",
+      "attributes": {
+        "id": "tseModelPackage",
+        "data-path-picker": "directory",
+        "list": "tseModelPackages",
+        "maxlength": "1000",
+        "spellcheck": "false",
+        "required": null,
+        "placeholder": "Absolute local package directory"
+      }
+    },
+    {
+      "module": "tse",
+      "tag": "input",
+      "attributes": {
+        "id": "tseSeparationModel",
+        "data-path-picker": "directory",
+        "maxlength": "1000",
+        "spellcheck": "false",
+        "required": null,
+        "placeholder": "External MossFormer2_SS_16K checkpoint directory"
+      }
+    },
+    {
+      "module": "tse",
+      "tag": "input",
+      "attributes": {
+        "id": "tseTargetThreshold",
+        "type": "number",
+        "min": "0",
+        "max": "1",
+        "step": "0.01",
+        "value": "0.72",
+        "required": null
+      }
+    },
+    {
+      "module": "tse",
+      "tag": "input",
+      "attributes": {
+        "id": "tseReviewMargin",
+        "type": "number",
+        "min": "0",
+        "max": "0.5",
+        "step": "0.01",
+        "value": "0.08",
+        "required": null
+      }
+    },
+    {
+      "module": "tse",
+      "tag": "input",
+      "attributes": {
+        "id": "tseOverlapReview",
+        "type": "checkbox",
+        "checked": null,
+        "disabled": null
+      }
+    },
+    {
+      "module": "tse",
+      "tag": "input",
+      "attributes": {
+        "id": "tseFrameMs",
+        "type": "number",
+        "min": "5",
+        "max": "100",
+        "step": "1",
+        "value": "20",
+        "required": null
+      }
+    },
+    {
+      "module": "tse",
+      "tag": "input",
+      "attributes": {
+        "id": "tseMinimumSpeechMs",
+        "type": "number",
+        "min": "20",
+        "max": "5000",
+        "step": "10",
+        "value": "160",
+        "required": null
+      }
+    },
+    {
+      "module": "tse",
+      "tag": "input",
+      "attributes": {
+        "id": "tseMaximumGapMs",
+        "type": "number",
+        "min": "0",
+        "max": "5000",
+        "step": "10",
+        "value": "120",
+        "required": null
+      }
+    },
+    {
+      "module": "tse",
+      "tag": "input",
+      "attributes": {
+        "id": "tseContextMs",
+        "type": "number",
+        "min": "0",
+        "max": "2000",
+        "step": "10",
+        "value": "40",
+        "required": null
+      }
+    },
+    {
+      "module": "tse",
+      "tag": "input",
+      "attributes": {
+        "id": "tseExtractionGapMs",
+        "type": "number",
+        "min": "0",
+        "max": "5000",
+        "step": "10",
+        "value": "120",
+        "required": null
+      }
+    },
+    {
+      "module": "tse",
+      "tag": "input",
+      "attributes": {
+        "id": "tseSeparationAmbiguityMargin",
+        "type": "number",
+        "min": "0",
+        "max": "0.5",
+        "step": "0.01",
+        "value": "0.03",
+        "required": null
+      }
+    },
+    {
+      "module": "tse",
+      "tag": "button",
+      "attributes": {
+        "id": "tseRunButton",
+        "class": "primary-button",
+        "type": "submit",
+        "disabled": null
+      }
+    },
+    {
+      "module": "tse",
+      "tag": "button",
+      "attributes": {
+        "id": "tseRerunButton",
+        "class": "text-button",
+        "type": "button",
+        "disabled": null
+      }
+    },
+    {
+      "module": "tse",
+      "tag": "button",
+      "attributes": {
+        "id": "tseCancelButton",
+        "class": "text-button tse-cancel-button",
+        "type": "button",
+        "disabled": null
+      }
+    },
+    {
+      "module": "tse",
+      "tag": "button",
+      "attributes": {
+        "id": "tseAudioToggle",
+        "class": "studio-audio-icon",
+        "type": "button",
+        "aria-label": "Play target audio",
+        "title": "Play",
+        "disabled": null
+      }
+    },
+    {
+      "module": "tse",
+      "tag": "input",
+      "attributes": {
+        "id": "tseAudioSeek",
+        "type": "range",
+        "min": "0",
+        "max": "1",
+        "step": "0.001",
+        "value": "0",
+        "aria-label": "Target audio position",
+        "disabled": null
+      }
+    },
+    {
+      "module": "tse",
+      "tag": "button",
+      "attributes": {
+        "id": "tseAudioMute",
+        "class": "studio-audio-icon",
+        "type": "button",
+        "aria-label": "Mute target audio",
+        "title": "Mute",
+        "disabled": null
+      }
+    },
+    {
+      "module": "training",
+      "tag": "button",
+      "attributes": {
+        "class": "primary-button",
+        "data-open-project": null,
+        "data-project-kind": "training",
+        "type": "button"
+      }
+    },
+    {
+      "module": "training",
+      "tag": "button",
+      "attributes": {
+        "id": "trainingRunButton",
+        "class": "primary-button",
+        "type": "button",
+        "disabled": null
+      }
+    },
+    {
+      "module": "training",
+      "tag": "button",
+      "attributes": {
+        "id": "productionBuildButton",
+        "class": "text-button",
+        "type": "button",
+        "disabled": null
+      }
+    },
+    {
+      "module": "training",
+      "tag": "button",
+      "attributes": {
+        "id": "referenceNoPreferenceButton",
+        "class": "text-button",
+        "type": "button"
+      }
+    },
+    {
+      "module": "training",
+      "tag": "button",
+      "attributes": {
+        "id": "referenceAllPoorButton",
+        "class": "text-button reference-reject-button",
+        "type": "button"
+      }
+    },
+    {
+      "module": "evaluation",
+      "tag": "button",
+      "attributes": {
+        "class": "primary-button",
+        "data-open-project": null,
+        "data-project-kind": "evaluation",
+        "type": "button"
+      }
+    },
+    {
+      "module": "evaluation",
+      "tag": "select",
+      "attributes": {
+        "id": "evaluationAudioLanguage"
+      }
+    },
+    {
+      "module": "evaluation",
+      "tag": "select",
+      "attributes": {
+        "id": "evaluationBaselineJob"
+      }
+    },
+    {
+      "module": "evaluation",
+      "tag": "select",
+      "attributes": {
+        "id": "evaluationTrainingDependency"
+      }
+    },
+    {
+      "module": "evaluation",
+      "tag": "button",
+      "attributes": {
+        "id": "evaluationRunButton",
+        "class": "primary-button",
+        "type": "button",
+        "disabled": null
+      }
+    },
+    {
+      "module": "evaluation",
+      "tag": "button",
+      "attributes": {
+        "id": "evaluationChainButton",
+        "class": "text-button",
+        "type": "button",
+        "disabled": null
+      }
+    },
+    {
+      "module": "evaluation",
+      "tag": "select",
+      "attributes": {
+        "id": "qualificationSubjectEvidence"
+      }
+    },
+    {
+      "module": "evaluation",
+      "tag": "select",
+      "attributes": {
+        "id": "qualificationAutomatedEvidence"
+      }
+    },
+    {
+      "module": "evaluation",
+      "tag": "select",
+      "attributes": {
+        "id": "qualificationLongFormEvidence"
+      }
+    },
+    {
+      "module": "evaluation",
+      "tag": "select",
+      "attributes": {
+        "id": "qualificationExpressionEvidence"
+      }
+    },
+    {
+      "module": "evaluation",
+      "tag": "select",
+      "attributes": {
+        "id": "qualificationSecurityEvidence"
+      }
+    },
+    {
+      "module": "evaluation",
+      "tag": "button",
+      "attributes": {
+        "id": "qualificationComposeButton",
+        "class": "primary-button",
+        "type": "button",
+        "disabled": null
+      }
+    },
+    {
+      "module": "models",
+      "tag": "select",
+      "attributes": {
+        "id": "artifactPromotionEvidence"
+      }
+    },
+    {
+      "module": "models",
+      "tag": "button",
+      "attributes": {
+        "id": "artifactPromoteButton",
+        "class": "primary-button",
+        "type": "button",
+        "disabled": null
+      }
+    },
+    {
+      "module": "jobs",
+      "tag": "button",
+      "attributes": {
+        "id": "queueJobButton",
+        "class": "primary-button",
+        "type": "button"
+      }
+    },
+    {
+      "module": "jobs",
+      "tag": "button",
+      "attributes": {
+        "id": "refreshJobs",
+        "class": "text-button",
+        "type": "button"
+      }
+    },
+    {
+      "module": "settings",
+      "tag": "button",
+      "attributes": {
+        "id": "studioInstallButton",
+        "class": "primary-button",
+        "type": "button",
+        "disabled": null
+      }
+    },
+    {
+      "module": "settings",
+      "tag": "select",
+      "attributes": {
+        "id": "settingsDefaultLanguage"
+      }
+    },
+    {
+      "module": "settings",
+      "tag": "select",
+      "attributes": {
+        "id": "settingsContinuityPolicy"
+      }
+    },
+    {
+      "module": "settings",
+      "tag": "select",
+      "attributes": {
+        "id": "settingsTrainingPreset"
+      }
+    },
+    {
+      "module": "settings",
+      "tag": "select",
+      "attributes": {
+        "id": "settingsBenchmarkLanguage"
+      }
+    },
+    {
+      "module": "settings",
+      "tag": "input",
+      "attributes": {
+        "id": "settingsTseThreshold",
+        "type": "number",
+        "min": "0",
+        "max": "1",
+        "step": "0.01"
+      }
+    },
+    {
+      "module": "settings",
+      "tag": "input",
+      "attributes": {
+        "id": "settingsRefreshSeconds",
+        "type": "number",
+        "min": "2",
+        "max": "30",
+        "step": "1"
+      }
+    },
+    {
+      "module": "settings",
+      "tag": "input",
+      "attributes": {
+        "id": "settingsOverviewMotion",
+        "type": "checkbox"
+      }
+    },
+    {
+      "module": "settings",
+      "tag": "button",
+      "attributes": {
+        "class": "primary-button",
+        "type": "submit"
+      }
+    },
+    {
+      "module": "settings",
+      "tag": "button",
+      "attributes": {
+        "id": "componentDownloadButton",
+        "class": "primary-button",
+        "type": "button"
+      }
+    },
+    {
+      "module": "settings",
+      "tag": "input",
+      "attributes": {
+        "id": "componentBundlePath",
+        "data-path-picker": "file",
+        "data-path-accept": "zip",
+        "maxlength": "4096",
+        "spellcheck": "false",
+        "placeholder": "Local .zip path"
+      }
+    },
+    {
+      "module": "settings",
+      "tag": "button",
+      "attributes": {
+        "id": "componentImportButton",
+        "class": "secondary-button",
+        "type": "button"
+      }
+    },
+    {
+      "module": "settings",
+      "tag": "button",
+      "attributes": {
+        "id": "componentExportButton",
+        "class": "row-action",
+        "type": "button"
+      }
+    },
+    {
+      "module": "settings",
+      "tag": "button",
+      "attributes": {
+        "id": "clearVisibleHistoryButton",
+        "class": "secondary-button",
+        "type": "button"
+      }
+    },
+    {
+      "module": "settings",
+      "tag": "button",
+      "attributes": {
+        "class": "icon-button",
+        "type": "button",
+        "data-mobile-sheet-close": null,
+        "aria-label": "Close module navigation"
+      }
+    },
+    {
+      "module": "settings",
+      "tag": "button",
+      "attributes": {
+        "type": "button",
+        "data-view": "expressions"
+      }
+    },
+    {
+      "module": "settings",
+      "tag": "button",
+      "attributes": {
+        "type": "button",
+        "data-view": "training"
+      }
+    },
+    {
+      "module": "settings",
+      "tag": "button",
+      "attributes": {
+        "type": "button",
+        "data-view": "evaluation"
+      }
+    },
+    {
+      "module": "settings",
+      "tag": "button",
+      "attributes": {
+        "type": "button",
+        "data-view": "models"
+      }
+    },
+    {
+      "module": "settings",
+      "tag": "button",
+      "attributes": {
+        "type": "button",
+        "data-view": "engines"
+      }
+    },
+    {
+      "module": "settings",
+      "tag": "button",
+      "attributes": {
+        "type": "button",
+        "data-view": "settings"
+      }
+    },
+    {
+      "module": "settings",
+      "tag": "button",
+      "attributes": {
+        "class": "icon-button",
+        "type": "button",
+        "data-dialog-cancel": null,
+        "aria-label": "Close",
+        "title": "Close"
+      }
+    },
+    {
+      "module": "settings",
+      "tag": "input",
+      "attributes": {
+        "type": "hidden",
+        "id": "projectKind",
+        "value": "dataset"
+      }
+    },
+    {
+      "module": "settings",
+      "tag": "input",
+      "attributes": {
+        "id": "projectName",
+        "required": null,
+        "maxlength": "120",
+        "autocomplete": "off"
+      }
+    },
+    {
+      "module": "settings",
+      "tag": "input",
+      "attributes": {
+        "type": "radio",
+        "name": "datasetAcquisitionMode",
+        "value": "standard",
+        "checked": null
+      }
+    },
+    {
+      "module": "settings",
+      "tag": "input",
+      "attributes": {
+        "type": "radio",
+        "name": "datasetAcquisitionMode",
+        "value": "target-speaker"
+      }
+    },
+    {
+      "module": "settings",
+      "tag": "input",
+      "attributes": {
+        "type": "radio",
+        "name": "datasetAcquisitionMode",
+        "value": "gpt-sovits-list"
+      }
+    },
+    {
+      "module": "settings",
+      "tag": "textarea",
+      "attributes": {
+        "id": "projectDatasetSources",
+        "data-path-picker": "mixed",
+        "data-path-accept": "media",
+        "data-path-multiple": "true",
+        "rows": "3",
+        "maxlength": "12000",
+        "spellcheck": "false",
+        "placeholder": "One local audio, video, folder or .list path per line"
+      }
+    },
+    {
+      "module": "settings",
+      "tag": "select",
+      "attributes": {
+        "id": "projectDatasetAsr"
+      }
+    },
+    {
+      "module": "settings",
+      "tag": "select",
+      "attributes": {
+        "id": "projectDatasetLanguage"
+      }
+    },
+    {
+      "module": "settings",
+      "tag": "input",
+      "attributes": {
+        "id": "projectDatasetRequireExpressions",
+        "type": "checkbox",
+        "checked": null
+      }
+    },
+    {
+      "module": "settings",
+      "tag": "input",
+      "attributes": {
+        "id": "projectTargetReference",
+        "data-path-picker": "file",
+        "data-path-accept": "audio",
+        "maxlength": "1000",
+        "spellcheck": "false",
+        "placeholder": "Short clean reference audio"
+      }
+    },
+    {
+      "module": "settings",
+      "tag": "select",
+      "attributes": {
+        "id": "projectTargetPreset"
+      }
+    },
+    {
+      "module": "settings",
+      "tag": "input",
+      "attributes": {
+        "id": "projectSource",
+        "data-path-picker": "mixed",
+        "data-path-accept": "media",
+        "maxlength": "1000",
+        "autocomplete": "off",
+        "spellcheck": "false"
+      }
+    },
+    {
+      "module": "settings",
+      "tag": "input",
+      "attributes": {
+        "id": "projectReference",
+        "data-path-picker": "file",
+        "data-path-accept": "audio",
+        "maxlength": "1000",
+        "autocomplete": "off",
+        "spellcheck": "false"
+      }
+    },
+    {
+      "module": "settings",
+      "tag": "input",
+      "attributes": {
+        "id": "projectModelPackage",
+        "data-path-picker": "directory",
+        "maxlength": "1000",
+        "autocomplete": "off",
+        "spellcheck": "false"
+      }
+    },
+    {
+      "module": "settings",
+      "tag": "select",
+      "attributes": {
+        "id": "projectPreset"
+      }
+    },
+    {
+      "module": "settings",
+      "tag": "input",
+      "attributes": {
+        "id": "projectPretrainedGpt",
+        "data-path-picker": "file",
+        "data-path-accept": "checkpoint",
+        "maxlength": "1000",
+        "autocomplete": "off",
+        "spellcheck": "false"
+      }
+    },
+    {
+      "module": "settings",
+      "tag": "input",
+      "attributes": {
+        "id": "projectPretrainedSovitsG",
+        "data-path-picker": "file",
+        "data-path-accept": "checkpoint",
+        "maxlength": "1000",
+        "autocomplete": "off",
+        "spellcheck": "false"
+      }
+    },
+    {
+      "module": "settings",
+      "tag": "input",
+      "attributes": {
+        "id": "projectPretrainedSovitsD",
+        "data-path-picker": "file",
+        "data-path-accept": "checkpoint",
+        "maxlength": "1000",
+        "autocomplete": "off",
+        "spellcheck": "false"
+      }
+    },
+    {
+      "module": "settings",
+      "tag": "input",
+      "attributes": {
+        "id": "projectResumeCheckpoint",
+        "data-path-picker": "file",
+        "data-path-accept": "checkpoint",
+        "maxlength": "1000",
+        "autocomplete": "off",
+        "spellcheck": "false"
+      }
+    },
+    {
+      "module": "settings",
+      "tag": "select",
+      "attributes": {
+        "id": "projectTrainingStage"
+      }
+    },
+    {
+      "module": "settings",
+      "tag": "input",
+      "attributes": {
+        "id": "projectGptEpochs",
+        "type": "number",
+        "min": "1",
+        "max": "100",
+        "step": "1",
+        "value": "20"
+      }
+    },
+    {
+      "module": "settings",
+      "tag": "input",
+      "attributes": {
+        "id": "projectSovitsEpochs",
+        "type": "number",
+        "min": "1",
+        "max": "100",
+        "step": "1",
+        "value": "12"
+      }
+    },
+    {
+      "module": "settings",
+      "tag": "input",
+      "attributes": {
+        "id": "projectGptBatch",
+        "type": "number",
+        "min": "1",
+        "max": "128",
+        "step": "1",
+        "value": "6"
+      }
+    },
+    {
+      "module": "settings",
+      "tag": "input",
+      "attributes": {
+        "id": "projectSovitsBatch",
+        "type": "number",
+        "min": "1",
+        "max": "128",
+        "step": "1",
+        "value": "4"
+      }
+    },
+    {
+      "module": "settings",
+      "tag": "input",
+      "attributes": {
+        "id": "projectGptLearningRate",
+        "type": "number",
+        "min": "0.000001",
+        "max": "1",
+        "step": "0.000001",
+        "value": "0.01"
+      }
+    },
+    {
+      "module": "settings",
+      "tag": "input",
+      "attributes": {
+        "id": "projectSovitsLearningRate",
+        "type": "number",
+        "min": "0.000001",
+        "max": "1",
+        "step": "0.000001",
+        "value": "0.0001"
+      }
+    },
+    {
+      "module": "settings",
+      "tag": "input",
+      "attributes": {
+        "id": "projectSaveEveryEpoch",
+        "type": "number",
+        "min": "1",
+        "max": "10",
+        "step": "1",
+        "value": "1"
+      }
+    },
+    {
+      "module": "settings",
+      "tag": "input",
+      "attributes": {
+        "id": "projectTrainingSeed",
+        "type": "number",
+        "min": "0",
+        "max": "2147483647",
+        "step": "1",
+        "value": "1234"
+      }
+    },
+    {
+      "module": "settings",
+      "tag": "input",
+      "attributes": {
+        "id": "projectGradientCheckpointing",
+        "type": "checkbox"
+      }
+    },
+    {
+      "module": "settings",
+      "tag": "input",
+      "attributes": {
+        "id": "projectSharedDir",
+        "data-path-picker": "directory",
+        "maxlength": "1000",
+        "autocomplete": "off",
+        "spellcheck": "false"
+      }
+    },
+    {
+      "module": "settings",
+      "tag": "input",
+      "attributes": {
+        "id": "projectAsrModel",
+        "data-path-picker": "directory",
+        "maxlength": "1000",
+        "autocomplete": "off",
+        "spellcheck": "false"
+      }
+    },
+    {
+      "module": "settings",
+      "tag": "input",
+      "attributes": {
+        "id": "projectBaselineReport",
+        "data-path-picker": "file",
+        "data-path-accept": "json",
+        "maxlength": "1000",
+        "autocomplete": "off",
+        "spellcheck": "false"
+      }
+    },
+    {
+      "module": "settings",
+      "tag": "input",
+      "attributes": {
+        "id": "projectBenchmarkSessions",
+        "type": "number",
+        "min": "1",
+        "max": "10",
+        "step": "1",
+        "value": "2"
+      }
+    },
+    {
+      "module": "settings",
+      "tag": "input",
+      "attributes": {
+        "id": "projectBenchmarkWarmups",
+        "type": "number",
+        "min": "0",
+        "max": "20",
+        "step": "1",
+        "value": "1"
+      }
+    },
+    {
+      "module": "settings",
+      "tag": "input",
+      "attributes": {
+        "id": "projectBenchmarkRuns",
+        "type": "number",
+        "min": "1",
+        "max": "100",
+        "step": "1",
+        "value": "10"
+      }
+    },
+    {
+      "module": "settings",
+      "tag": "select",
+      "attributes": {
+        "id": "projectBenchmarkLanguage"
+      }
+    },
+    {
+      "module": "settings",
+      "tag": "select",
+      "attributes": {
+        "id": "projectAsrComputeType"
+      }
+    },
+    {
+      "module": "settings",
+      "tag": "input",
+      "attributes": {
+        "id": "projectRequestTimeout",
+        "type": "number",
+        "min": "1",
+        "max": "600",
+        "step": "1",
+        "value": "120"
+      }
+    },
+    {
+      "module": "settings",
+      "tag": "button",
+      "attributes": {
+        "class": "text-button",
+        "value": "cancel",
+        "type": "button",
+        "data-dialog-cancel": null
+      }
+    },
+    {
+      "module": "settings",
+      "tag": "button",
+      "attributes": {
+        "class": "primary-button",
+        "type": "submit"
+      }
+    },
+    {
+      "module": "settings",
+      "tag": "button",
+      "attributes": {
+        "class": "icon-button",
+        "type": "button",
+        "data-job-dialog-cancel": null,
+        "aria-label": "Close",
+        "title": "Close"
+      }
+    },
+    {
+      "module": "settings",
+      "tag": "select",
+      "attributes": {
+        "id": "jobType",
+        "required": null
+      }
+    },
+    {
+      "module": "settings",
+      "tag": "select",
+      "attributes": {
+        "id": "jobProject",
+        "required": null
+      }
+    },
+    {
+      "module": "settings",
+      "tag": "input",
+      "attributes": {
+        "id": "jobPriority",
+        "type": "number",
+        "min": "-100",
+        "max": "100",
+        "step": "1",
+        "value": "0",
+        "required": null,
+        "inputmode": "numeric"
+      }
+    },
+    {
+      "module": "settings",
+      "tag": "button",
+      "attributes": {
+        "class": "text-button",
+        "value": "cancel",
+        "type": "button",
+        "data-job-dialog-cancel": null
+      }
+    },
+    {
+      "module": "settings",
+      "tag": "button",
+      "attributes": {
+        "class": "primary-button",
+        "type": "submit"
+      }
+    },
+    {
+      "module": "settings",
+      "tag": "button",
+      "attributes": {
+        "class": "icon-button",
+        "type": "button",
+        "data-history-dialog-cancel": null,
+        "aria-label": "Close",
+        "title": "Close"
+      }
+    },
+    {
+      "module": "settings",
+      "tag": "button",
+      "attributes": {
+        "class": "text-button",
+        "type": "button",
+        "data-history-dialog-cancel": null
+      }
+    },
+    {
+      "module": "settings",
+      "tag": "button",
+      "attributes": {
+        "id": "confirmClearVisibleHistory",
+        "class": "primary-button",
+        "type": "submit"
+      }
+    }
+  ],
+  "approved_removed_controls": [
+    "railToggle"
+  ],
+  "api_targets": [
+    "\"/api/status\")",
+    "\"/api/workstation/artifacts\")",
+    "\"/api/workstation/components\");",
+    "\"/api/workstation/components/download\"",
+    "\"/api/workstation/components/export\"",
+    "\"/api/workstation/components/import\"",
+    "\"/api/workstation/datasets/capabilities\")",
+    "\"/api/workstation/expression-bank\")",
+    "\"/api/workstation/expression-drafts\")",
+    "\"/api/workstation/jobs\"",
+    "\"/api/workstation/jobs\"",
+    "\"/api/workstation/jobs\"",
+    "\"/api/workstation/jobs\"",
+    "\"/api/workstation/jobs\"",
+    "\"/api/workstation/jobs\"",
+    "\"/api/workstation/jobs\")",
+    "\"/api/workstation/jobs\");",
+    "\"/api/workstation/overview\")",
+    "\"/api/workstation/path-picker\"",
+    "\"/api/workstation/projects\"",
+    "\"/api/workstation/projects\")",
+    "\"/api/workstation/qualifications\")",
+    "\"/api/workstation/qualifications\")",
+    "\"/api/workstation/qualifications/compose\"",
+    "\"/api/workstation/qualifications/import\"",
+    "\"/api/workstation/settings\"",
+    "\"/api/workstation/settings\");",
+    "\"/api/workstation/ui-history/clear\"",
+    "`${base}/resample`",
+    "`${base}/review`",
+    "`${base}/review`",
+    "`${base}/segments`",
+    "`${base}/vad`",
+    "`/api/workstation/artifacts/${encodeURIComponent(artifact.id)}/content`) : null;",
+    "`/api/workstation/artifacts/${encodeURIComponent(artifact.id)}`);",
+    "`/api/workstation/artifacts/${encodeURIComponent(details.artifact.id)}/promote`",
+    "`/api/workstation/artifacts/${encodeURIComponent(manifestArtifact.id)}/content`)",
+    "`/api/workstation/artifacts/${encodeURIComponent(reportArtifact.id)}/content`)",
+    "`/api/workstation/artifacts?project_id=${encodeURIComponent(project.id)}&status=ready`);",
+    "`/api/workstation/datasets/${encodeURIComponent(datasetId)}/items`)",
+    "`/api/workstation/datasets/${encodeURIComponent(datasetId)}/state`)",
+    "`/api/workstation/datasets/${encodeURIComponent(item.dataset_id)}/items/${encodeURIComponent(item.id)}/waveform?bins=640`);",
+    "`/api/workstation/datasets/${encodeURIComponent(project.id)}/continue-to-training`",
+    "`/api/workstation/datasets/${encodeURIComponent(project.id)}/expression-candidates`);",
+    "`/api/workstation/datasets/${encodeURIComponent(project.id)}/freeze`",
+    "`/api/workstation/datasets/${encodeURIComponent(project.id)}/manifest`);",
+    "`/api/workstation/datasets/${encodeURIComponent(project.id)}/qualification-report`);",
+    "`/api/workstation/datasets/${encodeURIComponent(project.id)}/review-queue`);",
+    "`/api/workstation/expression-drafts/${encodeURIComponent(expressionId)}/analyze-reference`",
+    "`/api/workstation/expression-drafts/${encodeURIComponent(expressionId)}/promote`",
+    "`/api/workstation/expression-drafts/${encodeURIComponent(expressionId)}`",
+    "`/api/workstation/expression-drafts/${encodeURIComponent(expressionId)}`",
+    "`/api/workstation/jobs/${encodeURIComponent(jobId)}/cancel`",
+    "`/api/workstation/jobs/${encodeURIComponent(jobId)}/run`",
+    "`/api/workstation/jobs/${encodeURIComponent(jobId)}`);",
+    "`/api/workstation/jobs/${encodeURIComponent(jobId)}`);",
+    "`/api/workstation/jobs/${encodeURIComponent(jobId)}`);",
+    "`/api/workstation/jobs/${encodeURIComponent(jobId)}`);",
+    "`/api/workstation/training/${encodeURIComponent(project.id)}/reference-selection/lock`",
+    "`/api/workstation/training/${encodeURIComponent(project.id)}/reference-selection/lock`",
+    "path",
+    "reportUrl));"
+  ]
+}

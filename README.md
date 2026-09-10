@@ -1,12 +1,12 @@
 <div align="center">
 
-<img src="assets/everynight_dance.gif" alt="Evernight dance" width="260">
+<img src="assets/aniflive-tts-studio-demo.gif" alt="AnifLive-TTS Studio overview" width="960">
 
 # AnifLive-TTS
 
 **A low-latency, high-quality multilingual voice-cloning TTS runtime with first-class Cantonese support**
 
-[![Release](https://img.shields.io/badge/release-v1.3.0-2563eb?style=flat-square)](RELEASE_NOTES_v1.3.0.md)
+[![Release](https://img.shields.io/badge/release-v1.4.0-2563eb?style=flat-square)](RELEASE_NOTES_v1.4.0.md)
 [![TensorRT](https://img.shields.io/badge/TensorRT-11.2.1.2-76b900?style=flat-square&logo=nvidia)](https://docs.nvidia.com/deeplearning/tensorrt/)
 [![CUDA](https://img.shields.io/badge/CUDA-12.8-76b900?style=flat-square&logo=nvidia)](https://developer.nvidia.com/cuda-toolkit)
 [![Model](https://img.shields.io/badge/GPT--SoVITS-V2ProPlus-0f766e?style=flat-square)](https://github.com/RVC-Boss/GPT-SoVITS)
@@ -231,6 +231,16 @@ GPU sampling, and persistent buffers. One process preloads one active model.
 - `stream=false` returns mono PCM16 WAV; `stream=true` returns PCM16 chunks.
 
 ## Quick Start
+
+The v1.4 Studio can also be started with `run_studio_docker.bat`.
+It builds the Docker images on first launch and opens the workstation at
+`http://127.0.0.1:9891/`; no host Python environment is required. Put the model
+package in `data/models/<model-id>` (or the existing `data/models/active`) and
+the shared assets in `data/shared`. Studio installs qualified training outputs
+into the model registry. If the speech service remains offline after adding a
+model, rerun the same launcher; existing data is retained.
+Use `run_studio_docker.bat cu126` to select CUDA 12.6. That runtime has not
+been verified on the current acceptance GPU.
 
 Users with an existing GPT-SoVITS voice-cloning model can convert its GPT/SoVITS checkpoints and reference audio directly into an AnifLive-TTS model package.
 

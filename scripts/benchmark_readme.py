@@ -626,7 +626,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--gpu-sample-interval", type=float, default=0.1)
     parser.add_argument("--timeout", type=float, default=180)
     parser.add_argument("--locale", choices=tuple(METRIC_LABELS), default="en")
-    parser.add_argument("--release", default="1.3.0")
+    parser.add_argument("--release", default="1.4.0")
     parser.add_argument("--report", type=Path, default=Path("reports/benchmark.json"))
     parser.add_argument("--markdown", type=Path, default=Path("reports/benchmark.md"))
     args = parser.parse_args()

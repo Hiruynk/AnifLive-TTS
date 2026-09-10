@@ -383,3 +383,42 @@ def test_legacy_builder_cli_is_blocked() -> None:
     assert "asset-lock.json" not in source
     assert "export_v2proplus_onnx.py" not in source
     assert "legacy_converter is an internal TensorRT builder" in source
+
+
+def test_driver_reserved_memory_variation_preserves_engine_manifest(tmp_path, monkeypatch):
+    recorded = {**RUNTIME_FINGERPRINT, "gpu_total_memory_bytes": "17094475776"}
+    current = {**RUNTIME_FINGERPRINT, "gpu_total_memory_bytes": "17066033152"}
+    package, manifest = _engine_package(tmp_path, recorded)
+    engine_dir = package / "engines" / manifest["active_engine_fingerprint"]
+    before = (engine_dir / "engine-manifest.json").read_bytes()
+    monkeypatch.setattr(model_package, "runtime_fingerprint", lambda: current)
+    assert model_package.select_engine_dir(package, manifest) == engine_dir.resolve()
+    assert (engine_dir / "engine-manifest.json").read_bytes() == before
+
+
+@pytest.mark.parametrize("memory", [None, "", "0", "-1", "nan", True, 17.5, "8589934592",
+                                   str(17066033152 + 64 * 1024 * 1024 + 1)])
+def test_invalid_or_different_memory_requires_rebuild(tmp_path, monkeypatch, memory):
+    recorded = {**RUNTIME_FINGERPRINT, "gpu_total_memory_bytes": memory}
+    current = {**RUNTIME_FINGERPRINT, "gpu_total_memory_bytes": "17066033152"}
+    package, manifest = _engine_package(tmp_path, recorded)
+    monkeypatch.setattr(model_package, "runtime_fingerprint", lambda: current)
+    with pytest.raises(EngineRebuildRequired, match="gpu_total_memory_bytes mismatch"):
+        model_package.select_engine_dir(package, manifest)
+
+
+@pytest.mark.parametrize(("field", "value"), [
+    ("gpu", "NVIDIA GeForce RTX 4090"), ("gpu_sm_count", "69"),
+    ("compute_capability", "11.0"), ("cuda_runtime", "12.9"), ("tensorrt", "11.3"),
+])
+def test_memory_tolerance_does_not_relax_other_identity(tmp_path, monkeypatch, field, value):
+    recorded = {**RUNTIME_FINGERPRINT, "gpu_total_memory_bytes": "17094475776", field: value}
+    current = {**RUNTIME_FINGERPRINT, "gpu_total_memory_bytes": "17066033152"}
+    package, manifest = _engine_package(tmp_path, recorded)
+    monkeypatch.setattr(model_package, "runtime_fingerprint", lambda: current)
+    with pytest.raises(EngineRebuildRequired, match=field + " mismatch"):
+        model_package.select_engine_dir(package, manifest)
+
+
+def test_memory_tolerance_requires_both_absolute_and_relative_bounds():
+    assert not model_package._compatible_gpu_memory(1024**3, 1024**3 + 10 * 1024**2)

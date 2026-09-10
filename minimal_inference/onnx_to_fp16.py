@@ -18,14 +18,17 @@ except ImportError:
     # is unavailable instead of trying to compile onnxsim inside the image.
     simplify = None
 
+# GPT state and HuBERT reference features stay FP32: rounding can change
+# close token rankings or discrete VQ reference tokens. Remaining stages
+# retain their existing mixed-precision policy.
 # --- 配置区 ---
 MODEL_CONFIGS = {
     "vq_encoder": {"fp16": False, "sensitive": []},
     "bert": {"fp16": True, "sensitive": ["LayerNormalization", "Mean"]},
-    "ssl": {"fp16": True, "sensitive": ["LayerNormalization", "Mean"]},
-    "gpt_encoder": {"fp16": True, "sensitive": ["Pow", "Exp", "Mean", "ReduceMean", "LayerNormalization"]},
-    "gpt_step": {"fp16": True, "sensitive": ["Pow", "Exp", "MatMulInteger", "LayerNormalization"]},
-    "gpt_block": {"fp16": True, "sensitive": ["Pow", "Exp", "MatMulInteger", "LayerNormalization"]},
+    "ssl": {"fp16": False, "sensitive": ["LayerNormalization", "Mean"]},
+    "gpt_encoder": {"fp16": False, "sensitive": ["Pow", "Exp", "Mean", "ReduceMean", "LayerNormalization"]},
+    "gpt_step": {"fp16": False, "sensitive": ["Pow", "Exp", "MatMulInteger", "LayerNormalization"]},
+    "gpt_block": {"fp16": False, "sensitive": ["Pow", "Exp", "MatMulInteger", "LayerNormalization"]},
     "sovits": {"fp16": True, "sensitive": ["InstanceNormalization", "Resize", "Mean", "Sum", "Exp"], "native_sensitive": ["Resize"]},
     "sovits_stream": {"fp16": True, "sensitive": ["InstanceNormalization", "Resize", "Mean", "Sum", "Exp"], "native_sensitive": ["Resize"]},
     # spectrogram 和 sv_embedding 保持 FP32，因为 STFT 和后续计算需要 FP32 精度
@@ -182,7 +185,7 @@ def optimize_single_model(input_path, output_path, native_fp16=False):
         strategy = f"Native FP16 (I/O: {'FP32' if keep_io else 'FP16'})"
     else:
         keep_io = config.get("keep_input_types", False)
-        io_status = "FP32 Input" if keep_io else "FP16"
+        io_status = "FP32 I/O" if keep_io or not config["fp16"] else "FP16 I/O"
         strategy = f"{'FP16 (Mixed)' if config['fp16'] else 'FP32 (Keep)'} [{io_status}]"
 
     print(f"Processing: {filename} | Strategy: {strategy}")
@@ -225,7 +228,7 @@ def optimize_single_model(input_path, output_path, native_fp16=False):
         # 修复属性（无论哪种 FP16 模式都需要）
         model = fix_broken_attributes(model)
     else:
-        print("  Skipping FP16 conversion (Sensitivity/Low-Cost).")
+        print("  Preserving FP32 graph under the stage precision policy.")
 
     # 通用 Simplification (无论 FP16 还是 FP32 都需要简化)
     if simplify is None:

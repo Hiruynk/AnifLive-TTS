@@ -1,0 +1,204 @@
+{
+  "schema": "aniflive-workstation-assets-lock-v1",
+  "components": [
+    {
+      "id": "eres2netv2-speaker-verifier",
+      "name": "ERes2NetV2 Speaker Verification",
+      "revision": "rtx5070ti-cc12.0-cuda12.8-trt11.2.1.2-febe844f",
+      "license": "Apache-2.0",
+      "runtime": "linux-worker-tensorrt11",
+      "required": true,
+      "qualified": true,
+      "capability": "speaker-verification",
+      "files": {
+        "component.json": {
+          "sha256": "75f277aadf6178d5c1e71470d5281a65cc491a01ee1d2c421fbc015c271b80be",
+          "bytes": 627
+        },
+        "workstation_sv_embedding.engine": {
+          "sha256": "2884c0e8c2cfaeab5dfedb98c8f7c53ad7fc4e457b0393a3c6c4c9dfa35871c4",
+          "bytes": 186567012
+        }
+      }
+    },
+    {
+      "id": "sensevoice-small",
+      "name": "SenseVoice Small",
+      "revision": "3847d57b6bdf2dd8875cb1508d2af43d80a16bf7",
+      "license": "FunASR Model Open Source License 1.1",
+      "runtime": "linux-worker-cuda",
+      "required": true,
+      "qualified": true,
+      "capability": "speech-recognition",
+      "files": {
+        "am.mvn": {
+          "sha256": "29b3c740a2c0cfc6b308126d31d7f265fa2be74f3bb095cd2f143ea970896ae5",
+          "bytes": 11203,
+          "source_url": "https://huggingface.co/FunAudioLLM/SenseVoiceSmall/resolve/3847d57b6bdf2dd8875cb1508d2af43d80a16bf7/am.mvn"
+        },
+        "chn_jpn_yue_eng_ko_spectok.bpe.model": {
+          "sha256": "aa87f86064c3730d799ddf7af3c04659151102cba548bce325cf06ba4da4e6a8",
+          "bytes": 377341,
+          "source_url": "https://huggingface.co/FunAudioLLM/SenseVoiceSmall/resolve/3847d57b6bdf2dd8875cb1508d2af43d80a16bf7/chn_jpn_yue_eng_ko_spectok.bpe.model"
+        },
+        "config.yaml": {
+          "sha256": "f71e239ba36705564b5bf2d2ffd07eece07b8e3f2bbf6d2c99d8df856339ac19",
+          "bytes": 1855,
+          "source_url": "https://huggingface.co/FunAudioLLM/SenseVoiceSmall/resolve/3847d57b6bdf2dd8875cb1508d2af43d80a16bf7/config.yaml"
+        },
+        "configuration.json": {
+          "sha256": "02810a7f8e9e8aee10370a265f7e799728ce25b4c00cdbf4602b303ee395a38e",
+          "bytes": 396,
+          "source_url": "https://huggingface.co/FunAudioLLM/SenseVoiceSmall/resolve/3847d57b6bdf2dd8875cb1508d2af43d80a16bf7/configuration.json"
+        },
+        "model.pt": {
+          "sha256": "833ca2dcfdf8ec91bd4f31cfac36d6124e0c459074d5e909aec9cabe6204a3ea",
+          "bytes": 936291369,
+          "source_url": "https://huggingface.co/FunAudioLLM/SenseVoiceSmall/resolve/3847d57b6bdf2dd8875cb1508d2af43d80a16bf7/model.pt"
+        }
+      }
+    },
+    {
+      "id": "fsmn-vad",
+      "name": "FSMN Voice Activity Detection",
+      "revision": "df20e6b30c653645fa4ff125cacfcabd1020a669",
+      "license": "Apache-2.0",
+      "runtime": "linux-worker-cuda",
+      "required": true,
+      "qualified": true,
+      "capability": "voice-activity-detection",
+      "files": {
+        "am.mvn": {
+          "sha256": "df189fd5f4352df84a0fd464eeab4e450a5e645665d6b38f13c832492261a739",
+          "bytes": 8033,
+          "source_url": "https://huggingface.co/funasr/fsmn-vad/resolve/df20e6b30c653645fa4ff125cacfcabd1020a669/am.mvn"
+        },
+        "config.yaml": {
+          "sha256": "486861ca26ddb79081663b6179cb204c6bfae71c52f04aafc48a9e9d8dde1e93",
+          "bytes": 1215,
+          "source_url": "https://huggingface.co/funasr/fsmn-vad/resolve/df20e6b30c653645fa4ff125cacfcabd1020a669/config.yaml"
+        },
+        "configuration.json": {
+          "sha256": "7bce8867e37d55c3dd8f672695ced18077a2be199ea529a5d432d5350fc0acba",
+          "bytes": 365,
+          "source_url": "https://huggingface.co/funasr/fsmn-vad/resolve/df20e6b30c653645fa4ff125cacfcabd1020a669/configuration.json"
+        },
+        "model.pt": {
+          "sha256": "b3be75be477f0780277f3bae0fe489f48718f585f3a6e45d7dd1fbb1a4255fc5",
+          "bytes": 1721366,
+          "source_url": "https://huggingface.co/funasr/fsmn-vad/resolve/df20e6b30c653645fa4ff125cacfcabd1020a669/model.pt"
+        }
+      }
+    },
+    {
+      "id": "faster-whisper-small",
+      "name": "Faster Whisper Small",
+      "revision": "536b0662742c02347bc0e980a01041f333bce120",
+      "license": "MIT",
+      "runtime": "linux-worker-cuda",
+      "required": false,
+      "qualified": true,
+      "capability": "speech-recognition",
+      "files": {
+        "config.json": {
+          "sha256": "b55496ac7940a7ae47d2c01eab40edfd8701feec1229d9cce3b40014383fb828",
+          "bytes": 2370,
+          "source_url": "https://huggingface.co/Systran/faster-whisper-small/resolve/536b0662742c02347bc0e980a01041f333bce120/config.json"
+        },
+        "model.bin": {
+          "sha256": "3e305921506d8872816023e4c273e75d2419fb89b24da97b4fe7bce14170d671",
+          "bytes": 483546902,
+          "source_url": "https://huggingface.co/Systran/faster-whisper-small/resolve/536b0662742c02347bc0e980a01041f333bce120/model.bin"
+        },
+        "tokenizer.json": {
+          "sha256": "fb7b63191e9bb045082c79fd742a3106a12c99513ab30df4a0d47fa6cb6fd0ab",
+          "bytes": 2203239,
+          "source_url": "https://huggingface.co/Systran/faster-whisper-small/resolve/536b0662742c02347bc0e980a01041f333bce120/tokenizer.json"
+        },
+        "vocabulary.txt": {
+          "sha256": "34ce3fe1c5041027b3f8d42912270993f986dbc4bb34cf27f951e34a1e453913",
+          "bytes": 459861,
+          "source_url": "https://huggingface.co/Systran/faster-whisper-small/resolve/536b0662742c02347bc0e980a01041f333bce120/vocabulary.txt"
+        }
+      }
+    },
+    {
+      "id": "sortformer-overlap-diarization",
+      "name": "Streaming Sortformer Overlap Diarization",
+      "revision": "5240a64075176943f677d30fa2171c780229f341",
+      "license": "CC-BY-4.0",
+      "runtime": "linux-worker-nemo-speech-cpp-cuda",
+      "required": true,
+      "qualified": true,
+      "capability": "speaker-diarization-and-overlap-detection",
+      "files": {
+        "diar_streaming_sortformer_4spk-v2.q8_0.gguf": {
+          "sha256": "0679cfeb1ce356d0dea9470b31274f4bfc7eb927497d82005483770666da998a",
+          "bytes": 147075776,
+          "source_url": "https://huggingface.co/nvidia/diar_streaming_sortformer_4spk-v2/resolve/5240a64075176943f677d30fa2171c780229f341/diar_streaming_sortformer_4spk-v2.q8_0.gguf"
+        }
+      }
+    },
+    {
+      "id": "mossformer2-ss-16k",
+      "name": "MossFormer2 Target Separation",
+      "revision": "407cb030cd66340918ebb6c8cc63b18f8592cdbe",
+      "license": "ClearerVoice-Studio license",
+      "runtime": "linux-worker-cuda",
+      "required": true,
+      "qualified": true,
+      "capability": "source-separation",
+      "files": {
+        "last_best_checkpoint.pt": {
+          "sha256": "00a3a48bda492db1e829b85dd443f8f43a43039a3e90f1a24962ea9caf14a11a",
+          "bytes": 670353271,
+          "source_url": "https://huggingface.co/alibabasglab/MossFormer2_SS_16K/resolve/407cb030cd66340918ebb6c8cc63b18f8592cdbe/last_best_checkpoint.pt"
+        }
+      }
+    },
+    {
+      "id": "gpt-sovits-v2proplus-training",
+      "name": "GPT-SoVITS V2ProPlus Training Base",
+      "revision": "336b2ec4e8d4ac74740798dd40af44e74659ecaf",
+      "license": "MIT",
+      "runtime": "linux-worker-cuda",
+      "required": true,
+      "qualified": true,
+      "capability": "v2proplus-preprocessing-and-training",
+      "files": {
+        "chinese-hubert-base/config.json": {"sha256": "c3e5060a1277e0f078cc6be9da4528a605dba6ece93018981fe2c820e5c7b103", "bytes": 1449, "source_url": "https://huggingface.co/lj1995/GPT-SoVITS/resolve/336b2ec4e8d4ac74740798dd40af44e74659ecaf/chinese-hubert-base/config.json"},
+        "chinese-hubert-base/preprocessor_config.json": {"sha256": "dcd684124d06722947939d41ea6ae58dbf10968c60a11a29f23ddc602c64a29b", "bytes": 212, "source_url": "https://huggingface.co/lj1995/GPT-SoVITS/resolve/336b2ec4e8d4ac74740798dd40af44e74659ecaf/chinese-hubert-base/preprocessor_config.json"},
+        "chinese-hubert-base/pytorch_model.bin": {"sha256": "24164f129c66499d1346e2aa55f183250c223161ec2770c0da3d3b08cf432d3c", "bytes": 188811417, "source_url": "https://huggingface.co/lj1995/GPT-SoVITS/resolve/336b2ec4e8d4ac74740798dd40af44e74659ecaf/chinese-hubert-base/pytorch_model.bin"},
+        "chinese-roberta-wwm-ext-large/config.json": {"sha256": "3d57de2fd7e80d0e5c8ff194f0bbb6baa10df7e43fc262a0cc71298a78b0a3e5", "bytes": 963, "source_url": "https://huggingface.co/lj1995/GPT-SoVITS/resolve/336b2ec4e8d4ac74740798dd40af44e74659ecaf/chinese-roberta-wwm-ext-large/config.json"},
+        "chinese-roberta-wwm-ext-large/pytorch_model.bin": {"sha256": "e53a693acc59ace251d143d068096ae0d7b79e4b1b503fa84c9dcf576448c1d8", "bytes": 651225145, "source_url": "https://huggingface.co/lj1995/GPT-SoVITS/resolve/336b2ec4e8d4ac74740798dd40af44e74659ecaf/chinese-roberta-wwm-ext-large/pytorch_model.bin"},
+        "chinese-roberta-wwm-ext-large/tokenizer.json": {"sha256": "173796956820ea27bd14f76bf28162607ff4254807e2948253eb5b46f5bb643b", "bytes": 268962, "source_url": "https://huggingface.co/lj1995/GPT-SoVITS/resolve/336b2ec4e8d4ac74740798dd40af44e74659ecaf/chinese-roberta-wwm-ext-large/tokenizer.json"},
+        "s1v3.ckpt": {"sha256": "87133414860ea14ff6620c483a3db5ed07b44be42e2c3fcdad65523a729a745a", "bytes": 155284856, "source_url": "https://huggingface.co/lj1995/GPT-SoVITS/resolve/336b2ec4e8d4ac74740798dd40af44e74659ecaf/s1v3.ckpt"},
+        "sv/pretrained_eres2netv2w24s4ep4.ckpt": {"sha256": "4f5a0bf73c61eb41b174e1bb54e7ee3c83233892be8e0af1f187024e8e581a35", "bytes": 107528697, "source_url": "https://huggingface.co/lj1995/GPT-SoVITS/resolve/336b2ec4e8d4ac74740798dd40af44e74659ecaf/sv/pretrained_eres2netv2w24s4ep4.ckpt"},
+        "v2Pro/s2Dv2ProPlus.pth": {"sha256": "635cd84bf6f7f9b8d41c88c7106f81d782c794c61f931845214ea037b0c5bef2", "bytes": 126432639, "source_url": "https://huggingface.co/lj1995/GPT-SoVITS/resolve/336b2ec4e8d4ac74740798dd40af44e74659ecaf/v2Pro/s2Dv2ProPlus.pth"},
+        "v2Pro/s2Gv2ProPlus.pth": {"sha256": "d42a22bbbf65fb2bbdd45ad6a66841156977db45c7aabe0a6992ff378d9c7d3b", "bytes": 200125741, "source_url": "https://huggingface.co/lj1995/GPT-SoVITS/resolve/336b2ec4e8d4ac74740798dd40af44e74659ecaf/v2Pro/s2Gv2ProPlus.pth"}
+      }
+    },
+    {
+      "id": "deepfilternet",
+      "name": "DeepFilterNet",
+      "revision": "qualification-required",
+      "license": "MIT/Apache-2.0",
+      "runtime": "linux-worker-cuda",
+      "required": false,
+      "qualified": false,
+      "capability": "speech-enhancement",
+      "files": {}
+    },
+    {
+      "id": "wpe-dereverberation",
+      "name": "WPE Dereverberation",
+      "revision": "experimental-disabled",
+      "license": "research-only-unqualified",
+      "runtime": "linux-worker",
+      "required": false,
+      "qualified": false,
+      "capability": "dereverberation",
+      "files": {}
+    }
+  ]
+}

@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from .errors import EngineRebuildRequired
+from .model_backend import model_backend_for_manifest
 from .model_package import (
     resolve_contained_path,
     select_engine_dir,
@@ -24,9 +25,10 @@ def configure_runtime(settings: RuntimeSettings | None = None) -> dict[str, Any]
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     if manifest.get("format") != "aniflive-tts-model-package":
         raise RuntimeError("Unsupported model package format")
-    if manifest.get("model_family") != "gsv-v2proplus":
+    backend = model_backend_for_manifest(manifest)
+    if backend is None:
         raise RuntimeError("AnifLive-TTS v1 currently supports gsv-v2proplus")
-    if manifest.get("precision") != "FP16":
+    if manifest.get("precision") != backend.precision:
         raise RuntimeError("AnifLive-TTS v1 currently supports FP16 packages")
     model_id = validate_safe_identifier(manifest.get("model_id"), "model_id")
     validate_checksums(package_dir)
@@ -61,7 +63,10 @@ def configure_runtime(settings: RuntimeSettings | None = None) -> dict[str, Any]
     for label, path in required.items():
         if not path.is_file():
             raise FileNotFoundError(f"Missing {label} runtime resource: {path}")
+    from .sampling_policy import package_sampling_contract
+
     values = {
+        "ANIFLIVE_TTS_PACKAGE_SEMANTIC_SAMPLING": package_sampling_contract(manifest),
         "ANIFLIVE_TTS_MODEL_ID": model_id,
         "ANIFLIVE_TTS_VOICE_PROFILE": voice,
         "ANIFLIVE_TTS_SOURCE_DIR": str(source_dir),

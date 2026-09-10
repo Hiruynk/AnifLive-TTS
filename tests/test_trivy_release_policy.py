@@ -58,3 +58,23 @@ def test_empty_or_malformed_reports_block_release() -> None:
     assert POLICY["find_blockers"](
         {"SchemaVersion": 2, "ArtifactName": "image", "Results": []}, "cu128"
     )
+
+
+def test_review_is_explicit_and_does_not_hide_other_versions():
+    import json
+    policy = POLICY["load_applicability"](ROOT / "scripts/release_vulnerability_applicability.json")
+    finding = {"PkgName": "transformers", "InstalledVersion": "5.5.0",
+               "VulnerabilityID": "CVE-2026-9856", "Severity": "HIGH"}
+    report = _report(finding)
+    report["Metadata"] = {"OS": {"Family": "ubuntu", "Name": "24.04"}}
+    assert POLICY["find_blockers"](report, "cu126")
+    assert POLICY["find_blockers"](report, "cu126", applicability=policy) == []
+    finding["InstalledVersion"] = "5.6.0"
+    assert POLICY["find_blockers"](report, "cu126", applicability=policy)
+
+
+def test_secret_findings_block_without_echoing_secret_material():
+    report = _report({"Severity": "LOW"})
+    report["Results"][0]["Secrets"] = [{"RuleID": "test-token", "Match": "private-test-value"}]
+    blockers = POLICY["find_blockers"](report, "cu128")
+    assert blockers and all("private-test-value" not in value for value in blockers)

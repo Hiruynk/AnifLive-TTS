@@ -33,7 +33,14 @@
         "explicit trusted-pickle opt-in",
         "offline export hardening",
         "local-only Transformer assets with remote model code disabled",
-        "privacy-minimized inference package configuration"
+        "privacy-minimized inference package configuration",
+        "mathematically equivalent portable FP32 radix-2 spectrogram with unchanged window/hop/magnitude contract",
+        "fixed multi-seed GPT export probe bank without changing model or inference settings",
+        "consistent CPU thread budget for export verification",
+        "replace approximate speaker feature frontend with native Kaldi framing, DC removal, pre-emphasis, symmetric Povey window and mel banks; validate exported speaker outputs against the independent native frontend",
+        "seed all export probes for repeatable validation in addition to the fixed GPT probe bank",
+        "default new streaming exports to 12 latent overlap frames after conversion and real-stream qualification; preserve explicit positive-even overrides",
+        "export GPT layer normalization using centered FP32 variance; retain native PyTorch reference, fixed probes and unchanged tolerances"
       ]
     },
     {
@@ -48,7 +55,9 @@
       "upstream_sha256": "3e1b5d2027b1166bf304c4683bef495b642e10604e2e82fa3a7414bae836464c",
       "changes": [
         "optional ONNX simplification",
-        "validated fallback when onnxsim is unavailable"
+        "validated fallback when onnxsim is unavailable",
+        "retain FP32 GPT encoder/step/block graphs to prevent accumulated autoregressive cache rounding from changing close token rankings; other mixed-precision stages unchanged",
+        "retain FP32 HuBERT reference features before discrete VQ tokenization; validate against saved native reference tokens"
       ]
     },
     {
@@ -58,7 +67,9 @@
         "removed environment-specific proxy configuration",
         "V2ProPlus warmup support",
         "deterministic sampling controls",
-        "stage profiling output"
+        "stage profiling output",
+        "safe weights-only GPT checkpoint loading",
+        "explicit workstation speaker-verifier asset injection"
       ]
     },
     {
@@ -98,7 +109,8 @@
         "validated asynchronous enqueue errors",
         "top-k and nucleus sampling controls",
         "local-only tokenizer assets with remote model code disabled",
-        "generic public example paths"
+        "generic public example paths",
+        "optional explicit sampling generator for isolated conversion QA; omitted-generator runtime behavior unchanged"
       ]
     },
     {
@@ -120,6 +132,20 @@
       "upstream_sha256": "409d5acad77d1d75433938c037915f33a85ab5e0eea2d28566b048f9cf95926c",
       "changes": [
         "adapted the API documentation link for the AnifLive-TTS distribution"
+      ]
+    },
+    {
+      "path": "onnx_validation.py",
+      "upstream_sha256": "27e55fe9add49a40b978fe3178a0be50f84454159050988d431e8745996543b6",
+      "changes": [
+        "standard elementwise absolute-plus-relative numerical tolerance with unchanged threshold values",
+        "exact discrete output checks and explicit empty/nonfinite rejection",
+        "declared ONNX input filtering with missing-input rejection",
+        "persistent per-stage validation diagnostics",
+        "shared standard-normal validation inputs with preserved production graph and recorded controls",
+        "isolated PyTorch input copies and retained failed probe inputs",
+        "explicit deterministic ONNX validation session and recorded CPU execution settings",
+        "scope native ATen CPU convolution to waveform validation; exact failed-probe and three saved-probe cross-checks preserve original tolerances"
       ]
     }
   ],
@@ -152,6 +178,22 @@
           "changes": [
             "required local-only Transformer assets",
             "disabled remote model code"
+          ]
+        },
+        {
+          "path": "GPT_SoVITS/process_ckpt.py",
+          "upstream_sha256": "a26495c11bfa00552d2599abdd093c50d4b554c224677912ce72d8fb99667c63",
+          "changes": [
+            "kept PyTorch restricted checkpoint loading enabled",
+            "allowlisted only the upstream HParams data container required by V2ProPlus checkpoints"
+          ]
+        },
+        {
+          "path": "GPT_SoVITS/sv.py",
+          "upstream_sha256": "58b063683a4e28727205101e12aedd6f5b7d74eaeb90cdcfa5257fb65d9afa1c",
+          "changes": [
+            "safe weights-only speaker-verifier state loading",
+            "explicit workstation-managed speaker-verifier model path support"
           ]
         },
         {

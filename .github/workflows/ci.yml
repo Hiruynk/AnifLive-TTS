@@ -26,18 +26,7 @@ jobs:
           python -m pip install -e .
       - name: Ruff
         run: ruff check src tests scripts
-      - name: Static, API, and runtime contract tests
-        run: >-
-          pytest -q
-          tests/test_no_runtime_install.py
-          tests/test_release_dependencies.py
-          tests/test_naming_and_boundaries.py
-          tests/test_release_hygiene.py
-          tests/test_benchmark_readme_contract.py
-          tests/test_api_contract.py
-          tests/test_runtime_safety.py
-          tests/test_release_security.py
-          tests/test_shared_assets_integrity.py
-          tests/test_upstream_provenance.py
+      - name: Full static, API, runtime, and workstation suite
+        run: pytest -q
       - name: Release security gate
-        run: python scripts/check_release_security.py --expected-version 1.3.0
+        run: python scripts/check_release_security.py --expected-version 1.4.0.dev0

@@ -25,6 +25,7 @@ import soundfile as sf
 import soxr
 
 from aniflive_tts.backend.semantic_runtime import TransformerSemanticRuntime
+from aniflive_tts.continuity import ContinuationCapture, NeuralContinuationInput
 from aniflive_tts.expression import (
     BoundaryKind,
     ConditioningBundle,
@@ -1308,6 +1309,9 @@ class TensorRTFixedReferenceStreamer:
         request_seed: int,
         chunk_length: int | None = None,
         cancelled: threading.Event | None = None,
+        continuity_input: NeuralContinuationInput | None = None,
+        continuity_capture: ContinuationCapture | None = None,
+        continuity_policy: str = "A",
     ) -> Iterator[np.ndarray]:
         """Yield mono float32 chunks while retaining the reference on the GPU."""
 
@@ -1363,6 +1367,16 @@ class TensorRTFixedReferenceStreamer:
             "pipeline_overlap_enabled": 0,
             "dedicated_tail_context_enabled": int(self._tail_executor is not None),
             "segment_profiles": [],
+            "session_context_policy": str(continuity_policy),
+            "session_context_input_phonemes": (
+                len(continuity_input.phones) if continuity_input is not None else 0
+            ),
+            "session_context_input_semantic_tokens": (
+                continuity_input.semantic_tokens if continuity_input is not None else 0
+            ),
+            "session_context_output_phonemes": 0,
+            "session_context_output_semantic_tokens": 0,
+            "session_acoustic_latent_continuity": 0,
         }
         self.last_profile = None
 
@@ -1562,10 +1576,19 @@ class TensorRTFixedReferenceStreamer:
         pending_tail: _PendingTail | None = None
         pending_technical_tail: np.ndarray | None = None
         technical_crossfade_samples = max(fade_samples, int(round(self.sample_rate * 0.020)))
-        continuation_phones: list[int] = []
-        continuation_bert: Any | None = None
-        continuation_tokens: Any | None = None
-        previous_was_technical = False
+        continuation_phones: list[int] = (
+            list(continuity_input.phones) if continuity_input is not None else []
+        )
+        continuation_bert: Any | None = (
+            continuity_input.bert if continuity_input is not None else None
+        )
+        continuation_tokens: Any | None = (
+            continuity_input.semantic if continuity_input is not None else None
+        )
+        previous_was_technical = continuity_input is not None
+        captured_phones: list[int] = []
+        captured_bert: Any | None = None
+        captured_tokens: Any | None = None
         pending_expression_fade_in = False
         # Do not publish silent preview chunks as if speech had started.  The
         # same conservative head trim is used for the first segment and every
@@ -1853,7 +1876,7 @@ class TensorRTFixedReferenceStreamer:
                 history_phones: list[int] = []
                 history_bert: Any | None = None
                 history_semantic: Any | None = None
-                if previous_was_technical and continuation_tokens is not None:
+                if previous_was_technical and continuation_bert is not None:
                     encoder_max_phones = int(
                         self.engine.model_gpt_enc.input_max_shapes.get(
                             "phoneme_ids", (1, 256)
@@ -1883,34 +1906,39 @@ class TensorRTFixedReferenceStreamer:
                     if history_phone_count > 0 and continuation_bert is not None:
                         history_phones = continuation_phones[-history_phone_count:]
                         history_bert = continuation_bert[:, -history_phone_count:]
-                        encoder_max_prompts = int(
-                            self.engine.model_gpt_enc.input_max_shapes.get(
-                                "prompts", (1, 300)
-                            )[-1]
-                        )
-                        available_prompts = max(
-                            0,
-                            encoder_max_prompts - int(reference.prompt_semantic.shape[-1]),
-                        )
-                        history_token_limit = (
-                            max(
-                                1,
-                                int(
-                                    os.environ.get(
-                                        "ANIFLIVE_TTS_EXPRESSION_CONTEXT_TOKENS", "48"
-                                    )
-                                ),
+                        if continuation_tokens is not None:
+                            encoder_max_prompts = int(
+                                self.engine.model_gpt_enc.input_max_shapes.get(
+                                    "prompts", (1, 300)
+                                )[-1]
                             )
-                            if entering_expression_switch
-                            else 125
-                        )
-                        history_token_count = min(
-                            history_token_limit,
-                            available_prompts,
-                            int(continuation_tokens.shape[-1]),
-                        )
-                        if history_token_count > 0:
-                            history_semantic = continuation_tokens[:, -history_token_count:]
+                            available_prompts = max(
+                                0,
+                                encoder_max_prompts
+                                - int(reference.prompt_semantic.shape[-1]),
+                            )
+                            history_token_limit = (
+                                max(
+                                    1,
+                                    int(
+                                        os.environ.get(
+                                            "ANIFLIVE_TTS_EXPRESSION_CONTEXT_TOKENS",
+                                            "48",
+                                        )
+                                    ),
+                                )
+                                if entering_expression_switch
+                                else 125
+                            )
+                            history_token_count = min(
+                                history_token_limit,
+                                available_prompts,
+                                int(continuation_tokens.shape[-1]),
+                            )
+                            if history_token_count > 0:
+                                history_semantic = continuation_tokens[
+                                    :, -history_token_count:
+                                ]
                 bert_parts = [reference.bert]
                 if history_bert is not None:
                     bert_parts.append(history_bert)
@@ -2690,24 +2718,27 @@ class TensorRTFixedReferenceStreamer:
                     ):
                         pending_expression_fade_in = True
 
-                if technical_continuation and segment_token_parts:
+                if segment_token_parts:
                     current_tokens = torch.cat(segment_token_parts, dim=1).detach()
-                    if (
-                        previous_was_technical
-                        and continuation_bert is not None
-                        and continuation_tokens is not None
-                    ):
-                        continuation_phones = continuation_phones + list(phones)
-                        continuation_bert = torch.cat(
+                    if previous_was_technical and continuation_bert is not None:
+                        captured_phones = continuation_phones + list(phones)
+                        captured_bert = torch.cat(
                             (continuation_bert, bert.detach()), dim=1
                         )
-                        continuation_tokens = torch.cat(
-                            (continuation_tokens, current_tokens), dim=1
-                        ).detach()
+                        captured_tokens = (
+                            torch.cat((continuation_tokens, current_tokens), dim=1).detach()
+                            if continuation_tokens is not None
+                            else current_tokens.clone()
+                        )
                     else:
-                        continuation_phones = list(phones)
-                        continuation_bert = bert.detach()
-                        continuation_tokens = current_tokens.clone()
+                        captured_phones = list(phones)
+                        captured_bert = bert.detach()
+                        captured_tokens = current_tokens.clone()
+
+                if technical_continuation and captured_tokens is not None:
+                    continuation_phones = captured_phones
+                    continuation_bert = captured_bert
+                    continuation_tokens = captured_tokens
                     previous_was_technical = True
                 else:
                     continuation_phones = []
@@ -2719,6 +2750,29 @@ class TensorRTFixedReferenceStreamer:
                 yield note_audio(pending, max(0, len(segments) - 1))
             if pending_technical_tail is not None:
                 yield note_audio(pending_technical_tail, max(0, len(segments) - 1))
+        if (
+            continuity_capture is not None
+            and captured_phones
+            and captured_bert is not None
+            and captured_tokens is not None
+        ):
+            # Capture on the same CUDA stream that produced these tensors.
+            # The next session segment also consumes them on this stream, so
+            # no host synchronization is introduced at a committed boundary.
+            with torch.cuda.stream(self.engine.stream):
+                continuity_capture.publish(
+                    language=text_language,
+                    expression=resolved_conditionings[-1].expression_id,
+                    phones=captured_phones,
+                    bert=captured_bert,
+                    semantic=captured_tokens,
+                )
+            profile["session_context_output_phonemes"] = min(
+                75, len(captured_phones)
+            )
+            profile["session_context_output_semantic_tokens"] = min(
+                64, int(captured_tokens.shape[-1])
+            )
         semantic_nfe = int(profile["semantic_nfe"])
         if semantic_nfe > 0:
             profile["semantic_tokens_per_nfe"] = float(profile["semantic_tokens"]) / float(

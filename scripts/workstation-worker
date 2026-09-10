@@ -1,0 +1,4 @@
+#!/bin/sh
+set -eu
+exec python -m aniflive_tts.container_worker "$@"
+

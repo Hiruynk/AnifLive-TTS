@@ -1,0 +1,24 @@
+ClearerVoice-Studio / MossFormer2_SS_16K
+=======================================
+
+Upstream project: https://github.com/modelscope/ClearerVoice-Studio
+Source revision: 6b3774dc79c46ae8bed2a4fa5f706f0ac8c75c61
+Source archive SHA-256:
+f8f8d2f2190b9909b51e91ce886d1c7efedb7349b3ff6d3ab521451165fbd8da
+
+Model repository: https://huggingface.co/alibabasglab/MossFormer2_SS_16K
+Model revision: 407cb030cd66340918ebb6c8cc63b18f8592cdbe
+Checkpoint SHA-256:
+00a3a48bda492db1e829b85dd443f8f43a43039a3e90f1a24962ea9caf14a11a
+
+The upstream source and model card identify this work as Apache-2.0. The full
+Apache License 2.0 text is distributed in this repository at
+minimal_inference/LICENSE. The workstation worker image also retains the
+unmodified upstream ClearerVoice-Studio LICENSE at
+/opt/aniflive-tts/clearvoice-source/LICENSE.
+
+AnifLive-TTS modifies only the integration and orchestration around the pinned
+upstream model: offline source acquisition, strict checksum validation,
+windowed overlap-add, and target selection through the existing TensorRT
+speaker embedding. Model weights remain external and are never placed in the
+source repository or release image.

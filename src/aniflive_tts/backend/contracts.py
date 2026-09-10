@@ -79,3 +79,25 @@ class ModelPaths:
         if missing:
             raise FileNotFoundError("Missing model assets: " + ", ".join(missing))
         return self
+
+
+def stage_outputs_supported(stage: str, outputs) -> bool:
+    """Accept legacy outputs or the explicit full-logit extension, never arbitrary extras."""
+    actual = set(outputs)
+    if len(actual) != len(outputs):
+        return False
+    required = set(STAGE_IO_CONTRACTS[stage][1])
+    return actual == required or (
+        stage in {"gpt_encoder", "gpt_step"} and actual == required | {"logits"}
+    )
+
+
+def validate_full_logits_output(stage: str, outputs, engine, trt) -> bool:
+    if stage not in {"gpt_encoder", "gpt_step"} or "logits" not in outputs:
+        return False
+    shape = tuple(engine.get_tensor_shape("logits"))
+    if (len(shape) != 2 or shape[0] not in {1, -1} or shape[1] != 1025
+            or engine.get_tensor_dtype("logits") != trt.float32
+            or engine.get_tensor_location("logits") != trt.TensorLocation.DEVICE):
+        raise RuntimeError(f"{stage} full logits require FP32 device output [batch, 1025]")
+    return True

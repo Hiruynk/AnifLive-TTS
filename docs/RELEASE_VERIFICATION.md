@@ -5,11 +5,11 @@ convenient name, not an immutable identity. Production deployments should pin
 the digest recorded by the release workflow.
 
 For each published container profile, download the matching
-`RELEASE-METADATA-AnifLive-TTS-v1.3.0-<profile>.json` and
-`SBOM-AnifLive-TTS-v1.3.0-<profile>.spdx.json` and
-`TRIVY-AnifLive-TTS-v1.3.0-<profile>.json` release assets, then verify:
+`RELEASE-METADATA-AnifLive-TTS-v1.4.0-<profile>.json` and
+`SBOM-AnifLive-TTS-v1.4.0-<profile>.spdx.json` and
+`TRIVY-AnifLive-TTS-v1.4.0-<profile>.json` release assets, then verify:
 
-1. `source_commit` equals the v1.3.0 release commit.
+1. `source_commit` equals the v1.4.0 release commit.
 2. `image_digest` matches the digest reported by GHCR.
 3. The OCI `org.opencontainers.image.revision` label and index annotation
    equal `source_commit`.
@@ -17,6 +17,12 @@ For each published container profile, download the matching
    names the same image.
 5. The Trivy report passes `scripts/check_trivy_report.py` for its profile.
 6. BuildKit provenance is attached to the immutable digest.
+
+The explicit `scripts/release_vulnerability_applicability.json` review records
+source-bound findings that do not affect this application's execution paths.
+Pass it with `--applicability`; unreviewed HIGH/CRITICAL findings still block
+release, and the original scan report is retained.
+
 
 Inspect an image without changing its contents:
 
@@ -32,5 +38,5 @@ docker pull ghcr.io/hiruynk/aniflive-tts@sha256:<digest>
 ```
 
 Digest and provenance fields remain pending until the image is rebuilt by the
-release workflow from the final v1.3.0 commit. Evidence from an older workflow
+release workflow from the final v1.4.0 commit. Evidence from an older workflow
 run must not be presented as evidence for a newer source revision.

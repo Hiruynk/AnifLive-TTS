@@ -1,13 +1,88 @@
+# Modified by AnifLive-TTS in 2026. See ANIFLIVE_TTS_PROVENANCE.json.
 """
 ONNX导出精度校验模块
 用于在导出过程中对比PyTorch模型和ONNX模型的输出，定位精度损失位置
 """
 import os
+import hashlib
+from contextlib import nullcontext
+from unittest.mock import patch
 import torch
 import numpy as np
 import onnxruntime
 from typing import Dict, Tuple, Optional, Any
 import json
+
+
+def _shared_normal_model(onnx_path, draws, dummy_inputs, output_dir, label):
+    """Align standard-normal draws for comparison without rewriting the exported model."""
+    if not draws:
+        return onnx_path, {"mode": "deterministic-or-explicit-noise"}
+    import onnx
+    from pathlib import Path
+
+    model = onnx.load(onnx_path)
+    random_nodes = []
+    for node in model.graph.node:
+        if node.op_type in {"RandomNormal", "RandomNormalLike"}:
+            random_nodes.append(node)
+        elif node.op_type in {"RandomUniform", "RandomUniformLike", "Bernoulli", "Multinomial"}:
+            raise ValueError("Unsupported mixed random operators in numerical validation")
+        for attribute in node.attribute:
+            graphs = [attribute.g] if attribute.type == onnx.AttributeProto.GRAPH else (
+                list(attribute.graphs) if attribute.type == onnx.AttributeProto.GRAPHS else []
+            )
+            if any("Random" in child.op_type for graph in graphs for child in graph.node):
+                raise ValueError("Nested random operators require explicit validation controls")
+    if len(random_nodes) != len(draws):
+        raise ValueError("PyTorch and ONNX standard-normal draw counts differ")
+    controls = []
+    for node, draw in zip(random_nodes, draws):
+        attrs = {a.name: onnx.helper.get_attribute_value(a) for a in node.attribute}
+        if attrs.get("mean", 0.0) != 0.0 or attrs.get("scale", 1.0) != 1.0:
+            raise ValueError("Only standard-normal primitives can use shared validation draws")
+        if len(node.output) != 1 or not np.isfinite(draw).all():
+            raise ValueError("Invalid normal draw in numerical validation")
+        dtype = onnx.helper.np_dtype_to_tensor_dtype(draw.dtype)
+        if "dtype" in attrs and attrs["dtype"] != dtype:
+            raise ValueError("PyTorch and ONNX random draw dtypes differ")
+        if node.op_type == "RandomNormal" and tuple(attrs["shape"]) != draw.shape:
+            raise ValueError("PyTorch and ONNX random draw shapes differ")
+        controls.append({
+            "operator": node.op_type,
+            "shape": list(draw.shape),
+            "dtype": str(draw.dtype),
+            "sha256": hashlib.sha256(draw.tobytes()).hexdigest(),
+        })
+        replacement = onnx.helper.make_node(
+            "Constant", [], list(node.output),
+            value=onnx.numpy_helper.from_array(draw),
+            name=node.name + "_shared_validation_draw",
+        )
+        node.CopyFrom(replacement)
+    onnx.external_data_helper.convert_model_from_external_data(model)
+    controlled = model.SerializeToString()
+    root = Path(output_dir) / "validation-inputs"
+    root.mkdir(parents=True, exist_ok=True)
+    safe_label = "".join(c if c.isalnum() else "_" for c in label)
+    inputs_path = root / (safe_label + ".npz")
+    values = {f"input_{i}": tensor.detach().cpu().numpy() for i, tensor in enumerate(dummy_inputs.values())}
+    values.update({f"noise_{i}": value for i, value in enumerate(draws)})
+    np.savez_compressed(inputs_path, **values)
+    source_digest = hashlib.sha256()
+    with open(onnx_path, "rb") as source:
+        while block := source.read(1024 * 1024):
+            source_digest.update(block)
+    source_sha = source_digest.hexdigest()
+    return controlled, {
+        "mode": "shared-standard-normal-v1",
+        "source_model_sha256": source_sha,
+        "controlled_model_sha256": hashlib.sha256(controlled).hexdigest(),
+        "production_graph_modified": False,
+        "controls": controls,
+        "inputs_file": str(inputs_path.relative_to(Path(output_dir))),
+        "input_names": list(dummy_inputs),
+    }
 
 
 class ONNXValidator:
@@ -28,11 +103,25 @@ class ONNXValidator:
         # 设置ONNX运行时选项
         so = onnxruntime.SessionOptions()
         so.graph_optimization_level = onnxruntime.GraphOptimizationLevel.ORT_ENABLE_ALL
+        so.intra_op_num_threads = 4
+        so.inter_op_num_threads = 1
+        so.use_deterministic_compute = True
+        self.session_options = so
 
         if onnx_device == "cuda":
             self.providers = [("CUDAExecutionProvider", {"device_id": 0}), "CPUExecutionProvider"]
         else:
             self.providers = ["CPUExecutionProvider"]
+
+    def _record_failure(self, model_name, reason):
+        self.validation_results.append({
+            "model_name": model_name,
+            "output_name": "__execution__",
+            "passed": False,
+            "metrics": {"error": str(reason)[:4000]},
+        })
+        self.save_report()
+        return False
 
     def validate_model(
         self,
@@ -42,7 +131,8 @@ class ONNXValidator:
         dummy_inputs: Dict[str, torch.Tensor],
         output_names: list,
         rtol: float = 1e-3,
-        atol: float = 1e-5
+        atol: float = 1e-5,
+        case_id: Optional[str] = None,
     ) -> bool:
         """
         校验单个模型的输出精度
@@ -65,7 +155,7 @@ class ONNXValidator:
 
         if not os.path.exists(onnx_path):
             print(f"❌ ONNX模型不存在: {onnx_path}")
-            return False
+            return self._record_failure(model_name, "missing_onnx_model")
 
         # 确保模型在评估模式
         pytorch_model.eval()
@@ -74,7 +164,7 @@ class ONNXValidator:
         pt_inputs = []
         input_names = list(dummy_inputs.keys())
         for name in input_names:
-            tensor = dummy_inputs[name]
+            tensor = dummy_inputs[name].detach().clone()
             # 如果是GPU上的模型，确保输入在GPU上
             if hasattr(pytorch_model, 'parameters'):
                 try:
@@ -86,8 +176,33 @@ class ONNXValidator:
                     pass
             pt_inputs.append(tensor)
 
+        # Capture the actual normal draws consumed by this reference forward pass.
+        # ONNX validation uses those same draws; the production model is untouched.
+        draws = []
+        original_randn_like = torch.randn_like
+        original_randn = torch.randn
+
+        def capture(function):
+            def recorded(*args, **kwargs):
+                value = function(*args, **kwargs)
+                draws.append(value.detach().cpu().numpy().copy())
+                return value
+            return recorded
+
+        # A native ATen waveform reference avoids platform-dependent oneDNN
+        # convolution rounding. Scope this to CPU decoder validation only.
+        native_cpu_waveform = model_name in {"SoVITS", "SoVITSStreaming"} and all(
+            tensor.device.type == "cpu" for tensor in pt_inputs
+        )
+        reference_mkldnn = False if native_cpu_waveform else torch.backends.mkldnn.enabled
+        reference_context = (
+            torch.backends.mkldnn.flags(enabled=False)
+            if native_cpu_waveform else nullcontext()
+        )
         # PyTorch前向传播
-        with torch.no_grad():
+        with torch.no_grad(), reference_context, patch("torch.randn_like", capture(original_randn_like)), patch(
+            "torch.randn", capture(original_randn)
+        ):
             try:
                 if len(pt_inputs) == 1:
                     pt_outputs = pytorch_model(pt_inputs[0])
@@ -101,31 +216,44 @@ class ONNXValidator:
                     pt_outputs = [pt_outputs]
             except Exception as e:
                 print(f"❌ PyTorch前向传播失败: {e}")
-                return False
+                return self._record_failure(model_name, f"pytorch_forward: {e}")
 
         # 加载ONNX模型并推理
         try:
+            validation_model, random_alignment = _shared_normal_model(
+                onnx_path, draws, dummy_inputs, self.output_dir, f"{model_name}-{len(self.validation_results)}"
+            )
             ort_session = onnxruntime.InferenceSession(
-                onnx_path,
-                sess_options=onnxruntime.SessionOptions(),
+                validation_model,
+                sess_options=self.session_options,
                 providers=self.providers
             )
         except Exception as e:
             print(f"❌ 加载ONNX模型失败: {e}")
-            return False
+            return self._record_failure(model_name, f"onnx_load_or_random_alignment: {e}")
 
-        # 准备ONNX输入
-        ort_inputs = {}
-        for name, tensor in dummy_inputs.items():
-            # 转换为numpy
-            arr = tensor.detach().cpu().numpy()
-            ort_inputs[name] = arr
+        # Export may remove unused inputs (for example the fixed speed=1 path).
+        # Feed only declared graph inputs, but never invent a missing required input.
+        required_inputs = {value.name for value in ort_session.get_inputs()}
+        missing_inputs = required_inputs - set(dummy_inputs)
+        if missing_inputs:
+            print(f"❌ ONNX inputs are missing: {sorted(missing_inputs)}")
+            return self._record_failure(model_name, f"missing_onnx_inputs: {sorted(missing_inputs)}")
+        pruned_inputs = sorted(set(dummy_inputs) - required_inputs)
+        ort_inputs = {
+            name: tensor.detach().cpu().numpy()
+            for name, tensor in dummy_inputs.items()
+            if name in required_inputs
+        }
 
         try:
             ort_outputs = ort_session.run(output_names, ort_inputs)
         except Exception as e:
             print(f"❌ ONNX前向传播失败: {e}")
-            return False
+            return self._record_failure(model_name, f"onnx_forward: {e}")
+
+        if len(pt_outputs) != len(ort_outputs) or len(pt_outputs) != len(output_names):
+            return self._record_failure(model_name, "output_count_mismatch")
 
         # 对比输出
         all_passed = True
@@ -139,8 +267,18 @@ class ONNXValidator:
             # 保存结果
             result = {
                 "model_name": model_name,
+                "case_id": case_id,
+                "reference_execution": {
+                    "torch_cpu_threads": torch.get_num_threads(),
+                    "torch_cpu_mkldnn": reference_mkldnn,
+                    "native_cpu_waveform_reference": native_cpu_waveform,
+                    "ort_cpu_threads": self.session_options.intra_op_num_threads,
+                    "ort_deterministic_compute": True,
+                },
                 "output_name": out_name,
                 "passed": passed,
+                "pruned_input_names": pruned_inputs,
+                "random_alignment": random_alignment,
                 "metrics": metrics
             }
             self.validation_results.append(result)
@@ -149,6 +287,21 @@ class ONNXValidator:
         print(f"\n{status} {model_name} 校验完成")
         print(f"{'='*60}\n")
 
+        if not all_passed:
+            label = f"{model_name}-{case_id or 'default'}-{len(self.validation_results)}"
+            safe_label = "".join(c if c.isalnum() else "_" for c in label)
+            inputs_dir = os.path.join(self.output_dir, "validation-inputs")
+            os.makedirs(inputs_dir, exist_ok=True)
+            snapshot = os.path.join(inputs_dir, safe_label + ".npz")
+            np.savez_compressed(
+                snapshot,
+                **{f"input_{i}": value.detach().cpu().numpy()
+                   for i, value in enumerate(dummy_inputs.values())},
+            )
+            for row in self.validation_results[-len(output_names):]:
+                row["failure_inputs_file"] = os.path.relpath(snapshot, self.output_dir)
+                row["input_names"] = list(dummy_inputs)
+        self.save_report()
         return all_passed
 
     def _compare_tensors(
@@ -181,6 +334,19 @@ class ONNXValidator:
             print(f"  ⚠️  输出形状不匹配: PyTorch {pt_np.shape} vs ONNX {ort_np.shape}")
             return False, {"error": "shape_mismatch"}
 
+        if pt_np.size == 0:
+            return False, {"error": "empty_output"}
+        if not np.isfinite(pt_np).all() or not np.isfinite(ort_np).all():
+            return False, {"error": "nonfinite_output"}
+        if pt_np.dtype.kind not in "biuf" or ort_np.dtype.kind not in "biuf":
+            return False, {"error": "unsupported_output_dtype"}
+        discrete = pt_np.dtype.kind in "biu" or ort_np.dtype.kind in "biu"
+        if discrete and (pt_np.dtype.kind in "biu") != (ort_np.dtype.kind in "biu"):
+            return False, {"error": "discrete_output_dtype_mismatch"}
+        exact_match = np.array_equal(pt_np, ort_np)
+        pt_np = pt_np.astype(np.float64)
+        ort_np = ort_np.astype(np.float64)
+
         # 计算各种误差指标
         abs_diff = np.abs(pt_np - ort_np)
         max_abs_diff = np.max(abs_diff)
@@ -196,19 +362,19 @@ class ONNXValidator:
         mse = np.mean((pt_np - ort_np) ** 2)
         rmse = np.sqrt(mse)
 
-        # 余弦相似度（用于评估特征嵌入质量）
-        if pt_np.ndim >= 2:
-            pt_flat = pt_np.reshape(pt_np.shape[0], -1)
-            ort_flat = ort_np.reshape(ort_np.shape[0], -1)
-
-            # 归一化
-            pt_norm = pt_flat / (np.linalg.norm(pt_flat, axis=1, keepdims=True) + 1e-10)
-            ort_norm = ort_flat / (np.linalg.norm(ort_flat, axis=1, keepdims=True) + 1e-10)
-
-            # 批量余弦相似度
-            cosine_sim = np.mean(np.sum(pt_norm * ort_norm, axis=1))
-        else:
-            cosine_sim = np.corrcoef(pt_np.flatten(), ort_np.flatten())[0, 1]
+        # Preserve per-batch embedding scores and define scalar/zero cases.
+        batch = pt_np.shape[0] if pt_np.ndim >= 2 else 1
+        pt_flat = pt_np.reshape(batch, -1)
+        ort_flat = ort_np.reshape(batch, -1)
+        scores = []
+        for reference, actual in zip(pt_flat, ort_flat):
+            reference_norm = np.linalg.norm(reference)
+            actual_norm = np.linalg.norm(actual)
+            if reference_norm == 0.0 or actual_norm == 0.0:
+                scores.append(1.0 if np.array_equal(reference, actual) else 0.0)
+            else:
+                scores.append(float(np.dot(reference, actual) / (reference_norm * actual_norm)))
+        cosine_sim = float(np.mean(scores))
 
         metrics = {
             "max_abs_diff": float(max_abs_diff),
@@ -237,7 +403,14 @@ class ONNXValidator:
         print(f"  余弦相似度: {cosine_sim:.6f}")
 
         # 判断是否通过
-        passed = (max_rel_diff < rtol) and (max_abs_diff < atol)
+        # Standard tolerance semantics: absolute protection near zero, relative
+        # protection at scale. Token IDs and lengths are discrete, never approximate.
+        passed = bool(exact_match) if discrete else bool(
+            np.allclose(ort_np, pt_np, rtol=rtol, atol=atol, equal_nan=False)
+        )
+        metrics["comparison"] = "exact" if discrete else "elementwise-atol-plus-rtol"
+        metrics["rtol"] = float(rtol)
+        metrics["atol"] = float(atol)
 
         # 对于声纹嵌入，余弦相似度更重要
         if "sv" in output_name.lower() or "embedding" in output_name.lower():
@@ -267,6 +440,9 @@ class ONNXValidator:
 
             if not passed:
                 failed_count += 1
+                if metrics.get("error"):
+                    print(f"   Error: {metrics['error']}")
+                    continue
                 print(f"   最大相对误差: {metrics['max_rel_diff']:.6%}")
                 print(f"   余弦相似度: {metrics['cosine_similarity']:.6f}")
                 if "cosine_similarity" in metrics and metrics['cosine_similarity'] < 0.95:
@@ -316,6 +492,7 @@ class ONNXValidator:
         # 转换validation_results中的numpy类型
         converted_results = convert_numpy_types(self.validation_results)
 
+        os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
         with open(output_path, "w", encoding="utf-8") as f:
             json.dump(converted_results, f, indent=2, ensure_ascii=False)
 

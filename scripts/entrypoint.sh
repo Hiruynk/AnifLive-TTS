@@ -12,7 +12,10 @@ case "${command}" in
     : "${ANIFLIVE_TTS_MODEL_PACKAGE:=/data/models/active}"
     : "${ANIFLIVE_TTS_SHARED_DIR:=/data/shared}"
     : "${ANIFLIVE_TTS_PORT:=9880}"
-    [[ -f "${ANIFLIVE_TTS_MODEL_PACKAGE}/manifest.json" ]] || fail "Missing model package. Run 'aniflive-tts model convert' explicitly before serve."
+    if [[ ! -f "${ANIFLIVE_TTS_MODEL_PACKAGE}/manifest.json" ]]; then
+      ANIFLIVE_TTS_MODEL_PACKAGE="$(python -m aniflive_tts.model_registry "${ANIFLIVE_TTS_MODEL_PACKAGE}")" || fail "Missing model package. Add or convert a model before serve."
+      export ANIFLIVE_TTS_MODEL_PACKAGE
+    fi
     [[ -d "${ANIFLIVE_TTS_SHARED_DIR}" ]] || fail "Missing shared resources: ${ANIFLIVE_TTS_SHARED_DIR}"
     python -m aniflive_tts validate --model-package "${ANIFLIVE_TTS_MODEL_PACKAGE}" >/data/reports/startup-validation.json
     log "Starting strict TensorRT 11 API on 0.0.0.0:${ANIFLIVE_TTS_PORT}; no runtime download/build is permitted."

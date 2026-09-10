@@ -200,6 +200,13 @@ class _PersistentGPTStepContexts:
             "topk_values": self.topk_values,
             "topk_indices": self.topk_indices,
         }
+        if "logits" in getattr(model, "output_names", ()):
+            shape = tuple(model.engine.get_tensor_shape("logits"))
+            if len(shape) != 2 or shape[-1] != 1025:
+                raise RuntimeError("Persistent GPT context requires full vocabulary logits")
+            self.outputs["logits"] = torch.empty(
+                (1, 1025), dtype=model.tensor_dtype["logits"], device=model.device,
+            )
 
         for parity in range(2):
             source_cache = cache_pair[parity]
@@ -219,6 +226,7 @@ class _PersistentGPTStepContexts:
                 "k_cache_new": destination_cache[0],
                 "v_cache_new": destination_cache[1],
             }
+            fixed_bindings.update(self.outputs)
             for name, tensor in fixed_bindings.items():
                 if not context.set_tensor_address(name, tensor.data_ptr()):
                     raise RuntimeError(
@@ -282,6 +290,8 @@ class TransformerSemanticState:
     sample_cuda_graph_captures: int = 0
     sample_cuda_graph_enabled: bool = False
     persistent_step_contexts: Any | None = None
+    sampling_contract: str = "legacy-topk-v1"
+    native_history: Any | None = None
 
 
 class TransformerSemanticRuntime:
@@ -301,6 +311,10 @@ class TransformerSemanticRuntime:
     ) -> None:
         self.engine = engine
         self.sample_topk = sample_topk
+        from ..sampling_policy import effective_sampling_contract
+        self.sampling_contract = effective_sampling_contract()
+        if self.sampling_contract not in {"legacy-topk-v1", "native-v2proplus-v1"}:
+            raise ValueError("Unsupported semantic sampling contract")
         self.torch = torch
         self.trt = trt
         self.logger = logger or logging.getLogger(__name__)
@@ -372,6 +386,30 @@ class TransformerSemanticRuntime:
             )
         return sampled
 
+    def _sample_native(
+        self, logits, history, *, temperature, top_k, top_p,
+        repetition_penalty, suppress_eos,
+    ):
+        from .semantic_sampling import SemanticSamplingConfig, sample_semantic_token
+
+        if logits is None or logits.ndim != 2 or logits.shape[-1] != 1025:
+            raise RuntimeError("Native semantic sampling requires full 1025-token logits")
+        values = logits.to(device=self.engine.device, dtype=self.torch.float32)
+        # Native GPT-SoVITS removes EOS from the probability vector during its
+        # initial minimum-length window; masking a packed top-k vector differs.
+        if suppress_eos:
+            values = values[:, :-1]
+        config = SemanticSamplingConfig(
+            top_k=top_k, top_p=top_p, temperature=temperature,
+            repetition_penalty=repetition_penalty,
+        )
+        sampled, probabilities = sample_semantic_token(values, history, config)
+        # Native termination also observes greedy EOS after history penalties.
+        stop = (sampled == 1024) | (probabilities.argmax(dim=-1, keepdim=True) == 1024)
+        return self.torch.where(
+            stop, self.torch.full_like(sampled, 1024), sampled,
+        ).to(dtype=self.torch.int64)
+
     def _prepare_step_input(self, name: str, tensor: Any) -> Any:
         location = self.engine.model_gpt_step.tensor_location.get(
             name, self.trt.TensorLocation.DEVICE
@@ -393,11 +431,13 @@ class TransformerSemanticRuntime:
     ) -> TransformerSemanticState:
         if repetition_penalty is None:
             repetition_penalty = float(
-                os.environ.get("ANIFLIVE_TTS_REPETITION_PENALTY", "1.0")
+                os.environ.get("ANIFLIVE_TTS_REPETITION_PENALTY",
+                               "1.35" if self.sampling_contract == "native-v2proplus-v1" else "1.0")
             )
         if minimum_semantic_tokens is None:
-            minimum_semantic_tokens = _resolve_minimum_semantic_tokens(
-                repetition_penalty
+            minimum_semantic_tokens = (
+                11 if self.sampling_contract == "native-v2proplus-v1"
+                else _resolve_minimum_semantic_tokens(repetition_penalty)
             )
         elif minimum_semantic_tokens < 0:
             raise ValueError("minimum_semantic_tokens must be non-negative")
@@ -405,18 +445,31 @@ class TransformerSemanticRuntime:
         started = time.perf_counter()
         encoded = self.engine.model_gpt_enc(dict(inputs))
         encoder_seconds = time.perf_counter() - started
-        seen_token_mask = self._prepare_seen_token_mask(repetition_penalty)
-        current = self._sample_candidates(
-            encoded["topk_values"],
-            encoded["topk_indices"],
-            temperature=temperature,
-            top_k=top_k,
-            top_p=top_p,
-            repetition_penalty=repetition_penalty,
-            seen_token_mask=seen_token_mask,
-            suppress_eos=minimum_semantic_tokens > 0,
-        )
-
+        native_history = None
+        if self.sampling_contract == "native-v2proplus-v1":
+            seen_token_mask = None
+            native_history = inputs["prompts"].to(
+                device=self.engine.device, dtype=self.torch.int64,
+            ).reshape(1, -1).clone()
+            current = self._sample_native(
+                encoded.get("logits"), native_history,
+                temperature=temperature, top_k=top_k, top_p=top_p,
+                repetition_penalty=repetition_penalty,
+                suppress_eos=minimum_semantic_tokens > 0,
+            )
+            native_history = self.torch.cat((native_history, current), dim=1)
+        else:
+            seen_token_mask = self._prepare_seen_token_mask(repetition_penalty)
+            current = self._sample_candidates(
+                encoded["topk_values"],
+                encoded["topk_indices"],
+                temperature=temperature,
+                top_k=top_k,
+                top_p=top_p,
+                repetition_penalty=repetition_penalty,
+                seen_token_mask=seen_token_mask,
+                suppress_eos=minimum_semantic_tokens > 0,
+            )
         k_cache = encoded["k_cache"]
         v_cache = encoded["v_cache"]
         encoded_lengths_list = (
@@ -541,6 +594,8 @@ class TransformerSemanticRuntime:
             seen_token_mask=seen_token_mask,
             detailed_profile=bool(detailed_profile),
             persistent_step_contexts=persistent_step_contexts,
+            sampling_contract=self.sampling_contract,
+            native_history=native_history,
         )
 
     def _execute_step(
@@ -587,6 +642,7 @@ class TransformerSemanticRuntime:
                 "no",
                 "off",
             }
+            and state.sampling_contract == "legacy-topk-v1"
             and state.repetition_penalty == 1.0
             and state.minimum_semantic_tokens == 0
         )
@@ -648,18 +704,29 @@ class TransformerSemanticRuntime:
                     or self._sample_graph_disabled
                 ):
                     pending_storage_start = None
-                    state.current = self._sample_candidates(
-                        decoded["topk_values"],
-                        decoded["topk_indices"],
-                        temperature=state.temperature,
-                        top_k=state.top_k,
-                        top_p=state.top_p,
-                        repetition_penalty=state.repetition_penalty,
-                        seen_token_mask=state.seen_token_mask,
-                        suppress_eos=(
-                            1 + state.steps < state.minimum_semantic_tokens
-                        ),
-                    )
+                    if state.sampling_contract == "native-v2proplus-v1":
+                        state.current = self._sample_native(
+                            decoded.get("logits"), state.native_history,
+                            temperature=state.temperature, top_k=state.top_k, top_p=state.top_p,
+                            repetition_penalty=state.repetition_penalty,
+                            suppress_eos=1 + state.steps < state.minimum_semantic_tokens,
+                        )
+                        state.native_history = self.torch.cat(
+                            (state.native_history, state.current), dim=1,
+                        )
+                    else:
+                        state.current = self._sample_candidates(
+                            decoded["topk_values"],
+                            decoded["topk_indices"],
+                            temperature=state.temperature,
+                            top_k=state.top_k,
+                            top_p=state.top_p,
+                            repetition_penalty=state.repetition_penalty,
+                            seen_token_mask=state.seen_token_mask,
+                            suppress_eos=(
+                                1 + state.steps < state.minimum_semantic_tokens
+                            ),
+                        )
                     stored_current = state.current
                 state.steps += 1
                 pending_tokens.append(stored_current)

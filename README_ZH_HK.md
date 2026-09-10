@@ -1,12 +1,12 @@
 <div align="center">
 
-<img src="assets/everynight_dance.gif" alt="Evernight dance" width="260">
+<img src="assets/aniflive-tts-studio-demo.gif" alt="AnifLive-TTS Studio 操作展示" width="960">
 
 # AnifLive-TTS
 
 **面向粵語／廣東話的低延遲、高音質、多語言聲音複製 TTS 推理系統**
 
-[![版本](https://img.shields.io/badge/%E7%89%88%E6%9C%AC-v1.3.0-2563eb?style=flat-square)](RELEASE_NOTES_v1.3.0.md)
+[![版本](https://img.shields.io/badge/%E7%89%88%E6%9C%AC-v1.4.0-2563eb?style=flat-square)](RELEASE_NOTES_v1.4.0.md)
 [![TensorRT](https://img.shields.io/badge/TensorRT-11.2.1.2-76b900?style=flat-square&logo=nvidia)](https://docs.nvidia.com/deeplearning/tensorrt/)
 [![CUDA](https://img.shields.io/badge/CUDA-12.8-76b900?style=flat-square&logo=nvidia)](https://developer.nvidia.com/cuda-toolkit)
 [![模型](https://img.shields.io/badge/%E6%A8%A1%E5%9E%8B-GPT--SoVITS_V2ProPlus-0f766e?style=flat-square)](https://github.com/RVC-Boss/GPT-SoVITS)
@@ -227,6 +227,13 @@ Python 負責 API、五語文字處理、模型封裝、轉換工具與 GPT AR �
 - `stream=false` 回傳單聲道 PCM16 WAV；`stream=true` 回傳 PCM16 音訊區塊。
 
 ## 快速開始
+
+v1.4 Studio 亦可透過 `run_studio_docker.bat` 啟動，首次執行會建立 Docker 映像，
+工作站位址為 `http://127.0.0.1:9891/`，不需要本機 Python 環境。
+模型套件放在 `data/models/<model-id>`（亦支援原有的 `data/models/active`），共用資源放在 `data/shared`。
+Studio 會將完成驗收的訓練成果安裝到模型目錄；加入模型後若語音服務仍未上線，
+再次執行同一啟動器即可，既有資料會保留。
+`run_studio_docker.bat cu126` 可選用 CUDA 12.6，但尚未在本次驗收 GPU 上驗證該執行環境。
 
 已有 GPT-SoVITS 聲音複製模型的使用者，可直接將 GPT／SoVITS 模型檢查點與參考音訊轉換為 AnifLive-TTS 模型套件。
 

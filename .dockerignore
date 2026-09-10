@@ -26,6 +26,7 @@ __pycache__
 *.flac
 *.mp3
 *.mp4
+!webui/media/voice-workstation-background.mp4
 .cloudflared-token
 cloudflare-token*
 tunnel-token*

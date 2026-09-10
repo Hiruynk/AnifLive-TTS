@@ -20,6 +20,7 @@ from .backend.legacy_converter import (
 from .backend.profiles import FITTED_PROFILE
 from .errors import PackageValidationError
 from .inspector import inspect_pair
+from .model_backend import V2PROPLUS_BACKEND, model_backend_for_manifest
 from .model_package import (
     ENGINE_RUNTIME_KEYS,
     engine_fingerprint,
@@ -44,7 +45,26 @@ def _require(path: Path, label: str) -> Path:
 def _run(command: list[str], *, cwd: Path, env: dict[str, str]) -> None:
     printable = " ".join(command)
     print(f"[aniflive-tts-convert] {printable}", flush=True)
-    subprocess.run(command, cwd=cwd, env=env, check=True)
+    log_value = env.get("ANIFLIVE_TTS_CONVERSION_LOG")
+    if not log_value:
+        subprocess.run(command, cwd=cwd, env=env, check=True)
+        return
+    log_path = Path(log_value)
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    with log_path.open("a", encoding="utf-8") as log:
+        log.write(f"[command] {printable}\n")
+        log.flush()
+        with subprocess.Popen(
+            command, cwd=cwd, env=env, stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace",
+        ) as process:
+            assert process.stdout is not None
+            for line in process.stdout:
+                log.write(line)
+                print(line, end="", flush=True)
+            returncode = process.wait()
+    if returncode:
+        raise subprocess.CalledProcessError(returncode, command)
 
 
 def export_onnx(
@@ -55,7 +75,7 @@ def export_onnx(
     source_dir: Path,
     output_dir: Path,
     max_len: int,
-    stream_overlap_frames: int = 32,
+    stream_overlap_frames: int = 12,
     allow_unsafe_pickle: bool = False,
 ) -> dict[str, str]:
     if stream_overlap_frames <= 0 or stream_overlap_frames % 2:
@@ -74,10 +94,12 @@ def export_onnx(
         **os.environ,
         "PYTHONPATH": os.pathsep.join((str(source_dir), str(source_dir / "GPT_SoVITS"))),
         "SV_MODEL_PATH": str(sv),
+        "ANIFLIVE_TTS_CONVERSION_LOG": str(output_dir.parent / "conversion.log"),
         "TOKENIZERS_PARALLELISM": "false",
         "HF_HUB_OFFLINE": "1",
         "TRANSFORMERS_OFFLINE": "1",
     }
+    completed = False
     try:
         export_command = [
             sys.executable,
@@ -98,6 +120,9 @@ def export_onnx(
             str(stream_overlap_frames),
             "--output_dir",
             str(fp32),
+            "--validate",
+            "--validation_device",
+            "cpu",
         ]
         if allow_unsafe_pickle:
             export_command.append("--allow_unsafe_pickle")
@@ -107,15 +132,72 @@ def export_onnx(
             cwd=source_dir,
             env=env,
         )
+        validation_report = fp32 / "validation_report.json"
+        if not validation_report.is_file():
+            raise ConversionError("PyTorch to ONNX validation report was not produced")
+        try:
+            validation_rows = json.loads(validation_report.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError) as error:
+            raise ConversionError("PyTorch to ONNX validation report is unreadable") from error
+        required_validation_models = {
+            "SSL",
+            "BERT",
+            "VQEncoder",
+            "GPTEncoder",
+            "GPTStep",
+            "SoVITS",
+            "SoVITSStreaming",
+            "Spectrogram",
+            "SVEmbedding",
+        }
+        validated_models = {
+            str(row.get("model_name"))
+            for row in validation_rows
+            if isinstance(row, dict) and row.get("passed") is True
+        } if isinstance(validation_rows, list) else set()
+        if (
+            not isinstance(validation_rows, list)
+            or not validation_rows
+            or any(
+                not isinstance(row, dict) or row.get("passed") is not True
+                for row in validation_rows
+            )
+            or not required_validation_models.issubset(validated_models)
+        ):
+            missing = sorted(required_validation_models - validated_models)
+            detail = f"; missing stages: {', '.join(missing)}" if missing else ""
+            raise ConversionError(
+                "PyTorch to ONNX numerical parity did not pass" + detail
+            )
+        shutil.copy2(validation_report, fp16 / "pytorch-onnx-validation.json")
+        validation_inputs = fp32 / "validation-inputs"
+        if validation_inputs.is_dir():
+            shutil.copytree(validation_inputs, fp16 / "validation-inputs")
         hashes = validate_onnx_bundle(fp16)
         if output_dir.exists():
             backup = output_dir.parent / f"{output_dir.name}.previous-{dt.datetime.now():%Y%m%dT%H%M%S}"
             os.replace(output_dir, backup)
         os.replace(fp16, output_dir)
+        completed = True
         return hashes
     finally:
-        shutil.rmtree(fp32, ignore_errors=True)
-        shutil.rmtree(fp16, ignore_errors=True)
+        report = fp32 / "validation_report.json"
+        if report.is_file():
+            shutil.copy2(report, output_dir.parent / "pytorch-onnx-validation.json")
+        validation_inputs = fp32 / "validation-inputs"
+        if validation_inputs.is_dir():
+            shutil.copytree(
+                validation_inputs, output_dir.parent / "validation-inputs",
+                dirs_exist_ok=True,
+            )
+        for scratch, retained_name in (
+            (fp32, "failed-onnx-export"),
+            (fp16, "failed-precision-export"),
+        ):
+            if not completed and scratch.is_dir():
+                os.replace(scratch, output_dir.parent / retained_name)
+            else:
+                shutil.rmtree(scratch, ignore_errors=True)
 
 
 def _jsonable_profiles() -> dict[str, Any]:
@@ -151,7 +233,8 @@ def rebuild_engines(
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     if manifest.get("format") != "aniflive-tts-model-package":
         raise ConversionError("Unsupported model package format")
-    if manifest.get("model_family") != "gsv-v2proplus":
+    backend = model_backend_for_manifest(manifest)
+    if backend is None:
         raise ConversionError("AnifLive-TTS v1 currently rebuilds gsv-v2proplus packages")
 
     onnx_dir = model_package / "onnx"
@@ -199,7 +282,7 @@ def rebuild_engines(
     engine_manifest = json.loads(engine_manifest_path.read_text(encoding="utf-8"))
     engine_manifest.update(
         {
-            "kind": "aniflive-tts-gsv-v2proplus-tensorrt11-engines",
+            "kind": backend.engine_manifest_kind,
             "fingerprint": fingerprint,
             "runtime": {key: fingerprint_payload[key] for key in ENGINE_RUNTIME_KEYS},
             "fingerprint_payload": fingerprint_payload,
@@ -234,7 +317,7 @@ def convert_model(
     source_dir: Path,
     allow_unsafe_pickle: bool = False,
     max_len: int = 1000,
-    stream_overlap_frames: int = 32,
+    stream_overlap_frames: int = 12,
     workspace_mib: int = 4096,
     optimization_level: int = 5,
 ) -> Path:
@@ -251,14 +334,14 @@ def convert_model(
     reference_text_file = _require(reference_text_file, "reference text")
     source_dir = source_dir.resolve()
     shared_dir = shared_dir.resolve()
-    if allow_unsafe_pickle:
-        # Legacy GPT-SoVITS checkpoints may pickle the bundled ``utils.HParams``
-        # class. The caller already opted into unsafe loading and the same
-        # source tree is executed by the exporter immediately afterwards.
-        for import_root in reversed((source_dir, source_dir / "GPT_SoVITS")):
-            value = str(import_root)
-            if value not in sys.path:
-                sys.path.insert(0, value)
+    # Official V2ProPlus training outputs may contain the bundled
+    # ``utils.HParams`` record. The inspector allowlists that exact class while
+    # retaining weights_only=True, so the pinned source roots must be visible
+    # even when unsafe pickle loading is disabled.
+    for import_root in reversed((source_dir, source_dir / "GPT_SoVITS")):
+        value = str(import_root)
+        if value not in sys.path:
+            sys.path.insert(0, value)
     inspection = inspect_pair(gpt, sovits, allow_unsafe_pickle=allow_unsafe_pickle)
     reference_text = reference_text_file.read_text(encoding="utf-8-sig").strip()
     if not reference_text:
@@ -310,7 +393,7 @@ def convert_model(
         engine_manifest = json.loads(engine_manifest_path.read_text(encoding="utf-8"))
         engine_manifest.update(
             {
-                "kind": "aniflive-tts-gsv-v2proplus-tensorrt11-engines",
+                "kind": V2PROPLUS_BACKEND.engine_manifest_kind,
                 "fingerprint": fingerprint,
                 "runtime": {key: fingerprint_payload[key] for key in ENGINE_RUNTIME_KEYS},
                 "fingerprint_payload": fingerprint_payload,
@@ -354,14 +437,15 @@ def convert_model(
         )
         manifest = {
             "schema": 1,
-            "format": "aniflive-tts-model-package",
+            "format": V2PROPLUS_BACKEND.package_format,
             "model_id": model_id,
-            "model_family": "gsv-v2proplus",
-            "precision": "FP16",
+            "model_family": V2PROPLUS_BACKEND.model_family,
+            "precision": V2PROPLUS_BACKEND.precision,
             "backend": "TensorRT-11",
             "active_engine_fingerprint": fingerprint,
             "voice_profiles": [voice_profile],
             "default_voice_profile": voice_profile,
+            "semantic_sampling": "native-v2proplus-v1",
             "languages": ["zh", "yue", "en", "ja", "ko"],
             "created_at": dt.datetime.now(dt.timezone.utc).isoformat(),
             "build_config": build_config,

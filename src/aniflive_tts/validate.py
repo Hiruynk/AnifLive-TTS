@@ -10,7 +10,10 @@ from .backend.contracts import (
     OPTIONAL_LEGACY_STAGE_INPUTS,
     STAGE_IO_CONTRACTS,
     STAGE_ORDER,
+    stage_outputs_supported,
+    validate_full_logits_output,
 )
+from .model_backend import model_backend_for_manifest
 from .model_package import select_engine_dir, sha256_file, validate_checksums
 
 
@@ -27,7 +30,7 @@ def validate_model_package(
 
     package_dir = package_dir.resolve()
     manifest = json.loads((package_dir / "manifest.json").read_text(encoding="utf-8"))
-    if manifest.get("model_family") != "gsv-v2proplus":
+    if model_backend_for_manifest(manifest) is None:
         raise RuntimeError("AnifLive-TTS v1 currently supports gsv-v2proplus packages")
     validate_checksums(package_dir)
     engine_dir = select_engine_dir(package_dir, manifest)
@@ -48,10 +51,21 @@ def validate_model_package(
         required_inputs = set(expected_inputs) - set(
             OPTIONAL_LEGACY_STAGE_INPUTS.get(stage, ())
         )
-        if not required_inputs.issubset(inputs) or set(outputs) != set(expected_outputs):
+        if not required_inputs.issubset(inputs) or not stage_outputs_supported(stage, outputs):
             raise RuntimeError(f"{stage} I/O mismatch: inputs={inputs}, outputs={outputs}")
+        full_logits = validate_full_logits_output(stage, outputs, engine, trt)
         engines[stage] = {"sha256": sha256_file(path), "layers": engine.num_layers}
+        if stage in {"gpt_encoder", "gpt_step"}:
+            engines[stage]["full_logits"] = full_logits
+    native_sampling_supported = all(
+        engines[stage].get("full_logits") for stage in ("gpt_encoder", "gpt_step")
+    )
+    from .sampling_policy import effective_sampling_contract, package_sampling_contract
+    if ("native-v2proplus-v1" in {effective_sampling_contract(manifest), package_sampling_contract(manifest)}
+            and not native_sampling_supported):
+        raise RuntimeError("Native sampling requires reconversion with full GPT logits")
     report = {
+        "capabilities": {"native_semantic_sampling": native_sampling_supported},
         "status": "passed",
         "model_id": manifest["model_id"],
         "engine_count": len(engines),

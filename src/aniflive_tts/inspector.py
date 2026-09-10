@@ -43,6 +43,14 @@ def _load(path: Path, *, allow_unsafe_pickle: bool) -> Any:
     try:
         return torch.load(source(), map_location="cpu", weights_only=True)
     except Exception as safe_error:
+        if "GLOBAL utils.HParams" in str(safe_error):
+            try:
+                from utils import HParams
+
+                with torch.serialization.safe_globals([(HParams, "utils.HParams")]):
+                    return torch.load(source(), map_location="cpu", weights_only=True)
+            except Exception as allowlist_error:
+                safe_error = allowlist_error
         if not allow_unsafe_pickle:
             raise ModelInspectionError(
                 f"Safe checkpoint load failed for {path}. Re-run converter with "

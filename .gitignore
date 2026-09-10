@@ -6,9 +6,13 @@ __pycache__/
 .pytest-tmp*/
 .pytest_tmp*/
 .test-tmp*/
+/.pytest-*/
+/tmp*/
+*.sqlite3
 *.egg-info/
 .ruff_cache/
 .env
+docker-compose.local.yml
 .env.*
 !.env.example
 Miku/

@@ -92,7 +92,14 @@ def split_text(text):
 
 
 class GPTSoVITSInference:
-    def __init__(self, gpt_path, sovits_path, cnhubert_base_path, bert_path):
+    def __init__(
+        self,
+        gpt_path,
+        sovits_path,
+        cnhubert_base_path,
+        bert_path,
+        sv_model_path=None,
+    ):
         self.device = device
         self.is_half = is_half
 
@@ -113,7 +120,7 @@ class GPTSoVITSInference:
         self.bert_model = self.bert_model.to(device)
 
         # Load GPT
-        dict_s1 = torch.load(gpt_path, map_location="cpu")
+        dict_s1 = torch.load(gpt_path, map_location="cpu", weights_only=True)
         self.config = dict_s1["config"]
         self.t2s_model = Text2SemanticLightningModule(self.config, "****", is_train=False)
         self.t2s_model.load_state_dict(dict_s1["weight"])
@@ -156,7 +163,7 @@ class GPTSoVITSInference:
 
         # SV Model (for v2Pro/Plus)
         # We initialize it if needed or just always init for simplicity in this minimal script
-        self.sv_model = SV(device, is_half)
+        self.sv_model = SV(device, is_half, sv_model_path)
 
         self.last_profile = {}
         self.warmup()

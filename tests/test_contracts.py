@@ -48,10 +48,10 @@ def test_convert_cli_exposes_generic_stream_overlap() -> None:
         "--output",
         "package",
     ]
-    assert parser.parse_args(common).stream_overlap_frames == 32
+    assert parser.parse_args(common).stream_overlap_frames == 12
     assert (
-        parser.parse_args([*common, "--stream-overlap-frames", "12"]).stream_overlap_frames
-        == 12
+        parser.parse_args([*common, "--stream-overlap-frames", "32"]).stream_overlap_frames
+        == 32
     )
 
 
@@ -98,3 +98,16 @@ def test_engine_profiles_are_fingerprint_serializable() -> None:
         "opt": [1, 1],
         "max": [1, 1],
     }
+
+
+def test_webui_cli_is_loopback_only_unless_explicitly_overridden() -> None:
+    parser = build_parser()
+    local = parser.parse_args(["webui"])
+    external = parser.parse_args(
+        ["webui", "--host", "0.0.0.0", "--allow-non-loopback"]
+    )
+
+    assert local.host == "127.0.0.1"
+    assert local.allow_non_loopback is False
+    assert external.host == "0.0.0.0"
+    assert external.allow_non_loopback is True

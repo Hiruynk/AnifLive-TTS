@@ -5,7 +5,7 @@ ARG TORCH_REQUIREMENTS=requirements/torch-cu128.txt
 ARG VCS_REF=unknown
 ARG BUILD_DATE=unknown
 LABEL org.opencontainers.image.title="AnifLive-TTS"
-LABEL org.opencontainers.image.version="1.3.0"
+LABEL org.opencontainers.image.version="1.4.0"
 LABEL org.opencontainers.image.description="First-party TTS runtime for AnifEngine-Voice"
 LABEL org.opencontainers.image.authors="Hiruynk"
 LABEL org.opencontainers.image.vendor="AnifEngine"
@@ -30,6 +30,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     ANIFLIVE_TTS_MODEL_PACKAGE=/data/models/active \
     ANIFLIVE_TTS_SHARED_DIR=/data/shared \
     ANIFLIVE_TTS_CACHE_DIR=/data/cache \
+    ANIFLIVE_TTS_WORKSTATION_DIR=/data/workstation \
     HF_HOME=/data/cache/huggingface \
     TORCH_HOME=/data/cache/torch \
     XDG_CACHE_HOME=/data/cache/xdg \
@@ -147,7 +148,7 @@ COPY assets/THIRD_PARTY_MEDIA.md /app/assets/THIRD_PARTY_MEDIA.md
 COPY minimal_inference /app/minimal_inference
 COPY scripts /app/scripts
 RUN python -m pip install --no-deps /app \
-    && mkdir -p /data/models /data/shared /data/cache /data/reports \
+    && mkdir -p /data/models /data/shared /data/cache /data/reports /data/workstation \
     && chmod 0755 /app/scripts/entrypoint.sh \
     && PYTHONPATH=/app/minimal_inference:/app/minimal_inference/GPT_SoVITS python - <<'PY'
 import pyopenjtalk
@@ -166,6 +167,9 @@ assert text.korean.g2p("오늘은 날씨가 좋습니다.")
 assert text.english.g2p("AnifLive-TTS speaks English.")
 assert LangSegmenter.getTexts("Hello，初めまして。", default_lang="ja")
 PY
+
+# Refresh the inherited image's crypto packages after dependency installation.
+RUN --mount=type=cache,id=aniflive-apt,target=/var/cache/apt,sharing=locked     --mount=type=cache,id=aniflive-apt-lists,target=/var/lib/apt/lists,sharing=locked     apt-get update && apt-get install -y --no-install-recommends --only-upgrade       openssl libssl3t64 gnupg gnupg2 gnupg-utils gpg gpgv gpgconf gpg-agent gpgsm dirmngr keyboxd     && rm -rf /var/lib/apt/lists/*
 
 EXPOSE 9880 9890
 ENTRYPOINT ["/app/scripts/entrypoint.sh"]

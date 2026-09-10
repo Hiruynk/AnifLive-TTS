@@ -71,3 +71,20 @@ def test_emits_a_package_level_inventory() -> None:
 def test_rejects_unknown_undefined_license_reference() -> None:
     with pytest.raises(ValueError, match="LicenseRef-Unknown"):
         normalize_document(_document("LicenseRef-Unknown"))
+
+def test_reuses_scanner_hashed_license_record_without_inventing_text():
+    document = _document("LicenseRef-NVIDIA-SOFTWARE-LICENSE")
+    record = document["hasExtractedLicensingInfos"][0]
+    record.update(licenseId="LicenseRef-scanner-hash", name="NVIDIA-Proprietary-Software")
+    result = normalize_document(document)
+    assert result["packages"][0]["licenseDeclared"] == "LicenseRef-scanner-hash"
+    assert result["hasExtractedLicensingInfos"] == [record]
+
+def test_rejects_ambiguous_named_license_records():
+    document = _document("LicenseRef-NVIDIA-Proprietary")
+    document["hasExtractedLicensingInfos"] = [
+        {"licenseId": "LicenseRef-a", "name": "NVIDIA-Proprietary-Software", "extractedText": "a"},
+        {"licenseId": "LicenseRef-b", "name": "NVIDIA-Proprietary-Software", "extractedText": "b"},
+    ]
+    with pytest.raises(ValueError, match="undefined"):
+        normalize_document(document)

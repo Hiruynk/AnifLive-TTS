@@ -11,6 +11,7 @@
 *.ico binary
 *.jpeg binary
 *.jpg binary
+*.mp4 binary
 *.onnx binary
 *.onnx_data binary
 *.png binary

@@ -19,6 +19,7 @@ unknown-length stream is a valid RIFF/WAV file.
 from __future__ import annotations
 
 import argparse
+import asyncio
 import gc
 import importlib
 import io
@@ -36,15 +37,25 @@ import wave
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterator, Mapping
+
+from .runtime_handoff_control import install_runtime_control
+from typing import Any, Callable, Iterator, Mapping
 
 import numpy as np
 from fastapi import FastAPI, Query, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response, StreamingResponse
+from starlette.concurrency import iterate_in_threadpool
 
 from aniflive_tts.errors import PackageValidationError
+from aniflive_tts.continuity import (
+    CONTINUITY_POLICY_CONTRACTS,
+    ContinuationCapture,
+    ContinuityPolicy,
+    NeuralContinuationInput,
+    parse_continuity_policy,
+)
 from aniflive_tts.expression import (
     ConditioningPolicy,
     ExpressionCatalog,
@@ -52,7 +63,22 @@ from aniflive_tts.expression import (
     has_safe_expression_boundary,
     load_expression_catalog,
 )
+from aniflive_tts.inference_lease import (
+    GPUResourceBusy,
+    GPUResourceLeaseError,
+    InferenceGPUResourceLease,
+    InferenceGPUResourceLeaseHandle,
+)
+from aniflive_tts.model_backend import (
+    V2PROPLUS_BACKEND,
+    model_backend_for_manifest,
+)
 from aniflive_tts.runtime_control import WarmRetentionController
+from aniflive_tts.speech_session import (
+    SpeechSession,
+    SpeechSessionError,
+    SpeechSessionManager,
+)
 
 
 LOGGER = logging.getLogger("aniflive_tts.service")
@@ -62,7 +88,7 @@ logging.basicConfig(
 )
 
 SERVICE_NAME = "AnifLive-TTS"
-SERVICE_VERSION = "1.3.0"
+SERVICE_VERSION = "1.4.0"
 MODEL_ID = os.environ.get("ANIFLIVE_TTS_MODEL_ID", "unconfigured")
 VOICE_ID = os.environ.get("ANIFLIVE_TTS_VOICE_PROFILE", "default")
 REFERENCE_TEXT = os.environ.get("ANIFLIVE_TTS_REFERENCE_TEXT", "")
@@ -245,6 +271,121 @@ class SynthesisResult:
     segments: int
     elapsed_seconds: float
     profile: dict[str, float | int]
+
+
+class _OwnedPCMIterator:
+    """Release a session stream owner even when iteration never starts."""
+
+    def __init__(self, inner: Iterator[bytes], release: Any) -> None:
+        self._inner = inner
+        self._release = release
+        self._closed = False
+
+    def __iter__(self) -> _OwnedPCMIterator:
+        return self
+
+    def __next__(self) -> bytes:
+        if self._closed:
+            raise StopIteration
+        try:
+            return next(self._inner)
+        except BaseException:
+            self.close()
+            raise
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        try:
+            close = getattr(self._inner, "close", None)
+            if close is not None:
+                close()
+        finally:
+            self._release()
+
+
+class _SpeechSessionConsumerOwner:
+    """Detach a session consumer exactly once across every response exit path."""
+
+    def __init__(
+        self,
+        manager: SpeechSessionManager,
+        session: SpeechSession,
+    ) -> None:
+        self._manager = manager
+        self._session = session
+        self._close_task: asyncio.Task[None] | None = None
+        self._closed = False
+
+    async def aclose(self) -> None:
+        task = self._close_task
+        if task is None:
+            # Detach in its own task so cancellation of one ASGI caller cannot
+            # interrupt cleanup after this owner has entered its close path.
+            task = asyncio.create_task(self._close())
+            self._close_task = task
+        await asyncio.shield(task)
+
+    async def _close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        await self._manager.detach_consumer(self._session)
+
+
+class _PCMStreamOwner:
+    """Cancel and close one direct PCM stream exactly once."""
+
+    def __init__(
+        self,
+        pcm: Iterator[bytes],
+        cancel: Callable[[], Any],
+    ) -> None:
+        self._pcm = pcm
+        self._cancel = cancel
+        self._close_task: asyncio.Task[None] | None = None
+        self._closed = False
+
+    async def aclose(self) -> None:
+        task = self._close_task
+        if task is None:
+            task = asyncio.create_task(self._close())
+            self._close_task = task
+        await asyncio.shield(task)
+
+    async def _close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        try:
+            await run_in_threadpool(self._cancel)
+        finally:
+            close = getattr(self._pcm, "close", None)
+            if close is not None:
+                await run_in_threadpool(close)
+
+
+class _OwnedStreamingResponse(StreamingResponse):
+    """Make the response own resources that body iteration would otherwise leak."""
+
+    def __init__(
+        self,
+        *args: Any,
+        owner: Any,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(*args, **kwargs)
+        self._owner = owner
+
+    async def aclose(self) -> None:
+        await self._owner.aclose()
+
+    async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
+        try:
+            await super().__call__(scope, receive, send)
+        finally:
+            await self.aclose()
 
 
 def _json_response(message: str, status_code: int = 400) -> JSONResponse:
@@ -604,6 +745,7 @@ class TensorRTService:
         self._torch: Any | None = None
         self._trt: Any | None = None
         self._sample_rate: int | None = None
+        self._gpu_metadata: dict[str, Any] | None = None
         self._engine_manifest: dict[str, Any] = {}
         self._warmup: dict[str, Any] | None = None
         self._expression_catalog: ExpressionCatalog | None = None
@@ -616,10 +758,17 @@ class TensorRTService:
         self._active_guard = threading.Lock()
         self._active_requests = 0
         self._active_stream_cancel: threading.Event | None = None
+        self._gpu_resource_lease = InferenceGPUResourceLease.from_env()
+        self._resident_gpu_lease: InferenceGPUResourceLeaseHandle | None = None
 
     @property
     def ready(self) -> bool:
-        return self._engine is not None
+        if self._engine is None:
+            return False
+        lease = self._gpu_resource_lease.status()
+        return not lease["enabled"] or bool(
+            self._resident_gpu_lease is not None and lease["lease_healthy"]
+        )
 
     @property
     def sample_rate(self) -> int:
@@ -650,26 +799,36 @@ class TensorRTService:
             raise TensorRTRuntimeError(
                 "TensorRT runtime dependencies are unavailable; PyTorch/ONNX fallback is disabled"
             ) from error
-        if not torch_module.cuda.is_available():
-            raise TensorRTRuntimeError(
-                "No CUDA GPU is available to TensorRT; CPU and PyTorch fallback are disabled"
-            )
+        startup_gpu_lease = self._acquire_gpu_resource(
+            "inference:engine-residency", busy_is_request_error=False
+        )
         try:
-            properties = torch_module.cuda.get_device_properties(0)
-            capability = torch_module.cuda.get_device_capability(0)
-        except Exception as error:
-            raise TensorRTRuntimeError("Unable to inspect the CUDA GPU for TensorRT") from error
-        if tuple(capability) < (7, 5):
-            raise TensorRTRuntimeError(
-                "The visible NVIDIA GPU is older than SM 7.5; this TensorRT deployment is unsupported"
-            )
-        if int(properties.total_memory) < 8 * 1024 * 1024 * 1024:
-            raise TensorRTRuntimeError(
-                "The visible NVIDIA GPU has less than the required 8 GiB of VRAM"
-            )
-
-        self._prepend_source_dir()
-        try:
+            if not torch_module.cuda.is_available():
+                raise TensorRTRuntimeError(
+                    "No CUDA GPU is available to TensorRT; CPU and PyTorch fallback are disabled"
+                )
+            try:
+                properties = torch_module.cuda.get_device_properties(0)
+                capability = torch_module.cuda.get_device_capability(0)
+                gpu_name = torch_module.cuda.get_device_name(0)
+            except Exception as error:
+                raise TensorRTRuntimeError(
+                    "Unable to inspect the CUDA GPU for TensorRT"
+                ) from error
+            if tuple(capability) < (7, 5):
+                raise TensorRTRuntimeError(
+                    "The visible NVIDIA GPU is older than SM 7.5; this TensorRT deployment is unsupported"
+                )
+            if int(properties.total_memory) < 8 * 1024 * 1024 * 1024:
+                raise TensorRTRuntimeError(
+                    "The visible NVIDIA GPU has less than the required 8 GiB of VRAM"
+                )
+            self._gpu_metadata = {
+                "name": str(gpu_name),
+                "compute_capability": f"{capability[0]}.{capability[1]}",
+                "vram_bytes": int(properties.total_memory),
+            }
+            self._prepend_source_dir()
             source_module = importlib.import_module("run_trt_inference")
             source_file = Path(getattr(source_module, "__file__", "")).resolve()
             expected_source = (self.settings.source_dir / "run_trt_inference.py").resolve()
@@ -693,6 +852,14 @@ class TensorRTService:
                 bert_path=str(self.settings.bert_path),
                 device="cuda",
             )
+            from .sampling_policy import effective_sampling_contract
+            if effective_sampling_contract() == "native-v2proplus-v1":
+                for attribute in ("model_gpt_enc", "model_gpt_step"):
+                    model = getattr(self._engine, attribute)
+                    if "logits" not in model.output_names:
+                        raise TensorRTRuntimeError(
+                            "Native sampling requires reconversion with full GPT logits"
+                        )
             self._sample_rate = int(self._engine.hps["data"]["sampling_rate"])
             if self._sample_rate <= 0:
                 raise TensorRTRuntimeError("Engine config contains an invalid sample rate")
@@ -712,7 +879,7 @@ class TensorRTService:
             self._streamer.warm_frontends()
             self._run_strict_warmup()
             self._warm_retention = WarmRetentionController(
-                pulse=self._streamer.keepwarm_pulse,
+                pulse=self._keepwarm_pulse_with_gpu_lease,
                 inference_lock=self._inference_lock,
                 is_busy=self._is_busy,
                 retention_seconds=float(
@@ -736,15 +903,62 @@ class TensorRTService:
             )
             self._warm_retention.start()
             self._warm_retention.notify_real_activity()
+            startup_gpu_lease.ensure_valid()
+            # Keep gpu:0 reserved for as long as TensorRT engines, reference
+            # conditioning and the CUDA context remain resident. Releasing at
+            # request end would allow a training worker to start beside live
+            # inference VRAM and could OOM both processes.
+            self._resident_gpu_lease = startup_gpu_lease
+            startup_gpu_lease = None
         except Exception as error:
-            self.unload()
+            # The startup lease is still active here, so cleanup cannot race a
+            # workstation worker that is waiting to claim the same GPU.
+            self._unload_pipeline()
             if isinstance(error, TensorRTRuntimeError):
                 raise
             raise TensorRTRuntimeError(
                 "Unable to initialize the required TensorRT pipeline"
             ) from error
+        finally:
+            if startup_gpu_lease is not None:
+                startup_gpu_lease.close()
 
     def unload(self) -> None:
+        if not any(
+            value is not None
+            for value in (
+                self._engine,
+                self._streamer,
+                self._torch,
+                self._trt,
+                self._warm_retention,
+                self._resident_gpu_lease,
+            )
+        ):
+            self._gpu_metadata = None
+            return
+        with self._inference_lock:
+            resident_gpu_lease = self._resident_gpu_lease
+            gpu_lease = resident_gpu_lease or self._acquire_gpu_resource(
+                "inference:shutdown", busy_is_request_error=False
+            )
+            lease_cleanup_error: BaseException | None = None
+            try:
+                self._unload_pipeline()
+                gpu_lease.ensure_valid()
+            finally:
+                if resident_gpu_lease is not None:
+                    self._resident_gpu_lease = None
+                try:
+                    gpu_lease.close()
+                except BaseException as error:
+                    lease_cleanup_error = error
+            if lease_cleanup_error is not None:
+                raise TensorRTRuntimeError(
+                    "The inference GPU resource lease could not be released"
+                ) from lease_cleanup_error
+
+    def _unload_pipeline(self) -> None:
         if self._warm_retention is not None:
             self._warm_retention.stop()
             self._warm_retention = None
@@ -756,6 +970,7 @@ class TensorRTService:
         self._engine = None
         self._streamer = None
         self._sample_rate = None
+        self._gpu_metadata = None
         self._warmup = None
         self._expression_catalog = None
         self._segment_char_limit = PROFILE_SEGMENT_CHAR_LIMITS["small"]
@@ -775,9 +990,10 @@ class TensorRTService:
         if self._engine is None or self._streamer is None or self._sample_rate is None:
             raise TensorRTRuntimeError("TensorRT pipeline is not loaded")
 
-        self._begin_request()
+        gpu_lease = self._begin_request()
         started = time.perf_counter()
         request_seed = self._effective_seed(options.seed)
+        lease_cleanup_error: BaseException | None = None
         try:
             with self._inference_lock:
                 plan = self._segment_plan(options)
@@ -793,7 +1009,8 @@ class TensorRTService:
                     ]
                 else:
                     conditioning = self._conditioning(options)
-                outputs = list(self._streamer.iter_audio(
+                outputs = []
+                for output in self._streamer.iter_audio(
                     segments=segments,
                     conditioning=conditioning,
                     conditionings=conditionings,
@@ -809,9 +1026,16 @@ class TensorRTService:
                     # low-latency PCM preview. Decode as much of a
                     # profile-safe sentence as the per-GPU engine permits.
                     chunk_length=self._streamer.complete_wav_chunk_length(),
-                ))
+                ):
+                    gpu_lease.ensure_valid()
+                    outputs.append(output)
+                gpu_lease.ensure_valid()
         finally:
-            self._end_request()
+            lease_cleanup_error = self._end_request(gpu_lease)
+        if lease_cleanup_error is not None:
+            raise TensorRTRuntimeError(
+                "The inference GPU resource lease could not be released"
+            ) from lease_cleanup_error
         if not outputs:
             raise TensorRTRuntimeError("TensorRT produced no audio chunks")
         postprocess_started = time.perf_counter()
@@ -843,15 +1067,22 @@ class TensorRTService:
             profile=profile,
         )
 
-    def stream_pcm(self, options: SynthesisOptions) -> Iterator[bytes]:
+    def stream_pcm(
+        self,
+        options: SynthesisOptions,
+        *,
+        continuity_input: NeuralContinuationInput | None = None,
+        continuity_capture: ContinuationCapture | None = None,
+        continuity_policy: str = "A",
+    ) -> Iterator[bytes]:
         """Return a producer-safe iterator of little-endian signed PCM16 bytes."""
 
         if self._engine is None or self._streamer is None or self._sample_rate is None:
             raise TensorRTRuntimeError("TensorRT pipeline is not loaded")
 
-        self._begin_request()
         chunks: queue.Queue[bytes | BaseException | None] = queue.Queue(maxsize=3)
         cancelled = threading.Event()
+        gpu_lease = self._begin_request()
         with self._active_guard:
             self._active_stream_cancel = cancelled
         request_seed = self._effective_seed(options.seed)
@@ -866,7 +1097,23 @@ class TensorRTService:
                     continue
             return False
 
+        def put_terminal(item: BaseException | None) -> None:
+            """Always wake the consumer, including after explicit cancellation."""
+
+            while True:
+                try:
+                    chunks.put(item, timeout=0.2)
+                    return
+                except queue.Full:
+                    if not cancelled.is_set():
+                        continue
+                    try:
+                        chunks.get_nowait()
+                    except queue.Empty:
+                        continue
+
         def produce() -> None:
+            terminal_error: BaseException | None = None
             try:
                 with self._inference_lock:
                     plan = self._segment_plan(options)
@@ -896,20 +1143,35 @@ class TensorRTService:
                         request_seed=request_seed,
                         cancelled=cancelled,
                         chunk_length=self._streamer.streaming_chunk_length(),
+                        continuity_input=continuity_input,
+                        continuity_capture=continuity_capture,
+                        continuity_policy=continuity_policy,
                     ):
+                        gpu_lease.ensure_valid()
                         if output_gain is not None and output_gain != 1.0:
                             audio = audio * output_gain
                         payload = _pcm16_bytes(audio)
                         if payload and not put(payload):
                             return
+                gpu_lease.ensure_valid()
             except BaseException as error:  # Logged by the response iterator.
-                put(error)
+                if continuity_capture is not None:
+                    continuity_capture.clear()
+                terminal_error = error
             finally:
-                put(None)
+                lease_cleanup_error = self._end_request(gpu_lease)
+                if terminal_error is None and lease_cleanup_error is not None:
+                    terminal_error = TensorRTRuntimeError(
+                        "The inference GPU resource lease could not be released"
+                    )
+                    terminal_error.__cause__ = lease_cleanup_error
+                if terminal_error is not None:
+                    put_terminal(terminal_error)
+                else:
+                    put_terminal(None)
                 with self._active_guard:
                     if self._active_stream_cancel is cancelled:
                         self._active_stream_cancel = None
-                self._end_request()
 
         worker = threading.Thread(target=produce, name="aniflive-tts-trt-stream", daemon=True)
         try:
@@ -918,7 +1180,7 @@ class TensorRTService:
             with self._active_guard:
                 if self._active_stream_cancel is cancelled:
                     self._active_stream_cancel = None
-            self._end_request()
+            self._end_request(gpu_lease)
             raise
 
         def consume() -> Iterator[bytes]:
@@ -964,18 +1226,59 @@ class TensorRTService:
             raise RequestError("Controlled expression is unavailable for the active model package")
         return self._expression_catalog.output_gain
 
-    def _begin_request(self) -> None:
+    def _begin_request(self) -> InferenceGPUResourceLeaseHandle:
         if not self._request_slot.acquire(blocking=False):
             raise ServiceBusy("AnifLive-TTS is already processing a synthesis request")
+        try:
+            gpu_lease = self._acquire_gpu_resource(
+                f"inference:synthesis:{MODEL_ID}", busy_is_request_error=True
+            )
+        except BaseException:
+            self._request_slot.release()
+            raise
         with self._active_guard:
             self._active_requests += 1
+        return gpu_lease
 
-    def _end_request(self) -> None:
-        with self._active_guard:
-            self._active_requests = max(0, self._active_requests - 1)
-        self._request_slot.release()
-        if self._warm_retention is not None:
-            self._warm_retention.notify_real_activity()
+    def _end_request(
+        self, gpu_lease: InferenceGPUResourceLeaseHandle
+    ) -> BaseException | None:
+        lease_error: BaseException | None = None
+        try:
+            gpu_lease.close()
+        except BaseException as error:
+            lease_error = error
+        finally:
+            with self._active_guard:
+                self._active_requests = max(0, self._active_requests - 1)
+            self._request_slot.release()
+            if self._warm_retention is not None:
+                self._warm_retention.notify_real_activity()
+        return lease_error
+
+    def _acquire_gpu_resource(
+        self, purpose: str, *, busy_is_request_error: bool
+    ) -> InferenceGPUResourceLeaseHandle:
+        try:
+            return self._gpu_resource_lease.acquire(purpose)
+        except GPUResourceBusy as error:
+            if busy_is_request_error:
+                raise ServiceBusy(
+                    "The GPU is reserved by an AnifLive-TTS workstation job"
+                ) from error
+            raise TensorRTRuntimeError(
+                "The GPU is reserved by an AnifLive-TTS workstation job"
+            ) from error
+        except GPUResourceLeaseError as error:
+            raise TensorRTRuntimeError(
+                "The shared inference GPU resource lease is unavailable"
+            ) from error
+
+    def _keepwarm_pulse_with_gpu_lease(self) -> float:
+        with self._gpu_resource_lease.hold("inference:warm-retention"):
+            if self._streamer is None:
+                raise TensorRTRuntimeError("TensorRT pipeline is not loaded")
+            return float(self._streamer.keepwarm_pulse())
 
     def _is_busy(self) -> bool:
         with self._active_guard:
@@ -1168,23 +1471,19 @@ class TensorRTService:
         LOGGER.info("Prepared %d expression references", len(catalog.profiles))
 
     def health(self) -> dict[str, Any]:
-        gpu: dict[str, Any] | None = None
-        if self._torch is not None:
-            try:
-                properties = self._torch.cuda.get_device_properties(0)
-                major, minor = self._torch.cuda.get_device_capability(0)
-                gpu = {
-                    "name": self._torch.cuda.get_device_name(0),
-                    "compute_capability": f"{major}.{minor}",
-                    "vram_bytes": int(properties.total_memory),
-                }
-            except Exception:
-                LOGGER.debug("Could not obtain CUDA device metadata", exc_info=True)
+        # CUDA metadata is captured once under the startup GPU lease. Health
+        # polling must remain a CPU-only operation while a worker owns gpu:0.
+        gpu = dict(self._gpu_metadata) if self._gpu_metadata is not None else None
 
         manifest_fingerprint = (
             self._engine_manifest.get("fingerprint")
             or self._engine_manifest.get("engine_fingerprint")
             or self._engine_manifest.get("id")
+        )
+        gpu_resource_lease = self._gpu_resource_lease.status()
+        gpu_resource_lease["policy"] = "engine-residency"
+        gpu_resource_lease["residency_reserved"] = bool(
+            gpu_resource_lease["enabled"] and self._resident_gpu_lease is not None
         )
         return {
             "service": SERVICE_NAME,
@@ -1213,6 +1512,7 @@ class TensorRTService:
             },
             "startup_warmup": self._warmup,
             "active_requests": self._active_requests,
+            "gpu_resource_lease": gpu_resource_lease,
             "warm_retention": (
                 self._warm_retention.status() if self._warm_retention is not None else None
             ),
@@ -1222,7 +1522,7 @@ class TensorRTService:
         """Read the build profile from the verified per-machine manifest."""
 
         if self._engine_manifest.get("kind") in {
-            "aniflive-tts-gsv-v2proplus-tensorrt11-engines",
+            V2PROPLUS_BACKEND.engine_manifest_kind,
         }:
             return PROFILE_SEGMENT_CHAR_LIMITS["fitted"]
         payload = self._engine_manifest.get("payload")
@@ -1274,8 +1574,10 @@ class TensorRTService:
         # This goes through the complete engine bundle using the actual reference
         # audio.  A model constructor's dummy warmup is intentionally not enough
         # evidence that a per-GPU TensorRT build can synthesize speech.
+        # Probe a fixed utterance while retaining the real reference conditioning.
+        # Replaying the prompt transcript is a separate model-quality case.
         options = SynthesisOptions(
-            text=REFERENCE_TEXT,
+            text=STREAM_CALIBRATION_TEXT.get(REFERENCE_LANGUAGE, REFERENCE_TEXT),
             text_language=REFERENCE_LANGUAGE,
             top_k=int(DEFAULTS["top_k"]),
             top_p=float(DEFAULTS["top_p"]),
@@ -1338,6 +1640,7 @@ class RuntimeServiceManager:
         self._service = service
         self._switch_lock = threading.RLock()
         self._switching = False
+        self._active_stream_owner: str | None = None
         self._package_dir = Path(
             os.environ.get("ANIFLIVE_TTS_MODEL_PACKAGE", "/data/models/active")
         ).expanduser().resolve()
@@ -1418,26 +1721,90 @@ class RuntimeServiceManager:
             active_model = MODEL_ID
             return self._service.synthesize(options), active_model
 
-    def stream_pcm(self, options: SynthesisOptions) -> Iterator[bytes]:
+    def stream_pcm(
+        self,
+        options: SynthesisOptions,
+        *,
+        continuity_input: NeuralContinuationInput | None = None,
+        continuity_capture: ContinuationCapture | None = None,
+        continuity_policy: str = "A",
+    ) -> Iterator[bytes]:
         with self._switch_lock:
             if self._switching:
                 raise ServiceBusy("AnifLive-TTS is switching the active model")
             # stream_pcm reserves the one request slot before returning, so a
             # later activation observes the active producer and is rejected.
-            return self._service.stream_pcm(options)
+            if (
+                continuity_input is None
+                and continuity_capture is None
+                and continuity_policy == "A"
+            ):
+                return self._service.stream_pcm(options)
+            return self._service.stream_pcm(
+                options,
+                continuity_input=continuity_input,
+                continuity_capture=continuity_capture,
+                continuity_policy=continuity_policy,
+            )
 
     def cancel_active_stream(self) -> bool:
         with self._switch_lock:
             return self._service.cancel_active_stream()
 
+    @property
+    def active_stream_owner(self) -> str | None:
+        with self._switch_lock:
+            return self._active_stream_owner
+
+    def cancel_stream(self, owner: str) -> bool:
+        """Cancel only the stream reserved by ``owner``.
+
+        The legacy cancel endpoint intentionally remains process-wide. Session
+        cancellation uses this owner-aware path so cancelling an idle session
+        cannot interrupt an unrelated synthesis request.
+        """
+
+        with self._switch_lock:
+            if self._active_stream_owner != owner:
+                return False
+            return self._service.cancel_active_stream()
+
     def prepare_stream(
-        self, options: SynthesisOptions, requested_model: str | None
+        self,
+        options: SynthesisOptions,
+        requested_model: str | None,
+        *,
+        stream_owner: str | None = None,
+        continuity_input: NeuralContinuationInput | None = None,
+        continuity_capture: ContinuationCapture | None = None,
+        continuity_policy: str = "A",
     ) -> tuple[list[str], Iterator[bytes], int, str]:
         with self._switch_lock:
             self._assert_active_model(requested_model)
             active_model = MODEL_ID
             segments = self._service._segments(options)
-            pcm = self.stream_pcm(options)
+            if (
+                continuity_input is None
+                and continuity_capture is None
+                and continuity_policy == "A"
+            ):
+                pcm = self.stream_pcm(options)
+            else:
+                pcm = self.stream_pcm(
+                    options,
+                    continuity_input=continuity_input,
+                    continuity_capture=continuity_capture,
+                    continuity_policy=continuity_policy,
+                )
+            if stream_owner is not None:
+                self._active_stream_owner = stream_owner
+
+                def release_owner() -> None:
+                    with self._switch_lock:
+                        if self._active_stream_owner == stream_owner:
+                            self._active_stream_owner = None
+
+                pcm = _OwnedPCMIterator(pcm, release_owner)
             return segments, pcm, self._service.sample_rate, active_model
 
     def _segments(self, options: SynthesisOptions) -> list[str]:
@@ -1459,8 +1826,8 @@ class RuntimeServiceManager:
                 "id": model_id,
                 "object": "model",
                 "owned_by": "aniflive-tts-local",
-                "description": "GPT-SoVITS V2 Pro Plus, TensorRT 11 only",
-                "model_family": str(record["manifest"]["model_family"]),
+                "description": record["backend"].display_name,
+                "model_family": record["backend"].model_family,
                 "voice_profiles": list(record["manifest"].get("voice_profiles", [])),
                 "active": model_id == MODEL_ID,
             }
@@ -1492,11 +1859,24 @@ class RuntimeServiceManager:
                 packages[requested]["manifest"].get("default_voice_profile", "default"),
                 "voice_profile",
             )
+            switch_gpu_lease = (
+                self._service._acquire_gpu_resource(
+                    "inference:model-switch", busy_is_request_error=False
+                )
+                if isinstance(self._service, TensorRTService)
+                else None
+            )
             self._switching = True
-            self._service.unload()
+            unloaded = False
             try:
+                self._service.unload()
+                unloaded = True
                 replacement = self._load_package(target_package, target_voice)
             except Exception as switch_error:
+                if not unloaded:
+                    raise TensorRTRuntimeError(
+                        "Model activation could not start; the previous model remains active"
+                    ) from switch_error
                 LOGGER.exception("Unable to activate model %s; restoring %s", requested, MODEL_ID)
                 try:
                     self._service = self._load_package(previous_package, previous_voice)
@@ -1511,6 +1891,8 @@ class RuntimeServiceManager:
                 ) from switch_error
             finally:
                 self._switching = False
+                if switch_gpu_lease is not None:
+                    switch_gpu_lease.close()
 
             self._service = replacement
             self._package_dir = target_package
@@ -1527,6 +1909,11 @@ class RuntimeServiceManager:
         configure_runtime(PackageRuntimeSettings.from_env())
         _sync_runtime_identity_from_env()
         service = TensorRTService(RuntimeSettings.from_env())
+        # A model switch retains one process-owned reference while the old
+        # service unloads and the replacement loads, eliminating the brief
+        # cross-process claim race between both CUDA lifecycles.
+        if isinstance(self._service, TensorRTService):
+            service._gpu_resource_lease = self._service._gpu_resource_lease
         service.load()
         return service
 
@@ -1556,11 +1943,8 @@ class RuntimeServiceManager:
                 continue
             try:
                 manifest = _read_json(manifest_path, "model package manifest")
-                if (
-                    manifest.get("format") != "aniflive-tts-model-package"
-                    or manifest.get("model_family") != "gsv-v2proplus"
-                    or manifest.get("precision") != "FP16"
-                ):
+                backend = model_backend_for_manifest(manifest)
+                if backend is None or not backend.supports_manifest(manifest):
                     continue
                 model_id = validate_safe_identifier(manifest.get("model_id"), "model_id")
             except Exception:
@@ -1568,11 +1952,28 @@ class RuntimeServiceManager:
                 continue
             existing = packages.get(model_id)
             if existing is None or candidate == self._package_dir:
-                packages[model_id] = {"path": candidate, "manifest": manifest}
+                packages[model_id] = {
+                    "path": candidate,
+                    "manifest": manifest,
+                    "backend": backend,
+                }
         return packages
 
 
 SERVICE = RuntimeServiceManager(TensorRTService(RuntimeSettings.from_env()))
+SESSION_MANAGER = SpeechSessionManager(
+    maximum_open=int(os.environ.get("ANIFLIVE_TTS_MAX_SPEECH_SESSIONS", "8")),
+    ttl_seconds=float(os.environ.get("ANIFLIVE_TTS_SPEECH_SESSION_TTL_SECONDS", "600")),
+    maximum_segments=int(
+        os.environ.get("ANIFLIVE_TTS_MAX_SPEECH_SESSION_SEGMENTS", "64")
+    ),
+    maximum_characters=int(
+        os.environ.get("ANIFLIVE_TTS_MAX_SPEECH_SESSION_CHARACTERS", "16000")
+    ),
+    maximum_retained=int(
+        os.environ.get("ANIFLIVE_TTS_MAX_RETAINED_SPEECH_SESSIONS", "64")
+    ),
+)
 
 
 def _assert_fixed_reference(values: Mapping[str, Any]) -> None:
@@ -1856,37 +2257,49 @@ async def _tts_response(
                     "stream=true requires response_format='pcm'. A valid RIFF/WAV file needs its final data length; use stream=false for a downloadable WAV."
                 )
             requested_model = _optional_string(values.get("model"), "model")
+            stream_owner = f"http:{secrets.token_hex(16)}"
             request_segments, pcm, sample_rate, response_model = SERVICE.prepare_stream(
-                options, requested_model
+                options,
+                requested_model,
+                stream_owner=stream_owner,
             )
-            recommended_prebuffer_ms = SERVICE.recommended_stream_prebuffer_ms(
-                request_segments
-            )
-            return StreamingResponse(
+            owner = _PCMStreamOwner(
                 pcm,
-                media_type="application/octet-stream",
-                headers={
-                    "X-TTS-Service": SERVICE_NAME,
-                    "X-TTS-Version": SERVICE_VERSION,
-                    "X-TensorRT-Backend": "TensorRT-11",
-                    "X-TensorRT-Engine-Count": str(len(REQUIRED_ENGINES)),
-                    "X-PyTorch-Fallback": "false",
-                    "X-TTS-Model": response_model,
-                    "X-TTS-Stream": "pcm_s16le",
-                    "X-TTS-Sample-Format": "s16le",
-                    "X-TTS-Sample-Rate": str(sample_rate),
-                    "X-TTS-Channels": "1",
-                    "X-TTS-Recommended-Prebuffer-Ms": str(
-                        recommended_prebuffer_ms
-                    ),
-                    "X-TTS-Queue-Ms": "0.000",
-                    "X-TTS-Pause-Mode": "adaptive",
-                    "X-TTS-Expression": options.expression_profile or "native",
-                    "X-TTS-Expression-Policy": options.expression_policy.value,
-                    "X-TTS-First-Context-Tokens": str(first_context_tokens),
-                    "Cache-Control": "no-store",
-                },
+                lambda: SERVICE.cancel_stream(stream_owner),
             )
+            try:
+                recommended_prebuffer_ms = SERVICE.recommended_stream_prebuffer_ms(
+                    request_segments
+                )
+                return _OwnedStreamingResponse(
+                    pcm,
+                    owner=owner,
+                    media_type="application/octet-stream",
+                    headers={
+                        "X-TTS-Service": SERVICE_NAME,
+                        "X-TTS-Version": SERVICE_VERSION,
+                        "X-TensorRT-Backend": "TensorRT-11",
+                        "X-TensorRT-Engine-Count": str(len(REQUIRED_ENGINES)),
+                        "X-PyTorch-Fallback": "false",
+                        "X-TTS-Model": response_model,
+                        "X-TTS-Stream": "pcm_s16le",
+                        "X-TTS-Sample-Format": "s16le",
+                        "X-TTS-Sample-Rate": str(sample_rate),
+                        "X-TTS-Channels": "1",
+                        "X-TTS-Recommended-Prebuffer-Ms": str(
+                            recommended_prebuffer_ms
+                        ),
+                        "X-TTS-Queue-Ms": "0.000",
+                        "X-TTS-Pause-Mode": "adaptive",
+                        "X-TTS-Expression": options.expression_profile or "native",
+                        "X-TTS-Expression-Policy": options.expression_policy.value,
+                        "X-TTS-First-Context-Tokens": str(first_context_tokens),
+                        "Cache-Control": "no-store",
+                    },
+                )
+            except BaseException:
+                await owner.aclose()
+                raise
         if response_format != "wav":
             raise RequestError("response_format must be 'wav' when stream=false")
         requested_model = _optional_string(values.get("model"), "model")
@@ -1968,22 +2381,72 @@ async def _read_json_body(request: Request) -> dict[str, Any]:
     return body
 
 
+def _structured_speech_values(values: Mapping[str, Any]) -> dict[str, Any]:
+    body = dict(values)
+    has_text = _optional_string(body.get("text"), "text") is not None
+    has_segments = body.get("segments") is not None
+    if has_text == has_segments:
+        raise RequestError("Exactly one of text or segments must be provided")
+    model = _optional_string(body.get("model"), "model") or MODEL_ID
+    if model != MODEL_ID:
+        raise RequestError(f"model must match the active model {MODEL_ID!r}")
+    voice_profile = (
+        _optional_string(body.get("voice_profile"), "voice_profile") or VOICE_ID
+    )
+    if voice_profile != VOICE_ID:
+        raise RequestError(
+            f"voice_profile must match the active profile {VOICE_ID!r}"
+        )
+    expression = body.get("expression") or {}
+    if not isinstance(expression, dict):
+        raise RequestError("expression must be an object")
+    body["_expression_enabled"] = _boolean(
+        expression.get("enabled"), "expression.enabled", False
+    )
+    body["_expression_profile"] = expression.get("profile")
+    body["_expression_intensity"] = expression.get("intensity", 0.5)
+    if "policy" in expression:
+        body["_expression_policy"] = expression["policy"]
+    if has_segments:
+        body["_expression_segments"] = body.get("segments")
+    generation = body.get("generation") or {}
+    if not isinstance(generation, dict):
+        raise RequestError("generation must be an object")
+    for key in ("top_k", "top_p", "temperature", "seed", "noise_scale", "speed"):
+        if key in generation:
+            body[key] = generation[key]
+    body["language"] = _canonical_language(body.get("language"), "language")
+    return body
+
+
 @asynccontextmanager
-async def lifespan(_: FastAPI):
+async def lifespan(app: FastAPI):
     # Startup intentionally fails if a valid TensorRT pipeline cannot be loaded.
     # Serving a deceptively successful CPU/PyTorch fallback is prohibited.
+    app.state.session_model_lock = asyncio.Lock()
     SERVICE.load()
     try:
         yield
     finally:
+        await SESSION_MANAGER.clear_all_neural_contexts()
         SERVICE.unload()
 
 
 app = FastAPI(
     title="AnifLive-TTS API",
     version=SERVICE_VERSION,
-    description="Low-latency multilingual AnifLive-TTS v1.3 service backed by TensorRT 11.",
+    description="Low-latency multilingual AnifLive-TTS v1.4 development service backed by TensorRT 11.",
     lifespan=lifespan,
+)
+
+
+install_runtime_control(
+    app, SERVICE, SESSION_MANAGER,
+    lambda: {
+        "model": SERVICE.health().get("model"),
+        "voice": VOICE_ID,
+        "engine_fingerprint": SERVICE.health().get("engine_fingerprint"),
+    },
 )
 
 
@@ -2059,35 +2522,7 @@ async def openai_speech(request: Request) -> Response:
             or "voice_profile" in body
             or "generation" in body
         ):
-            has_text = _optional_string(body.get("text"), "text") is not None
-            has_segments = body.get("segments") is not None
-            if has_text == has_segments:
-                raise RequestError("Exactly one of text or segments must be provided")
-            model = _optional_string(body.get("model"), "model") or MODEL_ID
-            if model != MODEL_ID:
-                raise RequestError(f"model must match the active model {MODEL_ID!r}")
-            voice_profile = _optional_string(body.get("voice_profile"), "voice_profile") or VOICE_ID
-            if voice_profile != VOICE_ID:
-                raise RequestError(f"voice_profile must match the active profile {VOICE_ID!r}")
-            expression = body.get("expression") or {}
-            if not isinstance(expression, dict):
-                raise RequestError("expression must be an object")
-            body["_expression_enabled"] = _boolean(
-                expression.get("enabled"), "expression.enabled", False
-            )
-            body["_expression_profile"] = expression.get("profile")
-            body["_expression_intensity"] = expression.get("intensity", 0.5)
-            if "policy" in expression:
-                body["_expression_policy"] = expression["policy"]
-            if has_segments:
-                body["_expression_segments"] = body.get("segments")
-            generation = body.get("generation") or {}
-            if not isinstance(generation, dict):
-                raise RequestError("generation must be an object")
-            for key in ("top_k", "top_p", "temperature", "seed", "noise_scale", "speed"):
-                if key in generation:
-                    body[key] = generation[key]
-            body["language"] = _canonical_language(body.get("language"), "language")
+            body = _structured_speech_values(body)
             return await _tts_response(
                 request, body, text_field="text", language_field="language"
             )
@@ -2110,15 +2545,301 @@ async def openai_speech(request: Request) -> Response:
     )
 
 
+def _session_error(error: SpeechSessionError) -> JSONResponse:
+    return _json_response(str(error), error.status_code)
+
+
+def _session_id(value: Any, field: str) -> str:
+    result = _optional_string(value, field)
+    if result is None or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", result) is None:
+        raise RequestError(
+            f"{field} must contain 1-128 letters, numbers, dots, underscores, colons or hyphens"
+        )
+    return result
+
+
+@app.post("/v1/sessions")
+async def create_speech_session(request: Request) -> JSONResponse:
+    try:
+        body = await _read_json_body(request)
+        # The active identity validation and session insertion are one atomic
+        # operation with respect to model activation. Otherwise activation can
+        # pass has_active(), then a session for the old model can appear while
+        # TensorRT is being replaced underneath it.
+        async with request.app.state.session_model_lock:
+            model = _optional_string(body.get("model"), "model") or MODEL_ID
+            voice_profile = (
+                _optional_string(body.get("voice_profile"), "voice_profile") or VOICE_ID
+            )
+            if model != MODEL_ID:
+                raise RequestError(f"model must match the active model {MODEL_ID!r}")
+            if voice_profile != VOICE_ID:
+                raise RequestError(
+                    f"voice_profile must match the active profile {VOICE_ID!r}"
+                )
+            try:
+                continuity_policy = parse_continuity_policy(
+                    body.get("continuity_policy", "A")
+                )
+            except ValueError as error:
+                raise RequestError(str(error)) from error
+            session = await SESSION_MANAGER.create(
+                model=model,
+                voice_profile=voice_profile,
+                sample_rate=SERVICE.sample_rate,
+                continuity_policy=continuity_policy,
+            )
+        return JSONResponse(session.public_dict(), status_code=201)
+    except RequestError as error:
+        return _json_response(str(error), error.status_code)
+    except SpeechSessionError as error:
+        return _session_error(error)
+
+
+@app.get("/v1/sessions/{session_id}")
+async def get_speech_session(session_id: str) -> JSONResponse:
+    try:
+        session = await SESSION_MANAGER.get(session_id)
+        return JSONResponse(session.public_dict())
+    except SpeechSessionError as error:
+        return _session_error(error)
+
+
+@app.post("/v1/sessions/{session_id}/segments")
+async def append_speech_session_segment(session_id: str, request: Request) -> JSONResponse:
+    try:
+        body = await _read_json_body(request)
+        session = await SESSION_MANAGER.get(session_id)
+        if session.model != MODEL_ID or session.voice_profile != VOICE_ID:
+            raise SpeechSessionError(
+                "The active model no longer matches this speech session", 409
+            )
+        segment_id = _session_id(body.get("segment_id"), "segment_id")
+        paragraph_id = (
+            _session_id(body.get("paragraph_id"), "paragraph_id")
+            if body.get("paragraph_id") is not None
+            else None
+        )
+        pause_value = _number(
+            body.get("pause_after_ms"),
+            "pause_after_ms",
+            0.0,
+            minimum=0.0,
+            maximum=10000.0,
+        )
+        if not pause_value.is_integer():
+            raise RequestError("pause_after_ms must be an integer")
+        speech_values = _structured_speech_values(
+            {
+                "text": body.get("text"),
+                "language": body.get("language"),
+                "expression": body.get("expression"),
+                "generation": body.get("generation"),
+                "model": session.model,
+                "voice_profile": session.voice_profile,
+                "stream": True,
+                "response_format": "pcm",
+            }
+        )
+        options = _options_from_values(
+            speech_values,
+            text_field="text",
+            language_field="language",
+        )
+        segment, created = await SESSION_MANAGER.append(
+            session_id,
+            segment_id=segment_id,
+            text=options.text,
+            language=options.text_language,
+            options=options,
+            fingerprint_payload={
+                "text": body.get("text"),
+                "language": body.get("language"),
+                "expression": body.get("expression"),
+                "generation": body.get("generation"),
+                "paragraph_id": paragraph_id,
+                "pause_after_ms": int(pause_value),
+            },
+            paragraph_id=paragraph_id,
+            pause_after_ms=int(pause_value),
+        )
+        return JSONResponse(segment.public_dict(), status_code=201 if created else 200)
+    except RequestError as error:
+        return _json_response(str(error), error.status_code)
+    except SpeechSessionError as error:
+        return _session_error(error)
+
+
+@app.get("/v1/sessions/{session_id}/audio")
+async def stream_speech_session_audio(session_id: str) -> Response:
+    try:
+        session = await SESSION_MANAGER.attach_consumer(session_id)
+    except SpeechSessionError as error:
+        return _session_error(error)
+    owner = _SpeechSessionConsumerOwner(SESSION_MANAGER, session)
+
+    async def session_pcm() -> Any:
+        try:
+            while True:
+                segment = await SESSION_MANAGER.next_segment(session)
+                if segment is None:
+                    break
+                pcm = None
+                capture = None
+                try:
+                    output_bytes = 0
+                    expression = None
+                    if getattr(segment.options, "expression_enabled", False):
+                        expression = getattr(
+                            segment.options, "expression_profile", None
+                        )
+                    if expression is None:
+                        expression = next(
+                            (
+                                getattr(control, "profile", None)
+                                for control in reversed(
+                                    getattr(segment.options, "expression_segments", ())
+                                )
+                                if getattr(control, "enabled", False)
+                            ),
+                            None,
+                        )
+                    context_plan = session.context.plan_for(
+                        text=segment.text,
+                        language=segment.language,
+                        expression=expression,
+                        paragraph_id=segment.paragraph_id,
+                    )
+                    if session.continuity_policy is not ContinuityPolicy.NONE:
+                        capture = ContinuationCapture(
+                            model_id=session.model,
+                            voice_profile=session.voice_profile,
+                        )
+                    _, pcm, sample_rate, response_model = await run_in_threadpool(
+                        SERVICE.prepare_stream,
+                        segment.options,
+                        session.model,
+                        stream_owner=session.session_id,
+                        continuity_input=context_plan.neural_input,
+                        continuity_capture=capture,
+                        continuity_policy=session.continuity_policy.value,
+                    )
+                    if response_model != session.model or sample_rate != session.sample_rate:
+                        raise RuntimeError("Speech session runtime identity changed")
+                    async for chunk in iterate_in_threadpool(pcm):
+                        if session.state in {"cancelled", "expired"}:
+                            SERVICE.cancel_stream(session.session_id)
+                            await run_in_threadpool(pcm.close)
+                            break
+                        if chunk:
+                            output_bytes += len(chunk)
+                            yield chunk
+                    if segment.pause_after_ms:
+                        silent_samples = round(
+                            session.sample_rate * segment.pause_after_ms / 1000
+                        )
+                        silence = b"\x00\x00" * silent_samples
+                        for offset in range(0, len(silence), 64 * 1024):
+                            if session.state in {"cancelled", "expired"}:
+                                break
+                            yield silence[offset : offset + 64 * 1024]
+                    await SESSION_MANAGER.finish_segment(
+                        session,
+                        segment,
+                        output_samples=output_bytes // 2,
+                        neural_state=(capture.take() if capture is not None else None),
+                    )
+                except asyncio.CancelledError:
+                    if capture is not None:
+                        capture.clear()
+                    await SESSION_MANAGER.cancel(session.session_id)
+                    SERVICE.cancel_stream(session.session_id)
+                    if pcm is not None:
+                        await run_in_threadpool(pcm.close)
+                    raise
+                except Exception:
+                    if capture is not None:
+                        capture.clear()
+                    LOGGER.exception(
+                        "AnifLive-TTS speech session segment failed: %s",
+                        segment.segment_id,
+                    )
+                    SERVICE.cancel_stream(session.session_id)
+                    if pcm is not None:
+                        await run_in_threadpool(pcm.close)
+                    await SESSION_MANAGER.finish_segment(
+                        session,
+                        segment,
+                        error="TensorRT synthesis failed",
+                    )
+                    break
+        finally:
+            await owner.aclose()
+
+    return _OwnedStreamingResponse(
+        session_pcm(),
+        owner=owner,
+        media_type="application/octet-stream",
+        headers={
+            "X-TTS-Service": SERVICE_NAME,
+            "X-TTS-Version": SERVICE_VERSION,
+            "X-TensorRT-Backend": "TensorRT-11",
+            "X-TensorRT-Engine-Count": str(len(REQUIRED_ENGINES)),
+            "X-PyTorch-Fallback": "false",
+            "X-TTS-Model": session.model,
+            "X-TTS-Stream": "pcm_s16le",
+            "X-TTS-Sample-Format": "s16le",
+            "X-TTS-Sample-Rate": str(session.sample_rate),
+            "X-TTS-Channels": "1",
+            "X-TTS-Session-ID": session.session_id,
+            "X-TTS-Session-Context": "committed-neural-v1",
+            "X-TTS-Session-Context-Policy": session.continuity_policy.value,
+            "X-TTS-Neural-State-Continuity": str(
+                session.continuity_policy is not ContinuityPolicy.NONE
+            ).lower(),
+            "X-TTS-Acoustic-Latent-Continuity": "false",
+            "X-TTS-Continuity-Qualification": "experimental-unqualified",
+            "Cache-Control": "no-store",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@app.post("/v1/sessions/{session_id}/flush")
+async def flush_speech_session(session_id: str) -> JSONResponse:
+    try:
+        session = await SESSION_MANAGER.flush(session_id)
+        return JSONResponse(session.public_dict())
+    except SpeechSessionError as error:
+        return _session_error(error)
+
+
+@app.post("/v1/sessions/{session_id}/cancel")
+async def cancel_speech_session(session_id: str) -> JSONResponse:
+    try:
+        session = await SESSION_MANAGER.cancel(session_id)
+        cancelled_audio = SERVICE.cancel_stream(session.session_id)
+        return JSONResponse(
+            {**session.public_dict(), "active_audio_cancelled": cancelled_audio}
+        )
+    except SpeechSessionError as error:
+        return _session_error(error)
+
+
+@app.delete("/v1/sessions/{session_id}")
+async def delete_speech_session(session_id: str) -> JSONResponse:
+    return await cancel_speech_session(session_id)
+
+
 @app.get("/v1/capabilities")
 async def capabilities() -> dict[str, Any]:
     expression = SERVICE.expression_metadata()
     return {
         "service": SERVICE_NAME,
         "version": SERVICE_VERSION,
-        "model_family": "gsv-v2proplus",
+        "model_family": V2PROPLUS_BACKEND.model_family,
         "backend": "TensorRT-11",
-        "precision": "FP16",
+        "precision": V2PROPLUS_BACKEND.precision,
         "languages": ["zh", "yue", "en", "ja", "ko"],
         "streaming": {"pcm16": True, "wav": False},
         "expression": {
@@ -2130,6 +2851,22 @@ async def capabilities() -> dict[str, Any]:
         "pytorch_fallback": False,
         "adaptive_punctuation_segments": True,
         "warm_retention_seconds": 25,
+        "speech_sessions": {
+            "committed_segments": True,
+            "pcm_stream": True,
+            "cancel": True,
+            "flush": True,
+            "context_mode": "committed-neural-v1",
+            "neural_state_continuity": True,
+            "acoustic_latent_continuity": False,
+            "default_policy": "A",
+            "policies": {
+                key: dict(value)
+                for key, value in CONTINUITY_POLICY_CONTRACTS.items()
+            },
+            "qualification": "experimental-unqualified",
+            "limits": SESSION_MANAGER.limits_dict(),
+        },
     }
 
 
@@ -2148,8 +2885,17 @@ async def list_expressions() -> dict[str, Any]:
 
 @app.post("/v1/audio/cancel")
 async def cancel_audio() -> dict[str, Any]:
+    owner = SERVICE.active_stream_owner
+    if owner is not None:
+        try:
+            await SESSION_MANAGER.cancel(owner)
+        except SpeechSessionError:
+            pass
+        cancelled = SERVICE.cancel_stream(owner)
+    else:
+        cancelled = SERVICE.cancel_active_stream()
     return {
-        "cancelled": SERVICE.cancel_active_stream(),
+        "cancelled": cancelled,
         "model": MODEL_ID,
     }
 
@@ -2240,7 +2986,17 @@ async def activate_model(request: Request) -> JSONResponse:
         model_id = _optional_string(body.get("model"), "model")
         if model_id is None:
             raise RequestError("Missing required parameter: model")
-        result = await run_in_threadpool(SERVICE.activate, model_id)
+        # Hold the same gate used by session creation through the complete
+        # blocking model transition. A creator therefore observes either the
+        # old model before switching starts or the new model after it finishes,
+        # never the unload/reload interval.
+        async with request.app.state.session_model_lock:
+            if await SESSION_MANAGER.has_active():
+                raise ModelSwitchConflict(
+                    "Cannot switch models while a speech session is open"
+                )
+            await SESSION_MANAGER.clear_all_neural_contexts()
+            result = await run_in_threadpool(SERVICE.activate, model_id)
         return JSONResponse(
             {
                 "code": 0,

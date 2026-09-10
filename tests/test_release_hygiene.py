@@ -134,6 +134,7 @@ def test_checkpoint_safety_policy_reaches_exporter() -> None:
     assert 'export_command.append("--allow_unsafe_pickle")' in converter
     assert 'torch.load(args.gpt_path, map_location="cpu", weights_only=True)' in exporter
     assert 'load_sovits_new(args.sovits_path, weights_only=True)' in exporter
+    assert 'SAFE_LEGACY_HPARAMS = [(LegacyHParams, "utils.HParams")]' in exporter
     assert "if not args.allow_unsafe_pickle" in exporter
     assert "def load_sovits_new(sovits_path, *, weights_only=True):" in checkpoint
 

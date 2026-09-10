@@ -14,7 +14,8 @@ from GPT_SoVITS.feature_extractor import cnhubert
 from GPT_SoVITS.text import _symbol_to_id_v2
 from GPT_SoVITS.AR.models.t2s_lightning_module import Text2SemanticLightningModule
 from GPT_SoVITS.module.models import SynthesizerTrn
-from transformers import AutoModelForMaskedLM, AutoTokenizer
+from utils import HParams as LegacyHParams
+from transformers import AutoModelForMaskedLM
 import logging
 
 # ONNX校验
@@ -24,6 +25,11 @@ logging.getLogger("torch.onnx").setLevel(logging.WARN)
 logging.getLogger("onnx").setLevel(logging.WARN)
 logging.getLogger("onnx_ir").setLevel(logging.WARN)
 logging.getLogger("onnxscript").setLevel(logging.WARN)
+
+# V2ProPlus training serializes the configuration under its historical fully
+# qualified name.  Pinning that exact name keeps weights-only loading enabled
+# without falling back to executable pickle deserialization.
+SAFE_LEGACY_HPARAMS = [(LegacyHParams, "utils.HParams")]
 
 # Wrappers for ONNX Export
 
@@ -36,16 +42,15 @@ class T2SEncoder(nn.Module):
         pass
 
 class GPTEncoder(nn.Module):
-    def __init__(self, t2s_model, max_len=2000):
+    def __init__(self, t2s_model, max_len=2000, full_logits=False):
         super().__init__()
         self.t2s_model = t2s_model
         self.max_len = max_len
+        self.full_logits = bool(full_logits)
 
     def forward(self, phoneme_ids, prompts, bert_feature):
         # Wrapper for infer_first_stage
         # Returns: logits, k_cache (stacked), v_cache (stacked), x_len, y_len
-        
-        actual_len = phoneme_ids.shape[1]
         
         logits, k_cache, v_cache, x_len, y_len = self.t2s_model.model.infer_first_stage(
             phoneme_ids, prompts, bert_feature
@@ -72,12 +77,14 @@ class GPTEncoder(nn.Module):
         else:
             y_len = y_len.reshape(1)
         
-        return topk_values, topk_indices, k_cache_padded, v_cache_padded, x_len, y_len
+        outputs = (topk_values, topk_indices, k_cache_padded, v_cache_padded, x_len, y_len)
+        return (*outputs, logits) if self.full_logits else outputs
 
 class GPTStep(nn.Module):
-    def __init__(self, t2s_model):
+    def __init__(self, t2s_model, full_logits=False):
         super().__init__()
         self.t2s_model = t2s_model
+        self.full_logits = bool(full_logits)
 
     def forward(self, samples, k_cache, v_cache, x_len, y_len, idx):
         # Wrapper for infer_next_stage
@@ -101,10 +108,11 @@ class GPTStep(nn.Module):
         v_cache_stacked = torch.stack(v_cache_new, dim=0)
         
         # Optimization: Return Top-K instead of full logits to reduce GPU->CPU transfer
-        # SoVITS vocabulary is 1025. Returning Top-50 is enough for high-quality sampling.
+        # Keep legacy top-50 outputs; native sampling additionally needs the full vocabulary.
         topk_values, topk_indices = torch.topk(logits, k=50, dim=-1)
         
-        return topk_values, topk_indices, k_cache_stacked, v_cache_stacked
+        outputs = (topk_values, topk_indices, k_cache_stacked, v_cache_stacked)
+        return (*outputs, logits) if self.full_logits else outputs
 
 class SoVITS(nn.Module):
     def __init__(self, vq_model, version):
@@ -171,193 +179,135 @@ class VQEncoder(nn.Module):
         return codes
 
 class SpectrogramWrapper(nn.Module):
+    """Portable FP32 STFT with explicit radix-2 butterflies.
+
+    Native PyTorch and ONNX FFT libraries round quiet bins differently. Keeping
+    the same operation graph gives deterministic export parity without changing
+    the Hann window, reflection padding, hop, magnitude floor or public I/O.
+    """
+
     def __init__(self, filter_length, hop_length, win_length, sampling_rate):
         super().__init__()
+        if filter_length < 2 or filter_length & (filter_length - 1):
+            raise ValueError("Spectrogram filter_length must be a power of two")
+        if not 0 < hop_length <= filter_length or not 0 < win_length <= filter_length:
+            raise ValueError("Spectrogram hop/window lengths are invalid")
         self.filter_length = filter_length
         self.hop_length = hop_length
         self.win_length = win_length
         self.sampling_rate = sampling_rate
         self.register_buffer("hann_window", torch.hann_window(win_length))
+        padding = filter_length - win_length
+        self.register_buffer(
+            "analysis_window",
+            F.pad(self.hann_window, (padding // 2, padding - padding // 2)),
+        )
+        bits = filter_length.bit_length() - 1
+        reverse = [
+            int(format(index, f"0{bits}b")[::-1], 2)
+            for index in range(filter_length)
+        ]
+        self.register_buffer("bit_reverse", torch.tensor(reverse, dtype=torch.long))
+        self.fft_widths = tuple(2 ** stage for stage in range(1, bits + 1))
+        for width in self.fft_widths:
+            angle = torch.arange(width // 2, dtype=torch.float64) * (-2 * torch.pi / width)
+            self.register_buffer(f"fft_cos_{width}", angle.cos().float())
+            self.register_buffer(f"fft_sin_{width}", angle.sin().float())
 
     def forward(self, y):
-        # y: [1, T] audio waveform
-        if torch.min(y) < -1.2:
-            print("min value is ", torch.min(y))
-        if torch.max(y) > 1.2:
-            print("max value is ", torch.max(y))
-
         n_fft = self.filter_length
-        hop_size = self.hop_length
-        win_size = self.win_length
-
-        # Convert to float32 for STFT (TensorRT requires float32 input for STFT)
-        y_stft = y.to(torch.float32)
-
-        # Pad audio for STFT
-        y_padded = torch.nn.functional.pad(
-            y_stft.unsqueeze(1), (int((n_fft - hop_size) / 2), int((n_fft - hop_size) / 2)), mode="reflect"
+        padding = (n_fft - self.hop_length) // 2
+        audio = F.pad(y.float().unsqueeze(1), (padding, padding), mode="reflect").squeeze(1)
+        starts = torch.arange(
+            0, audio.shape[-1] - n_fft + 1, self.hop_length, device=y.device
         )
-        y_padded = y_padded.squeeze(1)
+        indexes = starts.unsqueeze(1) + torch.arange(n_fft, device=y.device).unsqueeze(0)
+        real, imaginary = self.fft_components(audio[:, indexes] * self.analysis_window)
+        magnitude = torch.sqrt(real.square() + imaginary.square() + 1e-8)
+        return magnitude.transpose(1, 2)
 
-        # Compute STFT
-        spec = torch.stft(
-            y_padded,
-            n_fft,
-            hop_length=hop_size,
-            win_length=win_size,
-            window=self.hann_window.to(torch.float32),
-            center=False,
-            pad_mode="reflect",
-            normalized=False,
-            onesided=True,
-            return_complex=False,
-        )
+    def fft_components(self, frames):
+        n_fft = self.filter_length
+        real = frames.index_select(-1, self.bit_reverse)
+        imaginary = torch.zeros_like(real)
+        for width in self.fft_widths:
+            r = real.reshape(real.shape[0], real.shape[1], n_fft // width, width)
+            i = imaginary.reshape(imaginary.shape[0], imaginary.shape[1], n_fft // width, width)
+            half = width // 2
+            even_r, even_i = r[..., :half], i[..., :half]
+            odd_r, odd_i = r[..., half:], i[..., half:]
+            cosine = getattr(self, f"fft_cos_{width}")
+            sine = getattr(self, f"fft_sin_{width}")
+            rotated_r = odd_r * cosine - odd_i * sine
+            rotated_i = odd_r * sine + odd_i * cosine
+            real = torch.cat((even_r + rotated_r, even_r - rotated_r), dim=-1).reshape_as(real)
+            imaginary = torch.cat((even_i + rotated_i, even_i - rotated_i), dim=-1).reshape_as(imaginary)
+        bins = n_fft // 2 + 1
+        return real[..., :bins], imaginary[..., :bins]
 
-        # Compute magnitude spectrum
-        spec = torch.sqrt(spec.pow(2).sum(-1) + 1e-8)
-        return spec
 
 class SVEmbeddingWrapper(nn.Module):
-    """
-    Wrapper for SV model compute_embedding3 to enable ONNX export.
-    """
+    """Export the native dither-free Kaldi fbank contract before ERes2NetV2."""
+
+    def __init__(self, sv_model):
+        super().__init__()
+        from GPT_SoVITS.eres2net import kaldi
+
+        self.embedding_model = sv_model
+        self.window_size = 400
+        self.window_shift = 160
+        self.padded_window_size = 512
+        self.register_buffer(
+            "window", torch.hann_window(self.window_size, periodic=False).pow(0.85)
+        )
+        banks = kaldi.get_mel_banks(
+            80, self.padded_window_size, 16000.0, 20.0, 0.0, 100.0, -500.0, 1.0
+        )
+        self.register_buffer("mel_filterbank", F.pad(banks, (0, 1)))
+        self.fft = SpectrogramWrapper(512, 160, 400, 16000)
+
+    def features(self, wav):
+        audio = wav.float()
+        starts = torch.arange(
+            0, audio.shape[-1] - self.window_size + 1,
+            self.window_shift, device=audio.device,
+        )
+        indexes = starts.unsqueeze(1) + torch.arange(
+            self.window_size, device=audio.device
+        ).unsqueeze(0)
+        frames = audio[:, indexes]
+        frames = frames - frames.mean(dim=-1, keepdim=True)
+        previous = torch.cat((frames[..., :1], frames[..., :-1]), dim=-1)
+        frames = (frames - 0.97 * previous) * self.window
+        frames = F.pad(frames, (0, self.padded_window_size - self.window_size))
+        real, imaginary = self.fft.fft_components(frames)
+        power = real.square() + imaginary.square()
+        mel = torch.matmul(power, self.mel_filterbank.T)
+        return torch.clamp_min(mel, torch.finfo(torch.float32).eps).log()
+
+    def forward(self, wav):
+        return self.embedding_model.forward3(self.features(wav))
+
+
+class NativeSVEmbeddingReference(nn.Module):
+    """Independent native feature oracle used only by export validation."""
+
     def __init__(self, sv_model):
         super().__init__()
         self.embedding_model = sv_model
-        self.num_mel_bins = 80
-        self.sample_frequency = 16000.0
-        self.frame_length = 25.0  # ms
-        self.frame_shift = 10.0    # ms
-        self.dither = 0.0
-        self.low_freq = 20.0
-        self.high_freq = 0.0  # 0 means Nyquist
-        self.window_type = "povey"
-        self.remove_dc_offset = True
-        self.preemphasis_coefficient = 0.97
-        self.energy_floor = 1.0
-        self.raw_energy = True
-
-        # Pre-compute window and mel filter bank (ONNX compatible)
-        self.window_size = int(self.sample_frequency * self.frame_length * 0.001)
-        self.window_shift = int(self.sample_frequency * self.frame_shift * 0.001)
-        self.padded_window_size = 2 ** ((self.window_size - 1).bit_length())
-        num_fft_bins = self.padded_window_size // 2 + 1
-
-        # Pre-compute Povey window (Hanning window^0.85)
-        self.register_buffer("window", torch.hann_window(self.window_size) ** 0.85)
-
-        self.register_buffer("mel_filterbank", self._create_mel_filterbank_kaldi(num_fft_bins))
-
-    def _create_mel_filterbank_kaldi(self, num_fft_bins):
-        """
-        Create mel filter bank matching Kaldi implementation.
-        Kaldi uses triangular mel filters with specific edge frequencies.
-        """
-        import math
-
-        high_freq = self.high_freq
-        if high_freq <= 0.0:
-            high_freq = self.sample_frequency / 2.0
-
-        # Mel scale conversion functions (matching Kaldi)
-        def mel_scale(freq):
-            return 1127.0 * math.log(1.0 + freq / 700.0)
-
-        def inverse_mel_scale(mel_freq):
-            return 700.0 * (math.exp(mel_freq / 1127.0) - 1.0)
-
-        # Calculate mel frequencies
-        mel_low_freq = mel_scale(self.low_freq)
-        mel_high_freq = mel_scale(high_freq)
-
-        # Divide by num_bins+1 due to end-effects where bins spread to sides
-        mel_freq_delta = (mel_high_freq - mel_low_freq) / (self.num_mel_bins + 1)
-
-        # Create mel filter bank
-        bins = torch.zeros(self.num_mel_bins, num_fft_bins)
-
-        # FFT bin width
-        fft_bin_width = self.sample_frequency / self.padded_window_size
-
-        # For each mel bin
-        for i in range(self.num_mel_bins):
-            # Calculate left, center, right mel frequencies
-            left_mel = mel_low_freq + i * mel_freq_delta
-            center_mel = mel_low_freq + (i + 1.0) * mel_freq_delta
-            right_mel = mel_low_freq + (i + 2.0) * mel_freq_delta
-
-            # Convert to Hz
-            left_hz = inverse_mel_scale(left_mel)
-            center_hz = inverse_mel_scale(center_mel)
-            right_hz = inverse_mel_scale(right_mel)
-
-            # Calculate which FFT bins these correspond to
-            left_bin = int(round(left_hz / fft_bin_width))
-            center_bin = int(round(center_hz / fft_bin_width))
-            right_bin = int(round(right_hz / fft_bin_width))
-
-            # Create triangular filter
-            # Left slope: from left_bin to center_bin
-            if center_bin > left_bin:
-                bins[i, left_bin:center_bin] = torch.linspace(0, 1, center_bin - left_bin)
-
-            # Right slope: from center_bin to right_bin
-            if right_bin > center_bin:
-                bins[i, center_bin:right_bin] = torch.linspace(1, 0, right_bin - center_bin)
-
-        return bins
 
     def forward(self, wav):
-        # wav: [B, T] audio waveform at 16kHz
-        B = wav.shape[0]
-        device = wav.device
-        dtype = wav.dtype
+        from GPT_SoVITS.eres2net import kaldi
 
-        # Convert to float32 for STFT (TensorRT requires float32 input for STFT)
-        wav_stft = wav.to(torch.float32)
+        features = torch.stack([
+            kaldi.fbank(
+                row.float().unsqueeze(0), num_mel_bins=80,
+                sample_frequency=16000, dither=0,
+            )
+            for row in wav
+        ])
+        return self.embedding_model.forward3(features)
 
-        # Use STFT directly (ONNX compatible) to extract frames and compute FFT
-        # STFT will handle framing, windowing, and FFT in one operation
-        stft_result = torch.stft(
-            wav_stft,
-            n_fft=self.padded_window_size,
-            hop_length=self.window_shift,
-            win_length=self.window_size,
-            window=self.window.to(device=device, dtype=torch.float32),
-            center=False,  # Kaldi doesn't center
-            normalized=False,
-            onesided=True,
-            return_complex=False
-        )  # [B, num_freq_bins, num_frames, 2]
-
-        # Extract real and imag parts
-        real_part = stft_result[:, :, :, 0]  # [B, num_freq_bins, num_frames]
-        imag_part = stft_result[:, :, :, 1]  # [B, num_freq_bins, num_frames]
-
-        # Compute power spectrum: [B, num_freq_bins, num_frames]
-        spectrum = real_part.pow(2) + imag_part.pow(2)
-
-        # Transpose to [B, num_frames, num_freq_bins] for mel filter bank
-        spectrum = spectrum.transpose(1, 2)  # [B, num_frames, num_freq_bins]
-
-        # Apply mel filter bank
-        # spectrum: [B, num_frames, num_fft_bins]
-        # mel_filterbank: [num_mel_bins, num_fft_bins]
-        # result: [B, num_frames, num_mel_bins]
-        mel_energies = torch.matmul(spectrum, self.mel_filterbank.T)
-
-        # Log compression
-        epsilon_tensor = torch.tensor(torch.finfo(torch.float32).eps, device=device, dtype=torch.float32)
-        mel_energies = torch.clamp_min(mel_energies, epsilon_tensor).log()
-
-        # mel_energies: [B, T, F] where F=80 (already in correct format)
-        feat = mel_energies
-
-        # Pass through ERes2NetV2 forward3
-        # forward3 returns [B, 20480] regardless of input length
-        sv_emb = self.embedding_model.forward3(feat)
-
-        return sv_emb
 
 def hparams_to_dict(hp):
     if hasattr(hp, "__dict__"):
@@ -369,7 +319,109 @@ def hparams_to_dict(hp):
     else:
         return hp
 
+def stabilize_gpt_layer_norm(onnx_path):
+    """Express FP32 layer norm with centered variance, retaining the native oracle.
+
+    ORT's LayerNormalization CPU kernel can accumulate enough cancellation
+    error to fail cache checks on some GPT weights. This changes the exported
+    arithmetic, not its mathematical contract, dtype, weights or tolerances.
+    """
+    import numpy as np
+    import onnx
+    from onnx import helper, numpy_helper
+    from pathlib import Path
+
+    path = Path(onnx_path)
+    graph = onnx.load(path)
+    candidates = [node for node in graph.graph.node if node.op_type == "LayerNormalization"]
+    if not candidates:
+        return 0
+    opset = next(value.version for value in graph.opset_import if not value.domain)
+    prefix = "aniflive_centered_layer_norm"
+    occupied = {
+        name for node in graph.graph.node for name in (*node.input, *node.output)
+    } | {value.name for value in graph.graph.initializer}
+    while any(name.startswith(prefix) for name in occupied):
+        prefix += "_"
+    axes = prefix + "_axes"
+    if opset >= 18:
+        graph.graph.initializer.append(
+            numpy_helper.from_array(np.array([-1], dtype=np.int64), axes)
+        )
+    nodes = []
+    rewritten = 0
+    for node in graph.graph.node:
+        if node.op_type != "LayerNormalization":
+            nodes.append(node)
+            continue
+        attrs = {value.name: helper.get_attribute_value(value) for value in node.attribute}
+        if attrs.get("axis", -1) != -1 or len(node.output) != 1 or len(node.input) not in {2, 3}:
+            raise ValueError("GPT layer norm stabilization requires one last-axis output")
+        stem = f"{prefix}_{rewritten}"
+        rewritten += 1
+        x, scale = node.input[:2]
+        epsilon = stem + "_epsilon"
+        graph.graph.initializer.append(numpy_helper.from_array(
+            np.array(attrs.get("epsilon", 1e-5), dtype=np.float32), epsilon
+        ))
+        mean, centered, square, variance, adjusted, std, inverse, normalized, scaled = (
+            stem + "_" + name for name in
+            ("mean", "centered", "square", "variance", "adjusted", "std", "inverse", "normalized", "scaled")
+        )
+        def reduce_mean(value, output):
+            return helper.make_node(
+                "ReduceMean", [value, axes] if opset >= 18 else [value], [output],
+                **({"keepdims": 1} if opset >= 18 else {"axes": [-1], "keepdims": 1}),
+            )
+        nodes.extend((
+            reduce_mean(x, mean),
+            helper.make_node("Sub", [x, mean], [centered]),
+            helper.make_node("Mul", [centered, centered], [square]),
+            reduce_mean(square, variance),
+            helper.make_node("Add", [variance, epsilon], [adjusted]),
+            helper.make_node("Sqrt", [adjusted], [std]),
+            helper.make_node("Reciprocal", [std], [inverse]),
+            helper.make_node("Mul", [centered, inverse], [normalized]),
+            helper.make_node("Mul", [normalized, scale], [scaled]),
+            helper.make_node("Add", [scaled, node.input[2]], list(node.output))
+            if len(node.input) == 3 and node.input[2]
+            else helper.make_node("Identity", [scaled], list(node.output)),
+        ))
+    del graph.graph.node[:]
+    graph.graph.node.extend(nodes)
+    property_value = graph.metadata_props.add()
+    property_value.key = "aniflive.layer_norm"
+    property_value.value = json.dumps({
+        "contract": "centered-variance-fp32-v1", "nodes": rewritten,
+        "native_pytorch_reference": "unchanged",
+    }, sort_keys=True)
+    onnx.checker.check_model(graph)
+    temporary = path.with_suffix(".stable.tmp.onnx")
+    try:
+        onnx.save(graph, temporary)
+        os.replace(temporary, path)
+    finally:
+        if temporary.exists():
+            temporary.unlink()
+    return rewritten
+
+
+GPT_VALIDATION_SEEDS = (1234, 0, 1, 7, 42, 99, 2026, 31415)
+
+
+def gpt_validation_inputs(seed):
+    """Model-independent, reproducible encoder probes."""
+    generator = torch.Generator(device="cpu").manual_seed(seed)
+    return {
+        "phoneme_ids": torch.randint(0, 512, (1, 50), generator=generator),
+        "prompts": torch.randint(0, 1024, (1, 20), generator=generator),
+        "bert_feature": torch.randn(1, 1024, 50, generator=generator),
+    }
+
+
 def export_onnx(args):
+    torch.set_num_threads(4)
+    torch.manual_seed(1234)
     torch.set_grad_enabled(False)
     device = "cpu" # Export on CPU usually safer for dynamic axes
 
@@ -392,9 +444,6 @@ def export_onnx(args):
     ssl_model.eval()
     
     # BERT
-    tokenizer = AutoTokenizer.from_pretrained(
-        args.bert_path, local_files_only=True, trust_remote_code=False
-    )
     bert_model = AutoModelForMaskedLM.from_pretrained(
         args.bert_path, local_files_only=True, trust_remote_code=False
     )
@@ -418,7 +467,8 @@ def export_onnx(args):
     
     # SoVITS
     try:
-        dict_s2 = load_sovits_new(args.sovits_path, weights_only=True)
+        with torch.serialization.safe_globals(SAFE_LEGACY_HPARAMS):
+            dict_s2 = load_sovits_new(args.sovits_path, weights_only=True)
     except Exception as error:
         if not args.allow_unsafe_pickle:
             raise RuntimeError(
@@ -438,10 +488,11 @@ def export_onnx(args):
     
     hps_obj = AttrDict(hps)
     hps_obj.model.semantic_frame_rate = "25hz"
-    _, model_version, _ = get_sovits_version_from_path_fast(
-        args.sovits_path,
-        weights_only=not args.allow_unsafe_pickle,
-    )
+    with torch.serialization.safe_globals(SAFE_LEGACY_HPARAMS):
+        _, model_version, _ = get_sovits_version_from_path_fast(
+            args.sovits_path,
+            weights_only=not args.allow_unsafe_pickle,
+        )
     hps_obj.model.version = model_version
     
     # Update the original hps dict as well to ensure SynthesizerTrn gets the right values
@@ -582,12 +633,12 @@ def export_onnx(args):
         )
 
     print("Exporting GPT Encoder...")
-    gpt_enc = GPTEncoder(t2s_model, max_len=args.max_len)
+    gpt_enc = GPTEncoder(t2s_model, max_len=args.max_len, full_logits=True)
     # Dummies
-    phoneme_ids = torch.randint(0, 512, (1, 50), dtype=torch.long)
-    phoneme_ids_len = torch.tensor([50], dtype=torch.long)
-    prompts = torch.randint(0, 1024, (1, 20), dtype=torch.long)
-    bert_feature = torch.randn(1, 1024, 50)
+    trace_inputs = gpt_validation_inputs(GPT_VALIDATION_SEEDS[0])
+    phoneme_ids = trace_inputs["phoneme_ids"]
+    prompts = trace_inputs["prompts"]
+    bert_feature = trace_inputs["bert_feature"]
     
     dynamic_axes_gpt = {
         "phoneme_ids": {1: "text_len"},
@@ -604,18 +655,34 @@ def export_onnx(args):
         (phoneme_ids, prompts, bert_feature),
         f"{output_dir}/gpt_encoder.onnx",
         input_names=["phoneme_ids", "prompts", "bert_feature"],
-        output_names=["topk_values", "topk_indices", "k_cache", "v_cache", "x_len", "y_len"],
+        output_names=["topk_values", "topk_indices", "k_cache", "v_cache", "x_len", "y_len", "logits"],
         dynamic_axes=dynamic_axes_gpt,
         opset_version=20,
         dynamo=False
     )
-    
+
+    stabilize_gpt_layer_norm(f"{output_dir}/gpt_encoder.onnx")
+
+    if validator:
+        for probe_seed in GPT_VALIDATION_SEEDS:
+            if not validator.validate_model(
+                model_name="GPTEncoder",
+                onnx_path=f"{output_dir}/gpt_encoder.onnx",
+                pytorch_model=gpt_enc,
+                dummy_inputs=gpt_validation_inputs(probe_seed),
+                output_names=["topk_values", "topk_indices", "k_cache", "v_cache", "x_len", "y_len", "logits"],
+                rtol=1e-3,
+                atol=1e-5,
+                case_id=f"seed-{probe_seed}",
+            ):
+                raise RuntimeError("GPT encoder PyTorch to ONNX validation failed")
+
     print("Exporting GPT Step...")
     # Get outputs from encoder to feed to step
     with torch.no_grad():
-        topk_v_dummy, topk_i_dummy, k_cache, v_cache, x_len, y_len = gpt_enc(phoneme_ids, prompts, bert_feature)
+        topk_v_dummy, topk_i_dummy, k_cache, v_cache, x_len, y_len = gpt_enc(phoneme_ids, prompts, bert_feature)[:6]
     
-    gpt_step = GPTStep(t2s_model)
+    gpt_step = GPTStep(t2s_model, full_logits=True)
     idx = torch.tensor([0], dtype=torch.long)
     # samples input for step is indices [B, 1]
     samples = torch.randint(0, 1024, (1, 1), dtype=torch.long)
@@ -633,12 +700,38 @@ def export_onnx(args):
         (samples, k_cache, v_cache, x_len, y_len, idx),
         f"{output_dir}/gpt_step.onnx",
         input_names=["samples", "k_cache", "v_cache", "x_len", "y_len", "idx"],
-        output_names=["topk_values", "topk_indices", "k_cache_new", "v_cache_new"],
+        output_names=["topk_values", "topk_indices", "k_cache_new", "v_cache_new", "logits"],
         dynamic_axes=dynamic_axes_step,
         opset_version=20,
         dynamo=False
     )
-    
+
+    stabilize_gpt_layer_norm(f"{output_dir}/gpt_step.onnx")
+
+    if validator:
+        for probe_seed in GPT_VALIDATION_SEEDS:
+            probe = gpt_validation_inputs(probe_seed)
+            with torch.no_grad():
+                _, _, probe_k, probe_v, probe_x, probe_y = gpt_enc(*probe.values())[:6]
+            probe_sample = torch.randint(
+                0, 1024, (1, 1),
+                generator=torch.Generator(device="cpu").manual_seed(probe_seed),
+            )
+            if not validator.validate_model(
+                model_name="GPTStep",
+                onnx_path=f"{output_dir}/gpt_step.onnx",
+                pytorch_model=gpt_step,
+                dummy_inputs={
+                    "samples": probe_sample, "k_cache": probe_k, "v_cache": probe_v,
+                    "x_len": probe_x, "y_len": probe_y, "idx": idx,
+                },
+                output_names=["topk_values", "topk_indices", "k_cache_new", "v_cache_new", "logits"],
+                rtol=1e-3,
+                atol=1e-5,
+                case_id=f"seed-{probe_seed}",
+            ):
+                raise RuntimeError("GPT step PyTorch to ONNX validation failed")
+
     print("Exporting SoVITS...")
     sovits_wrapper = SoVITS(vq_model, model_version)
     # Dummies
@@ -677,6 +770,17 @@ def export_onnx(args):
         opset_version=20,
         dynamo=False
     )
+
+    if validator and not validator.validate_model(
+        model_name="SoVITS",
+        onnx_path=f"{output_dir}/sovits.onnx",
+        pytorch_model=sovits_wrapper,
+        dummy_inputs=dict(zip(input_names, args_sovits)),
+        output_names=["audio"],
+        rtol=1e-3,
+        atol=1e-5,
+    ):
+        raise RuntimeError("SoVITS PyTorch to ONNX validation failed")
 
     if "Pro" not in model_version:
         raise RuntimeError(
@@ -728,6 +832,28 @@ def export_onnx(args):
         opset_version=20,
         dynamo=False,
     )
+
+    if validator and not validator.validate_model(
+        model_name="SoVITSStreaming",
+        onnx_path=f"{output_dir}/sovits_stream.onnx",
+        pytorch_model=sovits_streaming_wrapper,
+        dummy_inputs={
+            "pred_semantic": pred_semantic,
+            "text_seq": text_seq,
+            "refer_spec": refer_spec,
+            "sv_emb": sv_emb,
+            "noise_scale": noise_scale,
+            "speed": speed,
+            "result_length": streaming_result_length,
+            "overlap_frames": streaming_overlap,
+            "overlap_enabled": streaming_overlap_enabled,
+            "acoustic_noise": streaming_acoustic_noise,
+        },
+        output_names=["audio", "latent", "latent_mask"],
+        rtol=1e-3,
+        atol=1e-5,
+    ):
+        raise RuntimeError("SoVITS streaming PyTorch to ONNX validation failed")
 
     # Export SpectrogramWrapper
     print("Exporting Spectrogram...")
@@ -783,7 +909,7 @@ def export_onnx(args):
         validator.validate_model(
             model_name="SVEmbedding",
             onnx_path=f"{output_dir}/sv_embedding.onnx",
-            pytorch_model=sv_wrapper,
+            pytorch_model=NativeSVEmbeddingReference(sv_model),
             dummy_inputs={"audio": dummy_wav_16k},
             output_names=["sv_embedding"],
             rtol=1e-3,
@@ -840,7 +966,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--stream_overlap_frames",
         type=int,
-        default=32,
+        default=12,
         help="Static latent overlap exported into the V2ProPlus streaming decoder",
     )
     parser.add_argument("--output_dir", default="onnx_export", help="Output directory for ONNX models")

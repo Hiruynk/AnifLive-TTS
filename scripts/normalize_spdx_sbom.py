@@ -92,11 +92,21 @@ def normalize_document(document: dict[str, Any]) -> dict[str, Any]:
         if isinstance(entry, dict) and isinstance(entry.get("licenseId"), str)
     }
 
-    usable_aliases = {
-        source: target
-        for source, target in LICENSE_ALIASES.items()
-        if source not in defined and target in defined
-    }
+    # Trivy may assign a hashed ID to an extracted license while retaining
+    # its original name. Reuse that existing record; never invent license text.
+    named = {}
+    for entry in extracted:
+        name, identifier = entry.get("name"), entry.get("licenseId")
+        if isinstance(name, str) and identifier in defined:
+            named.setdefault("LicenseRef-" + name, set()).add(identifier)
+    usable_aliases = {}
+    for source, target in LICENSE_ALIASES.items():
+        if source in defined:
+            continue
+        if target in defined:
+            usable_aliases[source] = target
+        elif len(named.get(target, ())) == 1:
+            usable_aliases[source] = next(iter(named[target]))
     _walk_and_rewrite(document, usable_aliases)
 
     missing = sorted(_used_license_refs(document) - defined)

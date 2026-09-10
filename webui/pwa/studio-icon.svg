@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title">
+  <title id="title">AnifLive-TTS Studio</title>
+  <rect width="512" height="512" rx="96" fill="#0b090d"/>
+  <path d="M82 256h52l30-95 48 190 44-238 47 277 43-184 31 98h53" fill="none" stroke="#f3edf5" stroke-width="28" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M82 400h348" fill="none" stroke="#a64f78" stroke-width="20" stroke-linecap="round"/>
+</svg>

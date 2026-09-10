@@ -424,6 +424,47 @@ def test_inspector_reads_official_v2proplus_tagged_header(tmp_path) -> None:
     assert inspect_checkpoint(checkpoint, kind="sovits").model_version == "gsv-v2proplus"
 
 
+def test_inspector_safely_allowlists_official_utils_hparams(
+    tmp_path, monkeypatch
+) -> None:
+    import sys
+    import types
+
+    from aniflive_tts.inspector import inspect_checkpoint
+
+    utils = types.ModuleType("utils")
+    hparams_type = type(
+        "HParams",
+        (),
+        {
+            "__module__": "utils",
+            "__init__": lambda self, **values: self.__dict__.update(values),
+        },
+    )
+    utils.HParams = hparams_type
+    monkeypatch.setitem(sys.modules, "utils", utils)
+    checkpoint = tmp_path / "official-output.pth"
+    torch.save(
+        {
+            "config": utils.HParams(
+                version="v2ProPlus",
+                train={"pretrained_s2G": "s2Gv2ProPlus.pth"},
+                model={"gin_channels": 1024},
+            ),
+            "weight": {
+                "enc_p.ssl_proj.weight": torch.zeros(192, 768, 1),
+                "enc_p.text_embedding.weight": torch.zeros(732, 192),
+                "sv_emb.bias": torch.zeros(1024),
+            },
+        },
+        checkpoint,
+    )
+
+    result = inspect_checkpoint(checkpoint, kind="sovits")
+
+    assert result.model_version == "gsv-v2proplus"
+
+
 def test_safe_punctuation_segments_preserve_semantic_tokens() -> None:
     from aniflive_tts.service import _cut_segments
 

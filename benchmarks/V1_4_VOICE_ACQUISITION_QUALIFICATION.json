@@ -1,0 +1,66 @@
+{
+  "schema": "aniflive-voice-acquisition-public-summary-v1",
+  "date": "2026-09-01",
+  "decision": "ACQUISITION-GO-HUMAN-REVIEW-REQUIRED",
+  "environment": {
+    "execution": "linux-docker-offline",
+    "network_required": false,
+    "gpu": "NVIDIA GeForce RTX 5070 Ti",
+    "cuda": "12.8",
+    "tensorrt": "11.2.1.2",
+    "neural_fallback": false
+  },
+  "input": {
+    "source_audio_seconds": 1862.58,
+    "target_reference_seconds": 35.98,
+    "reference_prototype_count": 7
+  },
+  "routing": {
+    "records": 363,
+    "clean": 238,
+    "salvage": 22,
+    "review": 80,
+    "rejected": 23,
+    "speaker_backend": "workstation-eres2netv2-tensorrt11",
+    "vad_backend": "fsmn-vad-funasr-1.4.11-cuda-v1",
+    "diarization_backend": "sortformer-v2-nemo-speech-cpp-cuda-offline",
+    "primary_diarization_onset": 0.4,
+    "sensitive_diarization_onset": 0.3,
+    "minimum_clean_snr_db": 20.0
+  },
+  "labelled_fixture": {
+    "passed": true,
+    "overlap_containment_recall": 1.0,
+    "contamination_auto_clean_rate": 0.0,
+    "non_target_auto_clean_count": 0,
+    "target_auto_reject_count": 0,
+    "mixed_truth_count": 26,
+    "mixed_truth_quarantined_count": 26,
+    "target_processed_count": 0
+  },
+  "final": {
+    "records": 363,
+    "clean": 238,
+    "salvage": 0,
+    "review": 102,
+    "rejected": 23,
+    "transcription_backend": "sensevoice-small-cuda-v1",
+    "nonempty_transcripts": 340,
+    "status": "waiting_for_review"
+  },
+  "gates": {
+    "automatic_voice_acquisition": true,
+    "human_audio_review": false,
+    "human_transcript_review": false,
+    "expression_annotation": false,
+    "dataset_freeze": false,
+    "training": false,
+    "tensorrt_engines": false,
+    "package_qualification": false
+  },
+  "notes": [
+    "The labelled fixture qualifies this routing policy on the recorded workload; it is not a universal speaker-threshold claim.",
+    "Review and salvage candidates remain quarantined until a human decision.",
+    "Private source audio, voice assets, generated clips and raw reports are excluded from this summary and from release tracking."
+  ]
+}

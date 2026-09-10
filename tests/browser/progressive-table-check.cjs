@@ -1,0 +1,60 @@
+
+const {chromium}=require("playwright"),fs=require("fs"),assert=require("node:assert/strict");
+const base=process.env.STUDIO_QA_BASE||"http://host.docker.internal:9893";
+(async()=>{
+ const browser=await chromium.launch({headless:true});
+ const page=await browser.newPage({viewport:{width:1440,height:900},locale:"en-US",reducedMotion:"reduce"});
+ const errors=[];page.on("pageerror",e=>errors.push(e.message));
+ let records=Array.from({length:1000},(_,i)=>({id:"artifact_ui_"+i,name:"UI engine "+String(i).padStart(4,"0")+" — 長檔名完整保留",type:"engine",status:"ready",promoted:false,parent_artifact_ids:[],updated_at:"2026-09-09T00:00:00Z",metadata:{}}));
+ await page.route("**/api/workstation/artifacts",r=>r.fulfill({json:{data:records}}));
+ await page.route("**/api/workstation/artifacts/*",r=>r.fulfill({json:{artifact:records.find(a=>r.request().url().endsWith(a.id)),lineage:{nodes:[]},qualifications:[]}}));
+ const response=await page.goto(base+"/",{waitUntil:"networkidle"});assert.equal(response.headers()["x-aniflive-ui-fixture"],"synthetic");
+ assert.equal(await page.locator("#modelRows tr:not(:has(.empty-cell))").count(),0,"Inactive model table is not eagerly constructed");
+ await page.locator('.rail [data-view="models"]').click();
+ await page.waitForFunction(()=>document.querySelector("#modelRows").dataset.renderedRows==="40");
+ assert.match(await page.locator("#modelCount").innerText(),/1000/);
+ const surface=page.locator("#modelRows").locator("..").locator("..");
+ const widths=await page.locator(".viewport").evaluate(e=>({w:e.clientWidth,s:e.scrollWidth}));assert.ok(widths.s<=widths.w+1);
+ await page.locator("#modelRows tr:not(.ux-lazy-sentinel)").nth(5).locator("button").click();
+ await page.locator("#artifactInspectorTitle").filter({hasText:"UI engine 0005"}).waitFor();
+ await page.locator("#modelRows tr:not(.ux-lazy-sentinel)").nth(5).locator("button").focus();
+ await page.waitForTimeout(5600);
+ assert.equal(await page.evaluate(()=>document.activeElement.closest("tr")?.rowIndex),6,"Polling retains row focus");
+ let steps=0;
+ while(Number(await page.locator("#modelRows").getAttribute("data-rendered-rows"))<1000){
+  const before=Number(await page.locator("#modelRows").getAttribute("data-rendered-rows"));
+  await surface.evaluate(e=>e.scrollTop=e.scrollHeight);
+  await page.waitForFunction(n=>Number(document.querySelector("#modelRows").dataset.renderedRows)>n,before);
+  steps++;assert.ok(steps<30);
+ }
+ assert.equal(await page.locator("#modelRows tr").count(),1000);
+ assert.equal(new Set(await page.locator("#modelRows tr td:first-child").allTextContents()).size,1000);
+ await page.locator('.rail [data-view="engines"]').click();
+ await page.locator("#engineArtifactRows").locator("..").locator("..").scrollIntoViewIfNeeded();
+ await page.waitForFunction(()=>document.querySelector("#engineArtifactRows").dataset.renderedRows==="40");
+ await page.locator("#engineArtifactRows .ux-lazy-sentinel button").focus();await page.keyboard.press("Enter");
+ await page.waitForFunction(()=>Number(document.querySelector("#engineArtifactRows").dataset.renderedRows)>=80);
+ const progressive={total:1000,initialRows:40,scrollBatches:steps,allRowsReachable:true,keyboardMore:true,pollingFocus:true};
+
+ const frozen=await browser.newPage({viewport:{width:1280,height:800},locale:"en-US",reducedMotion:"reduce"});
+ frozen.on("pageerror",e=>errors.push(e.message));
+ const project={id:"dataset_00000000-0000-4000-8000-000000000011",kind:"dataset",name:"Frozen UI fixture",status:"ready",config:{source:"/tmp/fixture.wav"},updated_at:"2026-09-09T00:00:00Z"};
+ let automaticImports=0,reads=0;
+ await frozen.route("**/api/workstation/projects",r=>r.fulfill({json:{data:[project]}}));
+ await frozen.route("**/api/workstation/jobs",r=>r.fulfill({json:{data:[{id:"job_ui_completed",type:"dataset.process",project_id:project.id,status:"succeeded",progress:1,parameters:{},depends_on:[]}]}}));
+ await frozen.route("**/api/workstation/datasets/"+project.id+"/state",r=>{reads++;return r.fulfill({json:{frozen:true}})});
+ await frozen.route("**/api/workstation/datasets/"+project.id+"/items",r=>r.fulfill({json:{items:[]}}));
+ await frozen.route("**/api/workstation/datasets/"+project.id+"/import-**",r=>{automaticImports++;return r.fulfill({status:409,json:{error:"A frozen dataset project is immutable"}})});
+ await frozen.goto(base+"/#datasets",{waitUntil:"networkidle"});
+ await frozen.waitForTimeout(5700);
+ await frozen.locator('.rail [data-view="jobs"]').click();
+ await frozen.locator('.rail [data-view="datasets"]').click();
+ await frozen.waitForTimeout(300);
+ assert.ok(reads>1);assert.equal(automaticImports,0);
+ assert.equal(await frozen.locator("#toast.show").count(),0);
+ assert.equal(await frozen.locator("#datasetFreezeButton").isDisabled(),true);
+ assert.deepEqual(errors,[]);
+ const result={progressive,frozen:{stateReads:reads,automaticImports,recurringToast:false},errors};
+ fs.writeFileSync("/qa/progressive-table-results.json",JSON.stringify(result,null,2));console.log(JSON.stringify(result));
+ await browser.close();
+})().catch(e=>{console.error(e);process.exit(1)});
