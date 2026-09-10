@@ -238,13 +238,6 @@ CUDA/TensorRT 负责九个模型的执行、GPU 采样与缓冲区复用。每�
 
 ## 快速开始
 
-v1.4 Studio 也可通过 `run_studio_docker.bat` 启动，首次运行会构建 Docker 镜像，
-工作站地址为 `http://127.0.0.1:9891/`，不需要本地 Python 环境。
-模型包放在 `data/models/<model-id>`（也支持原有的 `data/models/active`），共享资源放在 `data/shared`。
-Studio 会将完成验收的训练成果安装到模型目录；加入模型后若语音服务仍未上线，
-再次运行同一启动器即可，已有数据会保留。
-`run_studio_docker.bat cu126` 可选用 CUDA 12.6，但尚未在本次验收 GPU 上验证该运行环境。
-
 已有 GPT-SoVITS 声音克隆模型的用户，可直接将 GPT／SoVITS 模型检查点与参考音频转换为 AnifLive-TTS 模型包。
 
 ### 1. 安装本地工具

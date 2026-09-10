@@ -242,16 +242,6 @@ See the [Studio guide](docs/ANIFLIVE_TTS_STUDIO_GUIDE.md) for the complete workf
 
 ## Quick Start
 
-The v1.4 Studio can also be started with `run_studio_docker.bat`.
-It builds the Docker images on first launch and opens the workstation at
-`http://127.0.0.1:9891/`; no host Python environment is required. Put the model
-package in `data/models/<model-id>` (or the existing `data/models/active`) and
-the shared assets in `data/shared`. Studio installs qualified training outputs
-into the model registry. If the speech service remains offline after adding a
-model, rerun the same launcher; existing data is retained.
-Use `run_studio_docker.bat cu126` to select CUDA 12.6. That runtime has not
-been verified on the current acceptance GPU.
-
 Users with an existing GPT-SoVITS voice-cloning model can convert its GPT/SoVITS checkpoints and reference audio directly into an AnifLive-TTS model package.
 
 ### 1. Install the local toolchain

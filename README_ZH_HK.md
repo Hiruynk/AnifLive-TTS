@@ -238,13 +238,6 @@ Python 負責 API、五語文字處理、模型封裝、轉換工具與 GPT AR �
 
 ## 快速開始
 
-v1.4 Studio 亦可透過 `run_studio_docker.bat` 啟動，首次執行會建立 Docker 映像，
-工作站位址為 `http://127.0.0.1:9891/`，不需要本機 Python 環境。
-模型套件放在 `data/models/<model-id>`（亦支援原有的 `data/models/active`），共用資源放在 `data/shared`。
-Studio 會將完成驗收的訓練成果安裝到模型目錄；加入模型後若語音服務仍未上線，
-再次執行同一啟動器即可，既有資料會保留。
-`run_studio_docker.bat cu126` 可選用 CUDA 12.6，但尚未在本次驗收 GPU 上驗證該執行環境。
-
 已有 GPT-SoVITS 聲音複製模型的使用者，可直接將 GPT／SoVITS 模型檢查點與參考音訊轉換為 AnifLive-TTS 模型套件。
 
 ### 1. 安裝本機工具
