@@ -39,7 +39,7 @@ v1 首发完整支持 V2ProPlus；未来版本将沿用相同 API 与模型封�
 
 https://github.com/user-attachments/assets/0be5a03d-94a9-4d33-b05f-6bae6fb3cc40
 
-演示中的本地 WebUI 已包含在 v1.3 中；API 就绪后运行 `run_webui.bat` 即可启动。
+演示中的本地 WebUI 已包含在 v1.4 中；API 就绪后运行 `run_webui.bat` 即可启动。
 
 ## 实测性能
 
@@ -47,7 +47,7 @@ https://github.com/user-attachments/assets/0be5a03d-94a9-4d33-b05f-6bae6fb3cc40
 > **环境：** RTX 5070 Ti 16 GB / NVIDIA 驱动程序 596.36 / CUDA 运行环境 12.8 / PyTorch
 > 2.7.0+cu128 / TensorRT 11.2.1.2 / FP16
 
-v1.3 正式测试只采用外部 Roxy V2ProPlus 音色包，并固定测试文本、随机种子和采样参数。共执行 10 轮；每轮先预热 10 次，再测试 100 次完整 WAV、100 次新连接流式输出和 100 次持久连接流式输出。主值取 10 轮统计值的中位数，范围反映各轮之间的波动。Miku 存在仍在单独调查的模型特定流式现象，因此不计入性能主数据。
+以下 v1.4 性能参考沿用历史 Roxy 实测数据。该次正式测试只采用外部 Roxy V2ProPlus 音色包，并固定测试文本、随机种子和采样参数。共执行 10 轮；每轮先预热 10 次，再测试 100 次完整 WAV、100 次新连接流式输出和 100 次持久连接流式输出。主值取 10 轮统计值的中位数，范围反映各轮之间的波动。Miku 存在仍在单独调查的模型特定流式现象，因此不计入性能主数据。
 
 正式测试均为单并发。新连接数据会为每个请求建立本地 HTTP/1.1 连接；持久连接数据则在每轮复用一条已单独预热的连接。首包延迟从发送请求起计算，直到客户端读取服务器发出的第一个 PCM 音频块。可听 TTFA 取最早有效 10 ms 均方根分析帧内，第一个超过 -45 dBFS 的 PCM 采样点，并受该音频块的实际到达时间约束；不包含播放设备延迟。
 
@@ -104,7 +104,7 @@ docker exec aniflive-tts /app/scripts/entrypoint.sh benchmark `
 
 | 项目／系统 | 指标 | 延迟 | 测试条件 | 来源 |
 |---|---|---:|---|---|
-| **AnifLive-TTS v1.3** | **可听 TTFA P50** | **74.578 ms** 🚀 | **RTX 5070 Ti；HTTP/1.1 持久连接；10 轮 Roxy 测试** | **[本机实测](benchmarks/README_BENCHMARK_SUMMARY.json)** |
+| **AnifLive-TTS v1.4 参考基准** | **可听 TTFA P50** | **74.578 ms** 🚀 | **RTX 5070 Ti；HTTP/1.1 持久连接；10 轮 Roxy 测试** | **[本机实测](benchmarks/README_BENCHMARK_SUMMARY.json)** |
 | GPT-SoVITS C++ TRT 流式 | 首包 | 460 ms | RTX 2080 Ti 22 GB | [GPT-SoVITS C++](https://github.com/GPT-SoVITS-Devel/GPT-SoVITS-cpp#-performance-benchmarks) |
 | GPT-SoVITS Minimal Inference ONNX 流式 | 首个 token | 1,000 ms | RTX 2080 Ti 22 GB；FP16 | [Minimal Inference](https://github.com/GPT-SoVITS-Devel/GPT-SoVITS_minimal_inference#-performance-benchmarks) |
 | GPT-SoVITS Minimal Inference TRT 固定尺寸优化版 | 首个语义标记 | 2,022 ms | RTX 2080 Ti 22 GB；FP16 | [Minimal Inference](https://github.com/GPT-SoVITS-Devel/GPT-SoVITS_minimal_inference#-performance-benchmarks) |
@@ -115,7 +115,7 @@ docker exec aniflive-tts /app/scripts/entrypoint.sh benchmark `
 |---|---:|---|---|---|
 | GPT-SoVITS V2ProPlus | 0.014 | PyTorch 并行推理 | RTX 4090；约 4 分钟长文本 | [RVC-Boss/GPT-SoVITS](https://github.com/RVC-Boss/GPT-SoVITS#features) |
 | GPT-SoVITS V2ProPlus | 0.028 | PyTorch 并行推理 | RTX 4060 Ti | [RVC-Boss/GPT-SoVITS](https://github.com/RVC-Boss/GPT-SoVITS#features) |
-| **AnifLive-TTS v1.3** | **0.087680** | **TensorRT 11 FP16** | **RTX 5070 Ti；10 轮 Roxy 测试** | **[本机实测](benchmarks/README_BENCHMARK_SUMMARY.json)** |
+| **AnifLive-TTS v1.4 参考基准** | **0.087680** | **TensorRT 11 FP16** | **RTX 5070 Ti；10 轮 Roxy 测试** | **[本机实测](benchmarks/README_BENCHMARK_SUMMARY.json)** |
 | GPT-SoVITS C++ TRT | 0.1020 | TensorRT | RTX 2080 Ti 22 GB | [GPT-SoVITS C++](https://github.com/GPT-SoVITS-Devel/GPT-SoVITS-cpp#-performance-benchmarks) |
 | GPT-SoVITS Minimal Inference TRT 固定尺寸优化版 | 0.2096 | TensorRT；针对固定尺寸优化 | RTX 2080 Ti 22 GB；FP16 | [Minimal Inference](https://github.com/GPT-SoVITS-Devel/GPT-SoVITS_minimal_inference#-performance-benchmarks) |
 
@@ -127,7 +127,7 @@ docker exec aniflive-tts /app/scripts/entrypoint.sh benchmark `
 
 | 系统 | 指标 | 延迟 | 统计口径 | 测试条件 | 来源 |
 |---|---|---:|---|---|---|
-| **AnifLive-TTS v1.3** | **可听 TTFA** | **74.578 ms** 🚀 | **P50** | **RTX 5070 Ti；HTTP/1.1 持久连接；10 轮 Roxy 测试** | **[本机实测](benchmarks/README_BENCHMARK_SUMMARY.json)** |
+| **AnifLive-TTS v1.4 参考基准** | **可听 TTFA** | **74.578 ms** 🚀 | **P50** | **RTX 5070 Ti；HTTP/1.1 持久连接；10 轮 Roxy 测试** | **[本机实测](benchmarks/README_BENCHMARK_SUMMARY.json)** |
 | Qwen3-TTS-12Hz-0.6B | 首包延迟 | 97 ms | 并发数 1 | 单加速器；320 ms 语音包 | [Qwen3-TTS 技术报告](https://arxiv.org/abs/2601.15621) |
 | Fish Audio S2 | TTFA | 约 100 ms | 项目发布值 | H200；单卡 | [Fish Audio S2](https://github.com/fishaudio/fish-speech#performance) |
 | Chatterbox-Flash（D=32，α=0.75） | TTFP | 103 ms | 单并发；50 句 | H100 | [Chatterbox-Flash 论文](https://arxiv.org/abs/2605.30748) |
@@ -141,7 +141,7 @@ IndexTTS 2.0／2.5 和 VoxCPM2 未提供同口径的首音频延迟数值。
 | 系统 | RTF | 推理后端／模型 | 测试条件 | 来源 |
 |---|---:|---|---|---|
 | Chatterbox-Flash（D=32，α=0.75） | 0.076 | 分块扩散 | H100；单并发；50 句 | [Chatterbox-Flash 论文](https://arxiv.org/abs/2605.30748) |
-| **AnifLive-TTS v1.3** | **0.087680** | **TensorRT 11 FP16** | **RTX 5070 Ti；10 轮 Roxy 测试** | **[本机实测](benchmarks/README_BENCHMARK_SUMMARY.json)** |
+| **AnifLive-TTS v1.4 参考基准** | **0.087680** | **TensorRT 11 FP16** | **RTX 5070 Ti；10 轮 Roxy 测试** | **[本机实测](benchmarks/README_BENCHMARK_SUMMARY.json)** |
 | Chatterbox-Flash（默认 D=16，α=0.5） | 0.107 | 分块扩散 | H100；单并发；50 句 | [Chatterbox-Flash 论文](https://arxiv.org/abs/2605.30748) |
 | CosyVoice3 | 0.1091 | TRT-LLM；离线批次 1 | L20 | [QwenAudio/CosyVoice](https://github.com/QwenAudio/CosyVoice/blob/main/runtime/triton_trtllm/README.Cosyvoice3.md#benchmark-with-offline-inference-mode) |
 | CosyVoice2 | 0.1228 | TRT-LLM | L20；单并发；客户端／服务器 | [QwenAudio/CosyVoice](https://github.com/QwenAudio/CosyVoice/blob/main/runtime/triton_trtllm/README.Cosyvoice2.DiT.md#benchmark-with-client-server-mode) |
@@ -156,7 +156,7 @@ AnifLive-TTS 会预先封装音色配置并加载参考音频特征，适合长�
 ## 音质一致性验证
 
 > [!NOTE]
-> **音质验收口径**　每段受控情感流式输出都会在相同随机种子和设置下，与其完整 WAV 输出比较；中性完整 WAV、流式 PCM 和语义输出也会对照不可变的 v1.2 基准。这些客观检查不能替代主观试听。
+> **音质验收口径**　每段受控情感流式输出都会在相同随机种子和设置下，与其完整 WAV 输出比较；中性完整 WAV、流式 PCM 和语义输出也会对照不可变的 历史基准。这些客观检查不能替代主观试听。
 
 | 音色包 | 日语情感测试 | 最低 Log-mel 相似度 | 最低说话者相似度 | 最大时长差 | 缓冲中断 |
 |---|---:|---:|---:|---:|---:|
@@ -166,7 +166,7 @@ AnifLive-TTS 会预先封装音色配置并加载参考音频特征，适合长�
 以上项目只描述本地私有验证 overlay；相关情感参考音频、逐字稿和角色媒体不会
 包含在公开源代码、镜像或发行包中。
 
-五语言长短句验收中，每个音色均通过 20/20 项。受控情感的最低 Log-mel／说话者相似度，Miku 为 `0.999660`／`0.988638`，Roxy 为 `0.998827`／`0.993495`。两个音色在 `zh`、`yue`、`en`、`ja`、`ko` 的中性完整 WAV、流式 PCM、完整语义和流式语义均与 v1.2 完全一致。
+五语言长短句验收中，每个音色均通过 20/20 项。受控情感的最低 Log-mel／说话者相似度，Miku 为 `0.999660`／`0.988638`，Roxy 为 `0.998827`／`0.993495`。两个音色在 `zh`、`yue`、`en`、`ja`、`ko` 的中性完整 WAV、流式 PCM、完整语义和流式语义均与 历史基准 完全一致。
 
 六组短句、长句和混合情感盲听中，五组判定无明显差异，一组偏好 Roxy 完整输出，没有发现音频瑕疵。硬性阈值保持为 Log-mel 相似度 `>=0.99`、说话者相似度 `>=0.98` 和时长差 `<=3%`。
 
@@ -177,13 +177,13 @@ AnifLive-TTS 会预先封装音色配置并加载参考音频特征，适合长�
 - 采样 CUDA Graph 捕获 softmax、multinomial 和 gather，并保留随机数生成语义。
 - 只有第一个文本分段使用既有的 9+8 语义标记预览；后续分段沿用原生完整上下文补充路径。
 - 每 2 步批量检查 EOS，并将运行环境的热状态保留 25 秒。
-- 情感参考数据在模型启用时完成准备并常驻 GPU；中性请求与 v1.2 输出完全一致。
+- 情感参考数据在模型启用时完成准备并常驻 GPU；中性请求与 历史基准 输出完全一致。
 - 情感选择和转场设置由模型包决定，运行环境不会根据 Miku 或 Roxy 名称分支。
 - 使用 HTTP/1.1 持续连接并在启动时预热。
 
 完整 GPT 步骤 CUDA Graph 目前受 TensorRT 图捕获兼容性限制，详见[性能工程记录](docs/PERFORMANCE_ENGINEERING.md)。
 
-## v1.2 评估过的架构
+## v1.4 沿用的架构决定
 
 | 候选方案 | 结果 | 决定 |
 |---|---|---|
@@ -194,9 +194,11 @@ AnifLive-TTS 会预先封装音色配置并加载参考音频特征，适合长�
 
 AnifLive-TTS 不会只凭理论计算量采用新架构。实验语义后端必须在不牺牲
 语音音质的前提下优于正式运行基线，才会进入正式运行路径。详见
-[v1.2 语义架构实验记录](docs/research/v1.2-semantic-experiments.md)。
+[历史语义架构实验记录](docs/research/architecture-history.md#semantic-backends)。
 
-## v1.3 评估过的架构
+## v1.4 评估过的架构
+
+Studio 新增数据集导入与整理、转录文本审核、目标说话人提取、训练、检查点选择、TensorRT 转换、评估及合格模型安装；工作进程与推理进程分开运行。下表原有架构决定沿用历史实验结果，Studio 项目则是 v1.4 的新增功能。
 
 | 候选方案 | 结果 | 决定 |
 |---|---|---|
@@ -208,13 +210,16 @@ AnifLive-TTS 不会只凭理论计算量采用新架构。实验语义后端必�
 | 检索式推测解码 | 离线 oracle 没有任何候选同时通过全部前 17 个标记覆盖门槛 | 不采用 |
 | FastStart 蒸馏／剪枝 Transformer | 未通过续写和上下文补充的可靠性门槛 | 不采用 |
 | D16 块扩散 | 已评估的低秩适配方案未通过语义质量门槛 | 不采用 |
+| Studio 数据集准备与审核 | 功能流程已验证 | v1.4 新增 |
+| Studio 训练、检查点续训与 GPU 交接 | 真实训练及恢复已验证 | v1.4 新增 |
+| Studio TensorRT 转换、评估与模型安装 | 模型包及人工音频验收已验证 | v1.4 新增 |
 
-以上结论只适用于本次 AnifLive-TTS V2ProPlus 实现和工作负载，并非否定其他实现方式。详见 [v1.3 延迟实验记录](docs/research/v1.3-latency-experiments.md)和[情感控制设计记录](docs/research/v1.3-reference-expression-design.md)。
+以上结论只适用于本次 AnifLive-TTS V2ProPlus 实现和工作负载，并非否定其他实现方式。详见 [历史延迟实验记录](docs/research/architecture-history.md#latency)和[情感控制设计记录](docs/research/architecture-history.md#expression)。
 
 ## 架构
 
 AnifLive-TTS 是 AnifEngine-Voice 的第一方 FP16 TensorRT 11 语音推理平台；
-v1 首个完成验证的声学后端是 `gsv-v2proplus`，后续将沿用相同 API 与模型封装格式，扩展至更多 GPT-SoVITS 模型世代。
+v1.4 首个完成验证的声学后端是 `gsv-v2proplus`，后续将沿用相同 API 与模型封装格式，扩展至更多 GPT-SoVITS 模型世代。
 Python 负责 API、五语文本处理、模型封装、转换工具和 GPT AR 调度；
 CUDA/TensorRT 负责九个模型的执行、GPU 采样与缓冲区复用。每个进程只会预先加载一个模型。
 
@@ -225,6 +230,11 @@ CUDA/TensorRT 负责九个模型的执行、GPU 采样与缓冲区复用。每�
 - 模型选择：`POST /v1/models/activate` 会先卸载当前模型包，再加载一个兼容的本地模型包。
 - 取消流式输出：`POST /v1/audio/cancel` 会在下一个请求前释放已放弃的流式请求。
 - `stream=false` 返回单声道 PCM16 WAV；`stream=true` 返回 PCM16 音频块。
+- Studio：包含数据集、目标说话人提取、训练、转换、评估、模型及任务管理的完整工作站；通过 `run_studio_docker.bat` 启动，地址为 `http://127.0.0.1:9891/`。
+- WebUI：并存的轻量界面，提供模型选择、情感控制及语音播放；通过 `run_webui.bat` 启动，地址为 `http://127.0.0.1:9890/`。
+- Studio 任务支持进度显示、训练轮次边界暂停／续训及 GPU 交接。
+
+完整操作流程请参阅 [Studio 使用手册](docs/ANIFLIVE_TTS_STUDIO_GUIDE.zh-CN.md)，检查点与验收细节请参阅[训练管线说明](docs/V1_4_TRAINING_PIPELINE.md)。
 
 ## 快速开始
 
@@ -407,11 +417,14 @@ curl.exe -X POST "http://127.0.0.1:9882/v1/audio/speech" `
 
 ## 路线图
 
-**v1.3**
+**v1.4**
 
 - [x] V2ProPlus 模型转换与九段 TensorRT 11 推理
 - [x] 五语言 API、完整 WAV、低延迟 PCM 流式输出和 Docker 发行
 - [x] 模型包情感配置、分段演绎和本地 WebUI
+- [x] Studio 数据集准备、审核与目标说话人提取
+- [x] Studio 训练、检查点续训、TensorRT 转换及评估
+- [x] Studio 模型安装、任务管理与 GPU 交接
 
 **下一阶段：神经情感适配器**
 
@@ -426,7 +439,7 @@ curl.exe -X POST "http://127.0.0.1:9882/v1/audio/speech" `
 > [!WARNING]
 > **部署前请注意**　`cu128` 已完成本机 GPU 端到端验收；`cu126` 兼容配置目前仅完成源代码及构建规则验证，必须等待镜像通过发布流程并在兼容主机完成验收后，才可宣称 GPU 端到端支持。
 
-v1 当前支持 V2ProPlus；其他 GPT-SoVITS 版本仍在路线图中。RTX 50 系列／Blackwell 请使用 `cu128`；`cu126` 尚未在 RTX 5070 Ti 通过端到端 GPU 验证，详见[部署指南](docs/DEPLOYMENT_ZH.md)。
+v1.4 当前支持 V2ProPlus；其他 GPT-SoVITS 版本仍在路线图中。RTX 50 系列／Blackwell 请使用 `cu128`；`cu126` 尚未在 RTX 5070 Ti 通过端到端 GPU 验证，详见[部署指南](docs/DEPLOYMENT_ZH.md)。
 
 ## 文档与许可证
 

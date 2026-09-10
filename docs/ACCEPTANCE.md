@@ -21,7 +21,6 @@
 | Blind listening | Six pairs: five no meaningful difference, one Roxy complete-output preference, zero artifacts |
 | Model switching | One active package; previous model unloaded before replacement loads |
 | WebUI | Model switching, expression resolution, streaming playback, cancellation, and three interface languages passed |
-| Public WebUI privacy | No login page, account, password, session credential, or credential storage |
 | Offline container | Existing local image and persistent host data; no runtime model or dependency download |
 
 The canonical machine-readable performance report is

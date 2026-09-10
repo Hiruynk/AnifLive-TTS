@@ -10,30 +10,20 @@ the V2ProPlus FP16 TensorRT 11 inference path.
 - Adds dataset preparation, review, training, checkpoint selection, conversion,
   evaluation and qualified model installation in Studio.
 - Uses dataset-duration training recommendations and human listening to guide
-  checkpoint selection; dataset length alone does not guarantee voice quality.
+  checkpoint selection.
 - Supports epoch-boundary pause, real checkpoint continuation and managed GPU
   handoff between training/evaluation workers and inference.
 - Stores semantic sampling with each newly exported model package and preserves
   the existing sampling behavior of older packages.
 - Adds a Docker Studio launcher and supports named model folders on first use.
 
-### Quality and architecture decision
+### Studio and WebUI
 
-The Odette v2 workflow and a separate copy of approved training material were
-used to exercise the pipeline. Human listening covers multilingual content,
-repeated words, long sentences and expression playback. These checks guide
-generic pipeline behavior; each newly trained voice still needs its own review.
-
-The performance comparison retains the v1.3 Japanese sentence
-「今日はいい天気ですね。」 and accepts comparable performance rather than
-requiring identical timing. A model without a historical baseline records
-measured performance without claiming a regression comparison.
-
-### WebUI
-
-Run `run_studio_docker.bat` to open Studio at `127.0.0.1:9891`.
-The public source package excludes local login pages, accounts and passwords.
-Existing local data is preserved when the same launcher is run again.
+Studio and WebUI coexist. Studio provides the dataset, training, conversion,
+evaluation and model-management workstation; run `run_studio_docker.bat` and
+open `127.0.0.1:9891`. WebUI remains the lightweight model/expression/speech
+interface; start the API, run `run_webui.bat` and open `127.0.0.1:9890`.
+See the [Studio guide](https://github.com/Hiruynk/AnifLive-TTS/blob/main/docs/ANIFLIVE_TTS_STUDIO_GUIDE.md) for the complete workflow.
 
 ### Runtime
 
@@ -55,23 +45,18 @@ TensorRT 11 推理路徑。
 ### 主要更新
 
 - Studio 支援資料集準備、審核、訓練、檢查點選擇、轉換、評估及合格模型安裝。
-- 根據資料集時長提供訓練建議，配合人工盲聽選擇檢查點；音頻長度本身不能保證音質。
+- 根據資料集時長提供訓練建議，配合人工盲聽選擇檢查點。
 - 支援在訓練回合邊界暫停、從真實檢查點續訓，以及訓練／評估與推理之間的 GPU 交接。
 - 新匯出的模型套件會記錄語意採樣策略，舊套件保留原有採樣行為。
 - 新增 Docker Studio 啟動器，首次使用亦支援具名模型資料夾。
 
-### 音質與架構決定
+### Studio 與 WebUI
 
-以 Odette v2 流程及一份獨立的已審核訓練素材副本進行實測，人工盲聽涵蓋多語內容、
-重複字詞、長句及情感播放。修補反映於通用管線；每個新訓練的音色仍需個別驗收。
-
-效能比較沿用 v1.3 的日文句子「今日はいい天気ですね。」，要求成績接近，
-不要求每次計時完全一致。沒有歷史基準的模型只記錄實測效能，不會宣稱通過歷史回歸比較。
-
-### WebUI
-
-執行 `run_studio_docker.bat`，Studio 位址為 `127.0.0.1:9891`。
-公版原始碼不包含本機登入頁、帳戶及密碼；再次執行同一啟動器會保留既有本機資料。
+Studio 與 WebUI 並存。Studio 提供資料集、訓練、轉換、評估及模型管理工作站，
+執行 `run_studio_docker.bat` 後開啟 `127.0.0.1:9891`。
+WebUI 保留模型選擇、情感控制及語音播放的輕量介面；先啟動 API，再執行
+`run_webui.bat`，位址為 `127.0.0.1:9890`。
+完整流程請見 [Studio 使用手冊](https://github.com/Hiruynk/AnifLive-TTS/blob/main/docs/ANIFLIVE_TTS_STUDIO_GUIDE.zh-TW.md)。
 
 ### 執行環境
 
