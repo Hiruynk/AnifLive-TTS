@@ -224,6 +224,8 @@ Studio adds dataset preparation and review, training, checkpoint continuation, T
 | Studio training, checkpoint continuation and GPU handoff | Real training and recovery verified | Added in v1.4 |
 | Studio TensorRT conversion, evaluation and model installation | Package and listening gates verified | Added in v1.4 |
 
+For step-by-step instructions, see the [Studio user guide](docs/ANIFLIVE_TTS_STUDIO_GUIDE.md).
+
 ## Architecture And API
 
 AnifLive-TTS is the first-party FP16 TensorRT 11 speech inference platform for

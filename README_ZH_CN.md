@@ -221,6 +221,8 @@ Studio 新增数据集准备与审核、训练、检查点续训、TensorRT 转�
 | Studio 训练、检查点续训与 GPU 交接 | 真实训练及恢复已验证 | v1.4 新增 |
 | Studio TensorRT 转换、评估与模型安装 | 模型包及人工音频验收已验证 | v1.4 新增 |
 
+详细操作流程请参阅 [Studio 使用手册](docs/ANIFLIVE_TTS_STUDIO_GUIDE.zh-CN.md)。
+
 ## 架构
 
 AnifLive-TTS 是 AnifEngine-Voice 的第一方 FP16 TensorRT 11 语音推理平台；
