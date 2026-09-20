@@ -1,0 +1,39 @@
+from __future__ import annotations
+
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+
+def test_package_and_native_import_without_runtime_side_effects() -> None:
+    repository_root = Path(__file__).resolve().parents[2]
+    environment = os.environ.copy()
+    source_root = str(repository_root / "src")
+    existing_pythonpath = environment.get("PYTHONPATH")
+    environment["PYTHONPATH"] = os.pathsep.join(
+        value for value in (source_root, existing_pythonpath) if value
+    )
+    script = """
+import sys
+
+import aniflive_tts
+import aniflive_tts._native as native
+
+assert native.__version__ == aniflive_tts.__version__
+assert not any(
+    module in sys.modules
+    for module in ("torch", "tensorrt", "fastapi", "uvicorn")
+)
+"""
+
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=repository_root,
+        env=environment,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, f"{result.stdout}\n{result.stderr}"

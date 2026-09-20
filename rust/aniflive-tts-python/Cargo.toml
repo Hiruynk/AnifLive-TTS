@@ -1,0 +1,18 @@
+[package]
+name = "aniflive-tts-python"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+name = "_native"
+crate-type = ["cdylib"]
+
+[dependencies]
+aniflive-tts-client = { path = "../aniflive-tts-client" }
+pyo3.workspace = true
+pyo3-async-runtimes.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+serde.workspace = true

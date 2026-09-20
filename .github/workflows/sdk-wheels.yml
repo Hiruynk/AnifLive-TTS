@@ -1,0 +1,95 @@
+name: SDK wheels
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "rust/**"
+      - "src/aniflive_tts/**"
+      - "tests/sdk/**"
+      - "scripts/*sdk*"
+      - "licenses/SDK-NATIVE-*"
+      - "Cargo.*"
+      - "rust-toolchain.toml"
+      - "pyproject.toml"
+      - "MANIFEST.in"
+      - ".github/workflows/sdk-wheels.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  wheel:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            arch: x86_64
+          - os: windows-2025
+            arch: AMD64
+          - os: macos-15
+            arch: arm64
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    env:
+      CIBW_BUILD: "cp310-*"
+      CIBW_SKIP: "*-musllinux_*"
+      CIBW_ARCHS: ${{ matrix.arch }}
+      CIBW_MANYLINUX_X86_64_IMAGE: quay.io/pypa/manylinux_2_28_x86_64@sha256:531d7aa844bbb0c131d4ab011d3db741c4abc8d498cd5ccc86121046f62303b4
+      CIBW_BEFORE_ALL_LINUX: bash {project}/scripts/sdk_manylinux_setup.sh
+      CIBW_ENVIRONMENT_LINUX: 'PATH="$HOME/.cargo/bin:$PATH"'
+      CIBW_TEST_COMMAND: 'python -c "import aniflive_tts, aniflive_tts._native as n; assert n.__version__ == aniflive_tts.__version__"'
+      MACOSX_DEPLOYMENT_TARGET: "11.0"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.11"
+      - uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
+        if: runner.os != 'Linux'
+        with:
+          toolchain: "1.98.1"
+          rustflags: ""
+      - name: Build ABI3 wheel
+        run: |
+          python -m pip install cibuildwheel==4.2.1
+          python -m cibuildwheel --output-dir wheelhouse
+      - name: Verify archive and prepare isolated test configuration
+        run: |
+          python scripts/check_sdk_wheel.py wheelhouse/*.whl
+          mkdir -p .local-sdk
+          printf '[pytest]\n' > .local-sdk/wheel-test.ini
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.10"
+      - name: Test installed wheel on Python 3.10
+        run: |
+          python -m pip install pytest==9.1.1
+          python -m pip install --no-deps --force-reinstall wheelhouse/*.whl
+          python -m pytest -c .local-sdk/wheel-test.ini tests/sdk rust/aniflive-tts-python/tests/test_native_bridge.py --ignore=tests/sdk/test_benchmark_sdk.py -q
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.11"
+      - name: Test installed wheel on Python 3.11
+        run: |
+          python -m pip install pytest==9.1.1
+          python -m pip install --no-deps --force-reinstall wheelhouse/*.whl
+          python -m pytest -c .local-sdk/wheel-test.ini tests/sdk rust/aniflive-tts-python/tests/test_native_bridge.py --ignore=tests/sdk/test_benchmark_sdk.py -q
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Test installed wheel on Python 3.12
+        run: |
+          python -m pip install pytest==9.1.1
+          python -m pip install --no-deps --force-reinstall wheelhouse/*.whl
+          python -m pytest -c .local-sdk/wheel-test.ini tests/sdk rust/aniflive-tts-python/tests/test_native_bridge.py --ignore=tests/sdk/test_benchmark_sdk.py -q
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: sdk-wheel-${{ matrix.os }}
+          path: wheelhouse/*.whl
+          if-no-files-found: error

@@ -6,7 +6,7 @@ import json
 import os
 import tarfile
 import shutil
-from pathlib import Path, PurePosixPath
+from pathlib import PurePosixPath
 
 
 def _sha(path):

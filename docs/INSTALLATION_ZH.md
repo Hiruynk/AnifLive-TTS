@@ -7,6 +7,7 @@
 ## 前置條件
 
 - Python 3.11
+- v1.5 原始碼／editable 建置：Rust 1.98.1、CMake 與 MSVC C++ Build Tools；Docker 建置自備編譯工具。
 - 相容的 NVIDIA 顯示卡驅動程式
 - CUDA 12.x 相容環境
 - Git、FFmpeg
@@ -22,7 +23,7 @@ py -3.11 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements\torch-cu128.txt
 .\.venv\Scripts\python.exe -m pip install -r requirements\base.txt
 .\.venv\Scripts\python.exe -m pip install -r requirements\tensorrt11-cu12.txt
-.\.venv\Scripts\python.exe -m pip install -e .
+.\.venv\Scripts\python.exe -m pip install -e ".[runtime]"
 ```
 
 上述指令只用於明確的安裝階段。API 啟動與請求處理期間不會執行下載或安裝。

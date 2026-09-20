@@ -53,7 +53,6 @@ def test_changed_upstream_fails_before_publishing_runner(tmp_path):
 def test_native_gpt_sampler_epoch_is_set_before_first_iterator(
     monkeypatch, isolated_native_ar_modules
 ):
-    import sys
     from types import SimpleNamespace
     import torch
     from aniflive_tts import training_recovery

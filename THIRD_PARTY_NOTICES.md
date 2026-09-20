@@ -6,6 +6,7 @@ The release bundles retain the following upstream notices and licenses.
 
 | Component | License | Use |
 |---|---|---|
+| Rust-backed Python SDK dependencies | Per-component upstream licenses | Locked desktop-target dependencies, including PyO3, Tokio, reqwest, rustls and AWS-LC; original notices are retained in [SDK native notices](licenses/SDK-NATIVE-THIRD-PARTY-NOTICES.txt), with versions and checksums in [the dependency inventory](licenses/SDK-NATIVE-DEPENDENCIES.json) |
 | GPT-SoVITS | MIT | Model architecture, multilingual frontend and inference conventions; license retained in `licenses/GPT-SoVITS-MIT.txt`, with relevant vendored changes recorded in `minimal_inference/ANIFLIVE_TTS_PROVENANCE.json` |
 | GPT-SoVITS minimal inference | Apache-2.0 | ONNX export and TensorRT inference implementation; license retained in `minimal_inference/LICENSE`, with modified-file notices and provenance in `minimal_inference/ANIFLIVE_TTS_PROVENANCE.json` |
 | GPT-SoVITS C++ | Apache-2.0 | Hot-path and persistent-buffer design reference; retained where applicable |

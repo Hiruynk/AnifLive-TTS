@@ -1,16 +1,17 @@
-import json
 import tarfile
-from pathlib import Path
 from aniflive_tts.training_recovery_driver import prepare_training_recovery
 
 def prepare(root, text="same"):
     root.mkdir()
-    dataset=root/"dataset";dataset.mkdir()
+    dataset=root/"dataset"
+    dataset.mkdir()
     (dataset/"features").mkdir()
     (dataset/"features/a.pt").write_bytes(text.encode())
     (dataset/"labels.txt").write_text("sample")
-    weight=root/"weight.pth";weight.write_bytes(b"weights")
-    output=root/"output";output.mkdir()
+    weight=root/"weight.pth"
+    weight.write_bytes(b"weights")
+    output=root/"output"
+    output.mkdir()
     return prepare_training_recovery(
         manifest={"job_id":"job-test"},output=output,dataset=dataset,
         dataset_entries=("features","labels.txt"),

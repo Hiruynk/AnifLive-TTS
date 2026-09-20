@@ -8,8 +8,10 @@ def staged(tmp_path):
     project=store.create_project(kind="training",name="Publication heartbeat")
     job=store.create_job(job_type="training.prepare",project_id=project["id"])
     claim=store.claim_job(job["id"])
-    source=tmp_path/"output";source.mkdir()
-    path=source/"state.ckpt";path.write_bytes(b"checkpoint")
+    source=tmp_path/"output"
+    source.mkdir()
+    path=source/"state.ckpt"
+    path.write_bytes(b"checkpoint")
     artifacts=store.register_worker_artifacts(
         job_id=job["id"],claim_token=claim.token,job_type="training.prepare",
         project_id=project["id"],source_root=source,image_digest="sha256:"+"a"*64,
@@ -26,10 +28,13 @@ def test_completion_verification_does_not_hold_sqlite_writer_lock(tmp_path,monke
     def verify(rows):
         result=original(rows)
         def heartbeat():
-            try:store.heartbeat_resource_lease(token,lease_seconds=120)
-            except Exception as error:errors.append(error)
+            try:
+                store.heartbeat_resource_lease(token,lease_seconds=120)
+            except Exception as error:
+                errors.append(error)
         thread=threading.Thread(target=heartbeat)
-        thread.start();thread.join(2)
+        thread.start()
+        thread.join(2)
         assert not thread.is_alive(),"Checkpoint verification blocked coordinator heartbeat"
         return result
     monkeypatch.setattr(store,"_verify_staged_worker_artifacts",verify)
@@ -57,7 +62,9 @@ def test_worker_renews_job_lease_during_final_verification(tmp_path,monkeypatch)
     import time
     from aniflive_tts.workstation_worker import WorkstationWorker
     store=WorkstationStore(tmp_path/"state")
-    source=tmp_path/"source";source.mkdir();(source/"voice.wav").write_bytes(b"RIFF")
+    source=tmp_path/"source"
+    source.mkdir()
+    (source/"voice.wav").write_bytes(b"RIFF")
     project=store.create_project(kind="dataset",name="Verification heartbeat",config={"source":str(source)})
     job=store.create_job(job_type="dataset.inventory",project_id=project["id"])
     heartbeats=[]

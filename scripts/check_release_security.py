@@ -249,6 +249,11 @@ def _write_evidence(
     )
 
 
+def release_notes_filename(package_version: str) -> str:
+    release_tag = re.sub(r"b([0-9]+)$", r"-beta.\1", package_version)
+    return f"RELEASE_NOTES_v{release_tag}.md"
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run the AnifLive-TTS release security gate")
     parser.add_argument("--expected-version")
@@ -300,7 +305,7 @@ def main() -> int:
         pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
         if f'version = "{args.expected_version}"' not in pyproject:
             raise SystemExit("pyproject version does not match --expected-version")
-        release_notes = ROOT / f"RELEASE_NOTES_v{args.expected_version}.md"
+        release_notes = ROOT / release_notes_filename(args.expected_version)
         if not release_notes.is_file():
             raise SystemExit(f"Missing release notes: {release_notes.name}")
         if release_notes.name not in files:

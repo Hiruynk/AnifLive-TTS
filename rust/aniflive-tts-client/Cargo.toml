@@ -1,0 +1,18 @@
+[package]
+name = "aniflive-tts-client"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+name = "aniflive_tts_client"
+
+[dependencies]
+thiserror.workspace = true
+url.workspace = true
+
+reqwest.workspace = true
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true

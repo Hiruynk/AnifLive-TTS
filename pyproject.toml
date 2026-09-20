@@ -1,16 +1,20 @@
 [build-system]
-requires = ["setuptools==84.0.0", "wheel==0.48.0"]
+requires = ["setuptools==84.0.0", "setuptools-rust==1.13.0", "wheel==0.48.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "aniflive-tts"
-version = "1.4.0"
+version = "1.5.0b1"
 description = "First-party low-latency TTS runtime for AnifEngine-Voice"
 readme = "README.md"
 requires-python = ">=3.10,<3.13"
-license = { text = "PolyForm-Noncommercial-1.0.0" }
+license = "PolyForm-Noncommercial-1.0.0"
+license-files = ["LICENSE", "licenses/SDK-NATIVE-*"]
 authors = [{ name = "Hiruynk" }]
-dependencies = [
+dependencies = []
+
+[project.optional-dependencies]
+runtime = [
   "fastapi>=0.115,<1",
   "httpx>=0.28,<1",
   "numpy>=1.26,<3",
@@ -25,15 +29,26 @@ aniflive-tts = "aniflive_tts.cli:main"
 package-dir = {"" = "src"}
 
 [tool.setuptools.package-data]
-aniflive_tts = ["workstation_assets_lock.json"]
+aniflive_tts = ["workstation_assets_lock.json", "_native.pyi", "py.typed"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[[tool.setuptools-rust.ext-modules]]
+target = "aniflive_tts._native"
+path = "rust/aniflive-tts-python/Cargo.toml"
+binding = "PyO3"
+cargo-manifest-args = ["--locked"]
+py-limited-api = "auto"
+
 [tool.pytest.ini_options]
+markers = ["sdk_real_server: opt-in SDK tests requiring an explicitly configured running service"]
 testpaths = ["tests"]
 pythonpath = ["src", ".", "minimal_inference", "minimal_inference/GPT_SoVITS"]
 
 [tool.ruff]
 line-length = 100
 target-version = "py310"
+
+[tool.distutils.bdist_wheel]
+py-limited-api = "cp310"

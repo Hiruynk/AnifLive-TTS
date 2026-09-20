@@ -1,5 +1,5 @@
 param(
-    [string]$Version = "1.4.0",
+    [string]$Version = "1.5.0-beta.1",
     [string]$Python = ""
 )
 
@@ -28,7 +28,7 @@ try {
 
     & $Python `
         (Join-Path $Project "scripts\check_release_security.py") `
-        --expected-version $Version
+        --expected-version ($Version -replace '-beta\.(\d+)$', 'b$1')
     if ($LASTEXITCODE -ne 0) {
         throw "Release security gate failed with exit code $LASTEXITCODE"
     }

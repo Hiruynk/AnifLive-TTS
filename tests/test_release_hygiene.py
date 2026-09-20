@@ -13,7 +13,7 @@ def _read(path: str) -> str:
 
 def test_license_metadata_is_consistent() -> None:
     workflow = _read(".github/workflows/container.yml")
-    assert f'license = {{ text = "{LICENSE_ID}" }}' in _read("pyproject.toml")
+    assert f'license = "{LICENSE_ID}"' in _read("pyproject.toml")
     assert f'org.opencontainers.image.licenses="{LICENSE_ID}"' in _read("Dockerfile")
     assert "sbom: true" in workflow
     assert "docker buildx imagetools inspect" in workflow

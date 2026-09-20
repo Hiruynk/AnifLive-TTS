@@ -88,7 +88,7 @@ logging.basicConfig(
 )
 
 SERVICE_NAME = "AnifLive-TTS"
-SERVICE_VERSION = "1.4.0"
+SERVICE_VERSION = "1.5.0b1"
 MODEL_ID = os.environ.get("ANIFLIVE_TTS_MODEL_ID", "unconfigured")
 VOICE_ID = os.environ.get("ANIFLIVE_TTS_VOICE_PROFILE", "default")
 REFERENCE_TEXT = os.environ.get("ANIFLIVE_TTS_REFERENCE_TEXT", "")

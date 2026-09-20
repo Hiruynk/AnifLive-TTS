@@ -61,7 +61,6 @@ def test_empty_or_malformed_reports_block_release() -> None:
 
 
 def test_review_is_explicit_and_does_not_hide_other_versions():
-    import json
     policy = POLICY["load_applicability"](ROOT / "scripts/release_vulnerability_applicability.json")
     finding = {"PkgName": "transformers", "InstalledVersion": "5.5.0",
                "VulnerabilityID": "CVE-2026-9856", "Severity": "HIGH"}

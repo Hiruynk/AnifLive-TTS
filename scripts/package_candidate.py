@@ -20,7 +20,7 @@ PUBLIC_DIRECTORIES = {
 PUBLIC_ROOT_FILES = {
     ".dockerignore", ".env.example", ".gitattributes", ".gitignore",
     "Dockerfile", "Dockerfile.dev", "Dockerfile.workstation-worker", "Dockerfile.studio",
-    "Cargo.toml", "Cargo.lock", "rust-toolchain.toml", "MANIFEST.in",
+    "Cargo.toml", "Cargo.lock", "rust-toolchain.toml", "MANIFEST.in", "mypy-sdk.ini",
     "LICENSE", "LICENSING.md", "README.md", "README_ZH_CN.md", "README_ZH_HK.md",
     "SECURITY.md", "THIRD_PARTY_NOTICES.md", "api.py", "local_tts_cf.py",
     "docker-compose.cu126.yml", "docker-compose.yml", "pyproject.toml",
@@ -134,7 +134,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source-root", type=Path, default=ROOT)
     parser.add_argument("--output-dir", type=Path, required=True)
-    parser.add_argument("--version", default="1.4.0")
+    parser.add_argument("--version", default="1.5.0-beta.1")
     args = parser.parse_args()
     print(create_candidate(args.source_root, args.output_dir, args.version))
 

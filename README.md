@@ -6,7 +6,7 @@
 
 **A low-latency, high-quality multilingual voice-cloning TTS runtime with first-class Cantonese support**
 
-[![Release](https://img.shields.io/badge/release-v1.4.0-2563eb?style=flat-square)](RELEASE_NOTES_v1.4.0.md)
+[![Release](https://img.shields.io/badge/release-v1.5.0--beta.1-2563eb?style=flat-square)](RELEASE_NOTES_v1.5.0-beta.1.md)
 [![TensorRT](https://img.shields.io/badge/TensorRT-11.2.1.2-76b900?style=flat-square&logo=nvidia)](https://docs.nvidia.com/deeplearning/tensorrt/)
 [![CUDA](https://img.shields.io/badge/CUDA-12.8-76b900?style=flat-square&logo=nvidia)](https://developer.nvidia.com/cuda-toolkit)
 [![Model](https://img.shields.io/badge/GPT--SoVITS-V2ProPlus-0f766e?style=flat-square)](https://github.com/RVC-Boss/GPT-SoVITS)
@@ -226,6 +226,22 @@ Studio adds dataset preparation and review, training, checkpoint continuation, T
 
 For step-by-step instructions, see the [Studio user guide](docs/ANIFLIVE_TTS_STUDIO_GUIDE.md).
 
+## Python SDK Added in v1.5.0 Beta 1
+
+The official Rust-backed Python SDK provides sync/async discovery, WAV synthesis, incremental PCM streaming, expressions, and speech sessions. Install the supplied wheel for your platform and connect to the existing API; no local model or GPU is needed by the client.
+
+```python
+from aniflive_tts import Client
+
+with Client("http://127.0.0.1:9880") as client:
+    client.probe()
+    result = client.synthesize(text="今日はいい天気ですね。", language="ja")
+    with open("speech.wav", "wb") as output:
+        output.write(result.audio)
+```
+
+See the [SDK manual](docs/SDK_EN.md) for installation, asynchronous streaming, session lifecycle, and error handling. WebUI and Studio remain available alongside the SDK.
+
 ## Architecture And API
 
 AnifLive-TTS is the first-party FP16 TensorRT 11 speech inference platform for
@@ -261,7 +277,7 @@ py -3.11 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements\torch-cu128.txt
 .\.venv\Scripts\python.exe -m pip install -r requirements\base.txt
 .\.venv\Scripts\python.exe -m pip install -r requirements\tensorrt11-cu12.txt
-.\.venv\Scripts\python.exe -m pip install -e .
+.\.venv\Scripts\python.exe -m pip install -e ".[runtime]"
 .\.venv\Scripts\python.exe scripts\setup_shared_assets.py `
   --output D:\models\shared --accept-third-party-licenses
 ```

@@ -1,0 +1,8 @@
+include Cargo.toml Cargo.lock rust-toolchain.toml
+recursive-include rust Cargo.toml *.rs
+global-exclude AGENTS.md
+global-exclude ANIFLIVE_TTS_V1_5_BETA_RUST_PYTHON_SDK_CODEX_PLAN.md
+prune .local-sdk
+prune target
+prune build
+global-exclude *.so *.pyd *.dylib *.pyc

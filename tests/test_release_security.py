@@ -63,7 +63,7 @@ def test_container_release_records_source_and_evidence() -> None:
     assert "VCS_REF=${{ github.sha }}" in workflow
     assert "BUILD_DATE=${{ steps.build_date.outputs.value }}" in workflow
     assert "index:org.opencontainers.image.revision=${{ github.sha }}" in workflow
-    assert "RELEASE-METADATA-AnifLive-TTS-v1.4.0-" in workflow
+    assert "RELEASE-METADATA-AnifLive-TTS-v1.5.0-beta.1-" in workflow
     assert "provenance: mode=max" in workflow
     assert "pyspdxtools -i" in workflow
     assert workflow.count('python scripts/normalize_spdx_sbom.py "${output}"') == 2
@@ -168,3 +168,8 @@ def test_security_gate_emits_parseable_explicit_evidence(tmp_path: Path) -> None
     assert evidence["release_tree_sha256"] == check_release_security._release_tree_sha256(
         ["LICENSE", "SECURITY.md"]
     )
+
+
+def test_release_notes_filename_preserves_stable_and_maps_beta() -> None:
+    assert check_release_security.release_notes_filename("1.4.0") == "RELEASE_NOTES_v1.4.0.md"
+    assert check_release_security.release_notes_filename("1.5.0b1") == "RELEASE_NOTES_v1.5.0-beta.1.md"

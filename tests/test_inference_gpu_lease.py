@@ -639,11 +639,11 @@ def test_default_webui_and_compose_share_one_workstation_database() -> None:
     assert (
         'ANIFLIVE_TTS_WORKSTATION_DIR=%CD%\\data\\workstation' in launcher
     )
-    assert "aniflive-tts:1.4.0-cu128" in compose
+    assert "aniflive-tts:1.5.0-beta.1-cu128" in compose
     assert "aniflive-tts:1.3.0-cu128" not in compose
     assert "name: aniflive-tts-v14-workstation" in compose
     assert "container_name: aniflive-tts-v14-workstation-api" in compose
-    assert 'org.opencontainers.image.version="1.4.0"' in dockerfile
+    assert 'org.opencontainers.image.version="1.5.0-beta.1"' in dockerfile
 
 
 def test_inference_lease_does_not_import_worker_or_training_stacks() -> None:

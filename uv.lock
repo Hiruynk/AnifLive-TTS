@@ -9,9 +9,11 @@ resolution-markers = [
 
 [[package]]
 name = "aniflive-tts"
-version = "1.4.0"
+version = "1.5.0b1"
 source = { editable = "." }
-dependencies = [
+
+[package.optional-dependencies]
+runtime = [
     { name = "fastapi" },
     { name = "httpx" },
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
@@ -23,12 +25,13 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "fastapi", specifier = ">=0.115,<1" },
-    { name = "httpx", specifier = ">=0.28,<1" },
-    { name = "numpy", specifier = ">=1.26,<3" },
-    { name = "pydantic", specifier = ">=2.10,<3" },
-    { name = "uvicorn", extras = ["standard"], specifier = ">=0.34,<1" },
+    { name = "fastapi", marker = "extra == 'runtime'", specifier = ">=0.115,<1" },
+    { name = "httpx", marker = "extra == 'runtime'", specifier = ">=0.28,<1" },
+    { name = "numpy", marker = "extra == 'runtime'", specifier = ">=1.26,<3" },
+    { name = "pydantic", marker = "extra == 'runtime'", specifier = ">=2.10,<3" },
+    { name = "uvicorn", extras = ["standard"], marker = "extra == 'runtime'", specifier = ">=0.34,<1" },
 ]
+provides-extras = ["runtime"]
 
 [[package]]
 name = "annotated-doc"
@@ -85,7 +88,7 @@ name = "exceptiongroup"
 version = "1.3.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "typing-extensions", marker = "python_full_version < '3.11'" },
+    { name = "typing-extensions" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/50/79/66800aadf48771f6b62f7eb014e352e5d06856655206165d775e675a02c9/exceptiongroup-1.3.1.tar.gz", hash = "sha256:8b412432c6055b0b7d14c310000ae93352ed6754f70fa8f7c34141f91c4e3219", size = 30371, upload-time = "2025-11-21T23:01:54.787Z" }
 wheels = [

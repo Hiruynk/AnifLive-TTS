@@ -1,11 +1,29 @@
 ARG CUDA_BASE_IMAGE=nvidia/cuda:12.8.1-cudnn-runtime-ubuntu24.04@sha256:9175fa92f96de35a8cfb9493f0dfcf9435c7a597e9d95ad41d2cae382a95e3f9
+ARG SDK_BUILDER_IMAGE=rust:1.98.1-bookworm@sha256:93ce27a88655056a51dbdd8f5f2d7ddc071c7b0070fb288a37b5a285fc83971e
+FROM ${SDK_BUILDER_IMAGE} AS sdk-wheel
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends python3 python3-dev python3-venv cmake pkg-config \
+    && rm -rf /var/lib/apt/lists/*
+RUN python3 -m venv /opt/sdk-build \
+    && /opt/sdk-build/bin/python -m pip install --no-cache-dir \
+       setuptools==84.0.0 wheel==0.48.0 setuptools-rust==1.13.0
+ENV PYO3_PYTHON=/opt/sdk-build/bin/python
+WORKDIR /sdk
+COPY pyproject.toml MANIFEST.in Cargo.toml Cargo.lock rust-toolchain.toml README.md LICENSE /sdk/
+COPY rust /sdk/rust
+COPY src /sdk/src
+COPY licenses/SDK-NATIVE-* /sdk/licenses/
+RUN --mount=type=cache,id=aniflive-sdk-cargo-registry,target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,id=aniflive-sdk-cargo-target,target=/sdk/target,sharing=locked \
+    /opt/sdk-build/bin/python -m pip wheel --no-deps --no-build-isolation --wheel-dir /wheels /sdk
+
 FROM ${CUDA_BASE_IMAGE}
 
 ARG TORCH_REQUIREMENTS=requirements/torch-cu128.txt
 ARG VCS_REF=unknown
 ARG BUILD_DATE=unknown
 LABEL org.opencontainers.image.title="AnifLive-TTS"
-LABEL org.opencontainers.image.version="1.4.0"
+LABEL org.opencontainers.image.version="1.5.0-beta.1"
 LABEL org.opencontainers.image.description="First-party TTS runtime for AnifEngine-Voice"
 LABEL org.opencontainers.image.authors="Hiruynk"
 LABEL org.opencontainers.image.vendor="AnifEngine"
@@ -146,7 +164,9 @@ COPY webui /app/webui
 COPY assets/THIRD_PARTY_MEDIA.md /app/assets/THIRD_PARTY_MEDIA.md
 COPY minimal_inference /app/minimal_inference
 COPY scripts /app/scripts
-RUN python -m pip install --no-deps /app \
+COPY --from=sdk-wheel /wheels/ /tmp/aniflive-sdk-wheels/
+RUN python -m pip install --no-deps --force-reinstall /tmp/aniflive-sdk-wheels/*.whl \
+    && rm -rf /tmp/aniflive-sdk-wheels \
     && mkdir -p /data/models /data/shared /data/cache /data/reports /data/workstation \
     && chmod 0755 /app/scripts/entrypoint.sh \
     && PYTHONPATH=/app/minimal_inference:/app/minimal_inference/GPT_SoVITS python - <<'PY'

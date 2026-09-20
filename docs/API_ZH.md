@@ -1,5 +1,7 @@
 # API 規格
 
+Python 應用程式可使用 v1.5.0 Beta 1 新增的[官方 SDK](SDK_ZH.md)。伺服器 API 維持 wire contract；Rust client core 負責傳輸與協定，Python facade 提供型別化同步／非同步介面。
+
 ## Canonical request
 
 `POST /v1/audio/speech`

@@ -8,6 +8,7 @@ the system Python and CUDA installation are not modified.
 ## Prerequisites
 
 - Python 3.11
+- For v1.5 source/editable builds: Rust 1.98.1, CMake, and MSVC C++ Build Tools. Docker builds provide their own compiler toolchain.
 - A compatible NVIDIA display driver
 - A CUDA 12.x-compatible environment
 - Git and FFmpeg
@@ -23,7 +24,7 @@ py -3.11 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements\torch-cu128.txt
 .\.venv\Scripts\python.exe -m pip install -r requirements\base.txt
 .\.venv\Scripts\python.exe -m pip install -r requirements\tensorrt11-cu12.txt
-.\.venv\Scripts\python.exe -m pip install -e .
+.\.venv\Scripts\python.exe -m pip install -e ".[runtime]"
 ```
 
 These commands are explicit setup operations. API startup and request handling

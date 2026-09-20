@@ -968,7 +968,7 @@ def create_webui_app(
 
     app = FastAPI(
         title=surface_name,
-        version="1.4.0",
+        version="1.5.0b1",
         lifespan=lifespan,
     )
 
@@ -2424,7 +2424,7 @@ def create_webui_app(
         return JSONResponse(
             {
                 "product": surface_name,
-                "workspace_version": "1.4.0",
+                "workspace_version": "1.5.0b1",
                 "active_model": health.get("model"),
                 "gpu": health.get("gpu", {}),
                 "backend": health.get("backend"),

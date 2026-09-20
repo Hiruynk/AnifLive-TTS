@@ -364,5 +364,16 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
-    return int(args.handler(args) or 0)
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    try:
+        return int(args.handler(args) or 0)
+    except ModuleNotFoundError as error:
+        if (error.name or "").split(".", 1)[0] not in {
+            "fastapi", "httpx", "numpy", "pydantic", "uvicorn",
+        }:
+            raise
+        parser.error(
+            "This command requires runtime dependencies. Install "
+            "'aniflive-tts[runtime]' or use the documented runtime Docker image."
+        )

@@ -8,7 +8,9 @@ from aniflive_tts.workstation_training import validate_training_resume_request, 
 
 def test_resume_checkpoint_is_in_the_admitted_container_manifest(tmp_path):
     store=WorkstationStore(tmp_path/"state")
-    resume=tmp_path/"checkpoint";resume.mkdir();(resume/"latest.json").write_text("{}")
+    resume=tmp_path/"checkpoint"
+    resume.mkdir()
+    (resume/"latest.json").write_text("{}")
     project=store.create_project(kind="training",name="Resume admission")
     job=store.create_job(job_type="training.prepare",project_id=project["id"],
                          parameters={"resume_checkpoint":str(resume)})
@@ -34,7 +36,8 @@ def test_neural_worker_refuses_resume_without_checkpoint_before_loading_cuda(inp
         validate_training_resume_request({"resume_requested":True,"container_input_paths":inputs})
 
 def test_legacy_weight_folder_is_not_a_complete_resume_snapshot(tmp_path):
-    legacy=tmp_path/"legacy";legacy.mkdir()
+    legacy=tmp_path/"legacy"
+    legacy.mkdir()
     with pytest.raises(TrainingWorkerError,match="legacy weights"):
         validate_training_resume_request({"resume_requested":True,"container_input_paths":{"resume_checkpoint":str(legacy)}})
 
