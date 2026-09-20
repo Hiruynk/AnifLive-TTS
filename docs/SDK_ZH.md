@@ -2,7 +2,11 @@
 
 AnifLive-TTS Python SDK 是連接 AnifLive-TTS 服務的型別化用戶端。Python facade 透過內附的 Rust 傳輸核心呼叫 canonical HTTP API；既有伺服器、WebUI 與 Studio 繼續並存。
 
-此發行候選版本請安裝符合平台的隨附 wheel：
+## 下載與安裝
+
+v1.5.0 Beta 1 發布後，請開啟 [GitHub Releases](https://github.com/Hiruynk/AnifLive-TTS/releases)，選擇 `v1.5.0-beta.1`，並從 **Assets** 下載符合作業系統及架構的 `.whl`。本機預覽期間使用隨附的 wheel。
+
+安裝下載的 wheel（請將範例路徑換成實際檔案位置）：
 
 ```bash
 python -m pip install /path/to/aniflive_tts-1.5.0b1-cp310-abi3-manylinux_2_28_x86_64.whl

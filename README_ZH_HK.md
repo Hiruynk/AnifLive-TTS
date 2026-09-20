@@ -6,7 +6,7 @@
 
 **面向粵語／廣東話的低延遲、高音質、多語言聲音複製 TTS 推理系統**
 
-[![版本](https://img.shields.io/badge/%E7%89%88%E6%9C%AC-v1.4.0-2563eb?style=flat-square)](RELEASE_NOTES_v1.5.0-beta.1.md)
+[![版本](https://img.shields.io/badge/%E7%89%88%E6%9C%AC-v1.5.0--beta.1-2563eb?style=flat-square)](RELEASE_NOTES_v1.5.0-beta.1.md)
 [![TensorRT](https://img.shields.io/badge/TensorRT-11.2.1.2-76b900?style=flat-square&logo=nvidia)](https://docs.nvidia.com/deeplearning/tensorrt/)
 [![CUDA](https://img.shields.io/badge/CUDA-12.8-76b900?style=flat-square&logo=nvidia)](https://developer.nvidia.com/cuda-toolkit)
 [![模型](https://img.shields.io/badge/%E6%A8%A1%E5%9E%8B-GPT--SoVITS_V2ProPlus-0f766e?style=flat-square)](https://github.com/RVC-Boss/GPT-SoVITS)
@@ -237,7 +237,7 @@ with Client("http://127.0.0.1:9880") as client:
         output.write(result.audio)
 ```
 
-安裝、非同步串流、session 生命週期與錯誤處理請參閱 [SDK 使用手冊](docs/SDK_ZH.md)。WebUI 與 Studio 繼續與 SDK 並存。
+下載、安裝、使用範例、非同步串流、session 生命週期與錯誤處理請參閱 [SDK 使用手冊](docs/SDK_ZH.md)。WebUI 與 Studio 繼續與 SDK 並存。
 
 ## 架構
 

@@ -240,7 +240,7 @@ with Client("http://127.0.0.1:9880") as client:
         output.write(result.audio)
 ```
 
-See the [SDK manual](docs/SDK_EN.md) for installation, asynchronous streaming, session lifecycle, and error handling. WebUI and Studio remain available alongside the SDK.
+See the [SDK manual](docs/SDK_EN.md) for download, installation, usage examples, asynchronous streaming, session lifecycle, and error handling. WebUI and Studio remain available alongside the SDK.
 
 ## Architecture And API
 
