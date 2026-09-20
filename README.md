@@ -6,7 +6,7 @@
 
 **A low-latency, high-quality multilingual voice-cloning TTS runtime with first-class Cantonese support**
 
-[![Release](https://img.shields.io/badge/release-v1.5.0--beta.1-2563eb?style=flat-square)](RELEASE_NOTES_v1.5.0-beta.1.md)
+[![Release](https://img.shields.io/badge/release-v1.5.0--beta-2563eb?style=flat-square)](RELEASE_NOTES_v1.5.0-beta.md)
 [![TensorRT](https://img.shields.io/badge/TensorRT-11.2.1.2-76b900?style=flat-square&logo=nvidia)](https://docs.nvidia.com/deeplearning/tensorrt/)
 [![CUDA](https://img.shields.io/badge/CUDA-12.8-76b900?style=flat-square&logo=nvidia)](https://developer.nvidia.com/cuda-toolkit)
 [![Model](https://img.shields.io/badge/GPT--SoVITS-V2ProPlus-0f766e?style=flat-square)](https://github.com/RVC-Boss/GPT-SoVITS)
@@ -226,7 +226,7 @@ Studio adds dataset preparation and review, training, checkpoint continuation, T
 
 For step-by-step instructions, see the [Studio user guide](docs/ANIFLIVE_TTS_STUDIO_GUIDE.md).
 
-## Python SDK Added in v1.5.0 Beta 1
+## Python SDK Added in v1.5.0-beta
 
 The official Rust-backed Python SDK provides sync/async discovery, WAV synthesis, incremental PCM streaming, expressions, and speech sessions. Install the supplied wheel for your platform and connect to the existing API; no local model or GPU is needed by the client.
 

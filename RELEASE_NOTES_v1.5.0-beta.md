@@ -1,4 +1,4 @@
-# AnifLive-TTS v1.5.0 Beta 1
+# AnifLive-TTS v1.5.0-beta
 
 ## Highlights
 
@@ -19,7 +19,7 @@ The existing TensorRT runtime, WebUI, and Studio remain available. This beta add
 
 ---
 
-# AnifLive-TTS v1.5.0 Beta 1（繁體中文）
+# AnifLive-TTS v1.5.0-beta（繁體中文）
 
 ## 新增內容
 

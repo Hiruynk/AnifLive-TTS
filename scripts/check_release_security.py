@@ -250,6 +250,8 @@ def _write_evidence(
 
 
 def release_notes_filename(package_version: str) -> str:
+    if package_version == "1.5.0b1":
+        return "RELEASE_NOTES_v1.5.0-beta.md"
     release_tag = re.sub(r"b([0-9]+)$", r"-beta.\1", package_version)
     return f"RELEASE_NOTES_v{release_tag}.md"
 

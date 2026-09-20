@@ -4,7 +4,7 @@ AnifLive-TTS Python SDK 是連接 AnifLive-TTS 服務的型別化用戶端。Pyt
 
 ## 下載與安裝
 
-v1.5.0 Beta 1 發布後，請開啟 [GitHub Releases](https://github.com/Hiruynk/AnifLive-TTS/releases)，選擇 `v1.5.0-beta.1`，並從 **Assets** 下載符合作業系統及架構的 `.whl`。本機預覽期間使用隨附的 wheel。
+v1.5.0-beta 發布後，請開啟 [GitHub Releases](https://github.com/Hiruynk/AnifLive-TTS/releases)，選擇 `v1.5.0-beta`，並從 **Assets** 下載符合作業系統及架構的 `.whl`。本機預覽期間使用隨附的 wheel。
 
 安裝下載的 wheel（請將範例路徑換成實際檔案位置）：
 

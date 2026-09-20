@@ -4,7 +4,7 @@ The AnifLive-TTS Python SDK is a typed client for an AnifLive-TTS service. Its P
 
 ## Download and install
 
-Once v1.5.0 Beta 1 is published, open [GitHub Releases](https://github.com/Hiruynk/AnifLive-TTS/releases), select `v1.5.0-beta.1`, and download the `.whl` matching your operating system and architecture from **Assets**. During local preview, use the supplied wheel.
+Once v1.5.0-beta is published, open [GitHub Releases](https://github.com/Hiruynk/AnifLive-TTS/releases), select `v1.5.0-beta`, and download the `.whl` matching your operating system and architecture from **Assets**. During local preview, use the supplied wheel.
 
 Install the downloaded wheel (replace the example path with its actual location):
 

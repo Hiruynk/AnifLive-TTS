@@ -172,4 +172,4 @@ def test_security_gate_emits_parseable_explicit_evidence(tmp_path: Path) -> None
 
 def test_release_notes_filename_preserves_stable_and_maps_beta() -> None:
     assert check_release_security.release_notes_filename("1.4.0") == "RELEASE_NOTES_v1.4.0.md"
-    assert check_release_security.release_notes_filename("1.5.0b1") == "RELEASE_NOTES_v1.5.0-beta.1.md"
+    assert check_release_security.release_notes_filename("1.5.0b1") == "RELEASE_NOTES_v1.5.0-beta.md"

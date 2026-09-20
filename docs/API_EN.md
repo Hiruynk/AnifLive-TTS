@@ -1,6 +1,6 @@
 # API Contract
 
-Python applications can use the [official SDK](SDK_EN.md), introduced in v1.5.0 Beta 1. The server API remains the wire contract; the Rust client core owns transport and protocol handling, while the Python facade provides typed sync/async interfaces.
+Python applications can use the [official SDK](SDK_EN.md), introduced in v1.5.0-beta. The server API remains the wire contract; the Rust client core owns transport and protocol handling, while the Python facade provides typed sync/async interfaces.
 
 The canonical endpoint is `POST /v1/audio/speech` with `model`,
 `voice_profile`, `text`, `language`, `stream`, `expression`, and `generation`.

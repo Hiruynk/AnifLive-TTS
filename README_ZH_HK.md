@@ -6,7 +6,7 @@
 
 **面向粵語／廣東話的低延遲、高音質、多語言聲音複製 TTS 推理系統**
 
-[![版本](https://img.shields.io/badge/%E7%89%88%E6%9C%AC-v1.5.0--beta.1-2563eb?style=flat-square)](RELEASE_NOTES_v1.5.0-beta.1.md)
+[![版本](https://img.shields.io/badge/%E7%89%88%E6%9C%AC-v1.5.0--beta-2563eb?style=flat-square)](RELEASE_NOTES_v1.5.0-beta.md)
 [![TensorRT](https://img.shields.io/badge/TensorRT-11.2.1.2-76b900?style=flat-square&logo=nvidia)](https://docs.nvidia.com/deeplearning/tensorrt/)
 [![CUDA](https://img.shields.io/badge/CUDA-12.8-76b900?style=flat-square&logo=nvidia)](https://developer.nvidia.com/cuda-toolkit)
 [![模型](https://img.shields.io/badge/%E6%A8%A1%E5%9E%8B-GPT--SoVITS_V2ProPlus-0f766e?style=flat-square)](https://github.com/RVC-Boss/GPT-SoVITS)
@@ -223,7 +223,7 @@ Studio 新增資料集準備與審核、訓練、檢查點續訓、TensorRT 轉�
 
 詳細操作流程請見 [Studio 使用手冊](docs/ANIFLIVE_TTS_STUDIO_GUIDE.zh-TW.md)。
 
-## v1.5.0 Beta 1 新增的 Python SDK
+## v1.5.0-beta 新增的 Python SDK
 
 官方 Rust-backed Python SDK 提供同步／非同步服務探索、WAV 合成、增量 PCM 串流、情感設定及 Speech Session。安裝符合平台的隨附 wheel 後即可連接既有 API，用戶端毋須本機模型或 GPU。
 
