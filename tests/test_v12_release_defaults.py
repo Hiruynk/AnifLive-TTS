@@ -14,7 +14,8 @@ def test_v12_release_defaults_preserve_the_accepted_runtime() -> None:
         encoding="utf-8"
     )
 
-    assert '"ANIFLIVE_TTS_REPETITION_PENALTY", "1.0"' in semantic
+    assert '"ANIFLIVE_TTS_REPETITION_PENALTY"' in semantic
+    assert '"1.35" if self.sampling_contract == "native-v2proplus-v1" else "1.0"' in semantic
     assert '"ANIFLIVE_TTS_PERSISTENT_GPT_CONTEXTS", "1"' in semantic
     assert '"ANIFLIVE_TTS_FIRST_SEGMENT_PREVIEW_ONLY", "1"' in streaming
     assert "ANIFLIVE_TTS_FULL_CONTEXT_REFILL_DECODER" not in streaming

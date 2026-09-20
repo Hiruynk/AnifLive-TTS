@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def _project_text_files() -> list[Path]:
-    excluded = {".venv", "dist", "__pycache__", ".pytest-tmp"}
+    excluded = {".venv", "dist", "__pycache__", ".pytest-tmp", ".local-sdk"}
     suffixes = {".py", ".md", ".toml", ".yml", ".yaml", ".sh", ".bat", ".ps1"}
     files: list[Path] = []
     for directory, names, filenames in os.walk(ROOT):
@@ -22,6 +22,11 @@ def _project_text_files() -> list[Path]:
             and not (parent == ROOT and name == "reports")
         ]
         for filename in filenames:
+            if filename in {
+                "AGENTS.md",
+                "ANIFLIVE_TTS_V1_5_BETA_RUST_PYTHON_SDK_CODEX_PLAN.md",
+            }:
+                continue
             path = parent / filename
             if path.suffix in suffixes or path.name in {"Dockerfile", ".env.example"}:
                 files.append(path)
@@ -65,6 +70,9 @@ def test_public_source_scan_skips_report_snapshots_only_at_repository_root(
         "docs/release.md",
         "reports/old-source/src/stale.py",
         ".venv/lib/cached.py",
+        "AGENTS.md",
+        "ANIFLIVE_TTS_V1_5_BETA_RUST_PYTHON_SDK_CODEX_PLAN.md",
+        ".local-sdk/private.md",
     ]
     for name in paths:
         path = tmp_path / name

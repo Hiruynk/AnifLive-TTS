@@ -15,11 +15,12 @@ import zipfile
 ROOT = Path(__file__).resolve().parents[1]
 PUBLIC_DIRECTORIES = {
     ".github", "assets", "benchmarks", "docs", "licenses", "minimal_inference",
-    "requirements", "research", "scripts", "src", "tests", "webui",
+    "requirements", "research", "scripts", "src", "tests", "webui", "rust", "examples",
 }
 PUBLIC_ROOT_FILES = {
     ".dockerignore", ".env.example", ".gitattributes", ".gitignore",
     "Dockerfile", "Dockerfile.dev", "Dockerfile.workstation-worker", "Dockerfile.studio",
+    "Cargo.toml", "Cargo.lock", "rust-toolchain.toml", "MANIFEST.in",
     "LICENSE", "LICENSING.md", "README.md", "README_ZH_CN.md", "README_ZH_HK.md",
     "SECURITY.md", "THIRD_PARTY_NOTICES.md", "api.py", "local_tts_cf.py",
     "docker-compose.cu126.yml", "docker-compose.yml", "pyproject.toml",
@@ -28,6 +29,7 @@ PUBLIC_ROOT_FILES = {
 PRIVATE_NAMES = {
     "login.html", "signin.html", "login.py", "local_auth.py", "auth.local.json",
     "docker-compose.local.yml", ".cloudflared-token",
+    "agents.md", "aniflive_tts_v1_5_beta_rust_python_sdk_codex_plan.md",
 }
 
 

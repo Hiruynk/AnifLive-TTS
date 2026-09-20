@@ -483,7 +483,22 @@ def test_evaluation_ui_only_enables_audio_from_ready_worker_artifacts() -> None:
     assert "dependsOn: [modelPackage.id]" in script
 
 
-def test_control_plane_preserves_training_to_release_dependencies(tmp_path: Path) -> None:
+def test_control_plane_preserves_training_to_release_dependencies(tmp_path: Path, monkeypatch) -> None:
+    from aniflive_tts.workstation_evaluation import evaluation_workload, resolve_evaluation_plan
+
+    monkeypatch.setenv("ANIFLIVE_TTS_WORKSTATION_IMPORT_ROOTS", str(tmp_path))
+    baseline_path = tmp_path / "baseline.json"
+    baseline_path.write_text(json.dumps({
+        "schema": "aniflive-tts-workstation-evaluation-v1",
+        "benchmark": {
+            "workload": evaluation_workload(resolve_evaluation_plan({})),
+            "methodology": {
+                "sessions": 1, "warmup_requests_per_session": 2,
+                "full_wav_requests_per_session": 10, "stream_requests_per_session": 10,
+                "keepalive_stream_requests_per_session": 10,
+            },
+        },
+    }))
     store = WorkstationStore(tmp_path / "workstation")
     app = create_webui_app(
         static_dir=ROOT / "webui", client=_upstream(), workstation=store
@@ -512,7 +527,7 @@ def test_control_plane_preserves_training_to_release_dependencies(tmp_path: Path
                     "model_package": "C:/models/voice-v2proplus",
                     "shared_dir": "C:/shared/aniflive",
                     "asr_model": "C:/models/whisper",
-                    "baseline_report": "C:/reports/production.json",
+                    "baseline_report": str(baseline_path),
                 },
             },
         ).json()
@@ -542,7 +557,7 @@ def test_control_plane_preserves_training_to_release_dependencies(tmp_path: Path
                 "depends_on": [engine_job["id"]],
             },
         ).json()
-        evaluation_job = client.post(
+        evaluation_response = client.post(
             "/api/workstation/jobs",
             json={
                 "type": "evaluation.prepare",
@@ -550,7 +565,9 @@ def test_control_plane_preserves_training_to_release_dependencies(tmp_path: Path
                 "parameters": {},
                 "depends_on": [package_job["id"]],
             },
-        ).json()
+        )
+        assert evaluation_response.status_code == 201, evaluation_response.text
+        evaluation_job = evaluation_response.json()
         records = client.get("/api/workstation/jobs").json()["data"]
 
     by_id = {record["id"]: record for record in records}
@@ -561,5 +578,5 @@ def test_control_plane_preserves_training_to_release_dependencies(tmp_path: Path
         "model_package": "C:/models/voice-v2proplus",
         "shared_dir": "C:/shared/aniflive",
         "asr_model": "C:/models/whisper",
-        "baseline_report": "C:/reports/production.json",
+        "baseline_report": str(baseline_path),
     }

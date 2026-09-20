@@ -143,7 +143,6 @@ COPY pyproject.toml README.md LICENSE LICENSING.md THIRD_PARTY_NOTICES.md /app/
 COPY licenses /app/licenses
 COPY src /app/src
 COPY webui /app/webui
-COPY assets/everynight_dance.gif /app/assets/everynight_dance.gif
 COPY assets/THIRD_PARTY_MEDIA.md /app/assets/THIRD_PARTY_MEDIA.md
 COPY minimal_inference /app/minimal_inference
 COPY scripts /app/scripts

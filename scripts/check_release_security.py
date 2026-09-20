@@ -34,7 +34,11 @@ REQUIRED_FILES = (
     "webui/studio.js",
     "webui/synthesis.html",
 )
-FORBIDDEN_PREFIXES = ("Miku/", "data/", "dist/", "reports/")
+FORBIDDEN_PREFIXES = ("Miku/", "data/", "dist/", "reports/", ".local-sdk/")
+FORBIDDEN_LOCAL_DOCUMENTS = {
+    "agents.md",
+    "aniflive_tts_v1_5_beta_rust_python_sdk_codex_plan.md",
+}
 FORBIDDEN_GENERATED_ROOT_PREFIXES = (".pytest-", "tmp")
 FORBIDDEN_SUFFIXES = (
     ".ckpt",
@@ -73,6 +77,8 @@ def _check_tracked_paths(files: list[str]) -> None:
         normalized = name.replace("\\", "/")
         lowered = normalized.lower()
         root_component = lowered.split("/", 1)[0]
+        if lowered.rsplit("/", 1)[-1] in FORBIDDEN_LOCAL_DOCUMENTS:
+            violations.append(normalized)
         if lowered == ".env" or (
             lowered.startswith(".env.") and lowered != ".env.example"
         ):

@@ -285,7 +285,9 @@ def test_sovits_canonical_order_is_independent_of_initial_set_iteration():
     assert first.lengths==second.lengths
     assert random.getstate()==before
 
-def test_native_bucket_sampler_and_manual_gradient_resume_match(tmp_path, monkeypatch):
+def test_native_bucket_sampler_and_manual_gradient_resume_match(
+    tmp_path, monkeypatch, isolated_native_ar_modules
+):
     from aniflive_tts import training_recovery
     source=Path("/opt/aniflive-tts/gpt-sovits")
     if not source.exists():

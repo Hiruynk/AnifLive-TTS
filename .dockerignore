@@ -36,3 +36,15 @@ tunnel-token*
 *.pfx
 credentials*
 secrets*
+
+# Local execution instructions
+AGENTS.md
+ANIFLIVE_TTS_V1_5_BETA_RUST_PYTHON_SDK_CODEX_PLAN.md
+.local-sdk/
+
+# Native SDK build artifacts
+target/
+build/
+*.so
+*.pyd
+*.dylib
