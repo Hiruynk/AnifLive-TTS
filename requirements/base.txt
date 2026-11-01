@@ -17,7 +17,7 @@ einops==0.8.1
 cn2an==0.5.22
 pypinyin==0.50.0
 pyopenjtalk-plus==0.4.1.post8
-nltk==3.10.3
+nltk==3.10.4
 inflect==7.5.0
 jieba==0.42.1
 jieba-fast==0.53
