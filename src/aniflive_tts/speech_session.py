@@ -6,7 +6,10 @@ from datetime import datetime, timezone
 import hashlib
 import json
 import time
-from typing import Any, Mapping
+from typing import Any, Mapping, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .voice_library import VoiceBinding
 from uuid import uuid4
 
 from .continuity import (
@@ -89,6 +92,7 @@ class SpeechSession:
     last_activity_monotonic: float = field(default_factory=time.monotonic)
     condition: asyncio.Condition = field(default_factory=asyncio.Condition, repr=False)
     context: SpeechContextState = field(default_factory=SpeechContextState)
+    voice_binding: VoiceBinding | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
         self.continuity_policy = parse_continuity_policy(self.continuity_policy)
@@ -97,6 +101,11 @@ class SpeechSession:
             voice_profile=self.voice_profile,
             policy=self.continuity_policy,
         )
+
+    def release_voice_binding(self) -> None:
+        binding, self.voice_binding = self.voice_binding, None
+        if binding is not None:
+            binding.close()
 
     def touch(self) -> None:
         self.updated_at = utc_now()
@@ -165,6 +174,7 @@ class SpeechSessionManager:
 
     def _expire_session_locked(self, session: SpeechSession) -> None:
         session.state = "expired"
+        session.release_voice_binding()
         self._cancel_pending_locked(session)
         session.context.clear()
         session.updated_at = utc_now()
@@ -205,6 +215,7 @@ class SpeechSessionManager:
         voice_profile: str,
         sample_rate: int,
         continuity_policy: ContinuityPolicy | str = ContinuityPolicy.NONE,
+        voice_binding: VoiceBinding | None = None,
     ) -> SpeechSession:
         async with self._lock:
             await self._expire_locked()
@@ -221,6 +232,7 @@ class SpeechSessionManager:
                 voice_profile=voice_profile,
                 sample_rate=sample_rate,
                 continuity_policy=parse_continuity_policy(continuity_policy),
+                voice_binding=voice_binding,
             )
             self._sessions[session.session_id] = session
             self._prune_terminal_locked()
@@ -324,6 +336,7 @@ class SpeechSessionManager:
                     return segment
                 if session.state == "flushing":
                     session.state = "closed"
+                    session.release_voice_binding()
                     session.context.clear_neural()
                     session.touch()
                     return None
@@ -362,6 +375,7 @@ class SpeechSessionManager:
                 segment.error = error
                 segment.updated_at = utc_now()
                 session.state = "cancelled"
+                session.release_voice_binding()
                 session.context.clear()
                 self._cancel_pending_locked(session)
             else:
@@ -396,6 +410,7 @@ class SpeechSessionManager:
                     segment.error = "continuity state could not be committed"
                     segment.updated_at = utc_now()
                     session.state = "cancelled"
+                    session.release_voice_binding()
                     session.context.clear()
                     self._cancel_pending_locked(session)
                     session.touch()
@@ -421,6 +436,7 @@ class SpeechSessionManager:
         async with session.condition:
             if session.state not in TERMINAL_SESSION_STATES:
                 session.state = "cancelled"
+                session.release_voice_binding()
                 session.context.clear()
                 self._cancel_pending_locked(session)
                 session.touch()
@@ -436,6 +452,7 @@ class SpeechSessionManager:
                 if session.context.neural is not None:
                     cleared += 1
                 session.context.clear_neural()
+                session.release_voice_binding()
             return cleared
 
 

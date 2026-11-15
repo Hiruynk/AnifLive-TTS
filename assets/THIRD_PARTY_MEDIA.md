@@ -1,40 +1,45 @@
-# Third-Party Media Notice
+# UI Media Notice
 
-## `everynight_dance.gif`
+## Studio demo recording
 
-The decorative GIF used by the AnifLive-TTS project is based on a fan animation created by **千层的小星**.
+The README preview at `assets/aniflive-tts-studio-demo.gif` is an owner-supplied
+screen recording of the AnifLive-TTS Studio interface. The repository owner
+authorized its public inclusion in this release-preparation branch. SHA-256:
 
-- **Creator:** 千层的小星
-- **Original source:** [https://www.bilibili.com/video/BV1RV4HzTEth/](https://www.bilibili.com/video/BV1RV4HzTEth/)
-- **Purpose in this repository:** Decorative presentation only
+`554c9580dadd09c0881583c7022ce016a184f3eef7a69d75b3de6ff46ae4df0e`
 
-Special thanks to **千层的小星** for creating the original animation.
+This file is distinct from the third-party fan animation described by an
+obsolete version of this notice. The authorization applies to this supplied
+screen recording and does not change the software license or assert ownership
+of third-party material that might appear inside a recording.
 
-This GIF is a third-party fan-created media asset used as a decorative element
-in the README, WebUI and container image.
+## Existing public voice demo
 
-It is not executable source code and does not affect the model implementation,
-API or benchmark results. It is nevertheless redistributed as part of the
-repository and runtime presentation assets.
+`assets/roxy-v2proplus-cantonese-demo.mp4` is an existing public demo video
+containing generated speech output. The repository owner explicitly instructed
+that this demo remain in the release-preparation candidate. This is a
+file-specific distribution instruction; it does not authorize other audio,
+private Reference recordings, or model weights, and does not claim ownership
+of any third-party character or underlying rights. SHA-256:
 
-The GIF is **not covered by the AnifLive-TTS PolyForm Noncommercial 1.0.0 license**.
+`0b752658b0075b5e3db0b374be0e61bf77915e4703d45362f0321630d63ea44d`
 
-All rights relating to the GIF, the underlying fan creation, and any depicted third-party characters or intellectual property remain with their respective creators and rights holders.
+## PWA icons
 
-No public redistribution license or explicit permission is documented here.
-The project owner has accepted retaining this third-party decorative asset for
-the v1.4 release review; this notice does not claim ownership or relicense it.
+`webui/pwa/studio-icon-192.png` and `webui/pwa/studio-icon-512.png` are
+first-party application icons supplied with the WebUI.
 
-The presence, removal, or replacement of this media asset has no effect on the functionality, licensing, or distribution of the AnifLive-TTS software itself.
+## Mixkit workstation background and poster
 
-Its inclusion does not imply ownership, endorsement, sponsorship, or transfer of rights by AnifLive-TTS or AnifEngine.
-
-## `webui/media/voice-workstation-background.mp4`
-
-The full-screen workstation background is
+The full-screen workstation background at `webui/media/voice-workstation-background.mp4` is
 [Abstract Background in Grayscale](https://mixkit.co/free-stock-video/abstract-background-in-grayscale-101010/)
-from the [Mixkit contributor profile](https://mixkit.co/@mixkit/), downloaded from Mixkit
+from the [Mixkit contributor profile](https://mixkit.co/@mixkit/), downloaded
 under the [Mixkit Stock Video Free License](https://mixkit.co/license/#videoFree).
-The local poster, checksums, retrieval date, and license record are documented
-in `webui/media/README.md` and
+The video and its derived poster are documented in
+`webui/media/README.md`; the license record is
 `licenses/MIXKIT-STOCK-VIDEO-FREE-LICENSE.txt`.
+
+The local poster is `webui/media/voice-workstation-poster.jpg`. Its SHA-256 is
+`01e6977d8e325ce9572ebdbee82f6f6c22c1abeeb162dad42f196ee37706f535`.
+The distributed video SHA-256 is
+`26de26f0a6422688505684e7afbab1b13b3d68565b9156d6a9becf4fcd2c3eb4`.

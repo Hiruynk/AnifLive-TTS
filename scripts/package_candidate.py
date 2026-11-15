@@ -29,8 +29,11 @@ PUBLIC_ROOT_FILES = {
 PRIVATE_NAMES = {
     "login.html", "signin.html", "login.py", "local_auth.py", "auth.local.json",
     "docker-compose.local.yml", ".cloudflared-token",
-    "agents.md", "aniflive_tts_v1_5_beta_rust_python_sdk_codex_plan.md",
+    "agents.md",
 }
+PRIVATE_DOCUMENT_SUFFIXES = (
+    "_codex_plan.md", "_implementation_plan.md", "_master_start_prompt.md",
+)
 
 
 def validate_candidate_path(name: str) -> None:
@@ -42,6 +45,7 @@ def validate_candidate_path(name: str) -> None:
             r"RELEASE_NOTES_v[0-9][A-Za-z0-9._-]*\.md", name):
         raise ValueError(f"Root file has not been approved for a public candidate: {name}")
     if (not parts or parts[-1] in PRIVATE_NAMES
+            or parts[-1].endswith(PRIVATE_DOCUMENT_SUFFIXES)
             or re.search(r"login|signin|credentials|password|secrets", path.name, re.I)
             or path.stem.lower() in {"local_auth", "accounts", "users"}
             or any(part.startswith(("credentials", "secrets")) for part in parts)
@@ -134,7 +138,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source-root", type=Path, default=ROOT)
     parser.add_argument("--output-dir", type=Path, required=True)
-    parser.add_argument("--version", default="1.5.0-beta.1")
+    parser.add_argument("--version", default="1.5.0")
     args = parser.parse_args()
     print(create_candidate(args.source_root, args.output_dir, args.version))
 

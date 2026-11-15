@@ -49,8 +49,11 @@ impl NativeClient {
         for (name, value) in headers.unwrap_or_default() {
             let name = core::HeaderName::from_bytes(name.as_bytes())
                 .map_err(|_| pyo3::exceptions::PyValueError::new_err("invalid header name"))?;
-            let value = core::HeaderValue::from_str(&value)
+            let mut value = core::HeaderValue::from_str(&value)
                 .map_err(|_| pyo3::exceptions::PyValueError::new_err("invalid header value"))?;
+            if name.as_str() == "authorization" {
+                value.set_sensitive(true);
+            }
             defaults.insert(name, value);
         }
         let config = core::ClientConfig::new(base_url)
@@ -134,18 +137,358 @@ impl NativeClient {
             |py, value| convert::serialized(py, "Voices", value),
         )
     }
-    fn expressions(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+    fn create_voice(&self, py: Python<'_>, request: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
+        let request: core::VoiceCreate = convert::request(request, "VoiceCreate")?;
         let inner = self.inner.clone();
-        bridge::sync(py, async move { inner.expressions().await }, |py, value| {
-            convert::serialized(py, "ExpressionCatalogInfo", value)
-        })
+        bridge::sync(
+            py,
+            async move { inner.create_voice(&request).await },
+            |py, value| convert::serialized(py, "VoiceInfo", value),
+        )
     }
-    fn expressions_async(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+
+    fn create_voice_async(
+        &self,
+        py: Python<'_>,
+        request: &Bound<'_, PyAny>,
+    ) -> PyResult<Py<PyAny>> {
+        let request: core::VoiceCreate = convert::request(request, "VoiceCreate")?;
         let inner = self.inner.clone();
         bridge::asynchronous(
             py,
             &self.affinity,
-            async move { inner.expressions().await },
+            async move { inner.create_voice(&request).await },
+            |py, value| convert::serialized(py, "VoiceInfo", value),
+        )
+    }
+
+    fn voice(&self, py: Python<'_>, voice: String) -> PyResult<Py<PyAny>> {
+        let inner = self.inner.clone();
+        bridge::sync(py, async move { inner.voice(&voice).await }, |py, value| {
+            convert::serialized(py, "VoiceInfo", value)
+        })
+    }
+
+    fn voice_async(&self, py: Python<'_>, voice: String) -> PyResult<Py<PyAny>> {
+        let inner = self.inner.clone();
+        bridge::asynchronous(
+            py,
+            &self.affinity,
+            async move { inner.voice(&voice).await },
+            |py, value| convert::serialized(py, "VoiceInfo", value),
+        )
+    }
+
+    fn update_voice(
+        &self,
+        py: Python<'_>,
+        voice: String,
+        request: &Bound<'_, PyAny>,
+    ) -> PyResult<Py<PyAny>> {
+        let request: core::VoiceUpdate = convert::request(request, "VoiceUpdate")?;
+        let inner = self.inner.clone();
+        bridge::sync(
+            py,
+            async move { inner.update_voice(&voice, &request).await },
+            |py, value| convert::serialized(py, "VoiceInfo", value),
+        )
+    }
+
+    fn update_voice_async(
+        &self,
+        py: Python<'_>,
+        voice: String,
+        request: &Bound<'_, PyAny>,
+    ) -> PyResult<Py<PyAny>> {
+        let request: core::VoiceUpdate = convert::request(request, "VoiceUpdate")?;
+        let inner = self.inner.clone();
+        bridge::asynchronous(
+            py,
+            &self.affinity,
+            async move { inner.update_voice(&voice, &request).await },
+            |py, value| convert::serialized(py, "VoiceInfo", value),
+        )
+    }
+
+    fn delete_voice(&self, py: Python<'_>, voice: String) -> PyResult<Py<PyAny>> {
+        let inner = self.inner.clone();
+        bridge::sync(
+            py,
+            async move { inner.delete_voice(&voice).await },
+            |py, _| Ok(py.None()),
+        )
+    }
+
+    fn delete_voice_async(&self, py: Python<'_>, voice: String) -> PyResult<Py<PyAny>> {
+        let inner = self.inner.clone();
+        bridge::asynchronous(
+            py,
+            &self.affinity,
+            async move { inner.delete_voice(&voice).await },
+            |py, _| Ok(py.None()),
+        )
+    }
+
+    fn references(&self, py: Python<'_>, voice: String) -> PyResult<Py<PyAny>> {
+        let inner = self.inner.clone();
+        bridge::sync(
+            py,
+            async move { inner.references(&voice).await },
+            |py, value| convert::serialized(py, "References", value),
+        )
+    }
+
+    fn references_async(&self, py: Python<'_>, voice: String) -> PyResult<Py<PyAny>> {
+        let inner = self.inner.clone();
+        bridge::asynchronous(
+            py,
+            &self.affinity,
+            async move { inner.references(&voice).await },
+            |py, value| convert::serialized(py, "References", value),
+        )
+    }
+
+    fn reference(&self, py: Python<'_>, voice: String, reference: String) -> PyResult<Py<PyAny>> {
+        let inner = self.inner.clone();
+        bridge::sync(
+            py,
+            async move { inner.reference(&voice, &reference).await },
+            |py, value| convert::serialized(py, "ReferenceInfo", value),
+        )
+    }
+
+    fn reference_async(
+        &self,
+        py: Python<'_>,
+        voice: String,
+        reference: String,
+    ) -> PyResult<Py<PyAny>> {
+        let inner = self.inner.clone();
+        bridge::asynchronous(
+            py,
+            &self.affinity,
+            async move { inner.reference(&voice, &reference).await },
+            |py, value| convert::serialized(py, "ReferenceInfo", value),
+        )
+    }
+
+    fn prepare_reference(
+        &self,
+        py: Python<'_>,
+        voice: String,
+        reference: String,
+    ) -> PyResult<Py<PyAny>> {
+        let inner = self.inner.clone();
+        bridge::sync(
+            py,
+            async move { inner.prepare_reference(&voice, &reference).await },
+            |py, value| convert::serialized(py, "ReferenceInfo", value),
+        )
+    }
+
+    fn prepare_reference_async(
+        &self,
+        py: Python<'_>,
+        voice: String,
+        reference: String,
+    ) -> PyResult<Py<PyAny>> {
+        let inner = self.inner.clone();
+        bridge::asynchronous(
+            py,
+            &self.affinity,
+            async move { inner.prepare_reference(&voice, &reference).await },
+            |py, value| convert::serialized(py, "ReferenceInfo", value),
+        )
+    }
+
+    fn update_reference(
+        &self,
+        py: Python<'_>,
+        voice: String,
+        reference: String,
+        request: &Bound<'_, PyAny>,
+    ) -> PyResult<Py<PyAny>> {
+        let request: core::ReferenceUpdate = convert::request(request, "ReferenceUpdate")?;
+        let inner = self.inner.clone();
+        bridge::sync(
+            py,
+            async move { inner.update_reference(&voice, &reference, &request).await },
+            |py, value| convert::serialized(py, "ReferenceInfo", value),
+        )
+    }
+
+    fn update_reference_async(
+        &self,
+        py: Python<'_>,
+        voice: String,
+        reference: String,
+        request: &Bound<'_, PyAny>,
+    ) -> PyResult<Py<PyAny>> {
+        let request: core::ReferenceUpdate = convert::request(request, "ReferenceUpdate")?;
+        let inner = self.inner.clone();
+        bridge::asynchronous(
+            py,
+            &self.affinity,
+            async move { inner.update_reference(&voice, &reference, &request).await },
+            |py, value| convert::serialized(py, "ReferenceInfo", value),
+        )
+    }
+
+    fn delete_reference(
+        &self,
+        py: Python<'_>,
+        voice: String,
+        reference: String,
+    ) -> PyResult<Py<PyAny>> {
+        let inner = self.inner.clone();
+        bridge::sync(
+            py,
+            async move { inner.delete_reference(&voice, &reference).await },
+            |py, _| Ok(py.None()),
+        )
+    }
+
+    fn delete_reference_async(
+        &self,
+        py: Python<'_>,
+        voice: String,
+        reference: String,
+    ) -> PyResult<Py<PyAny>> {
+        let inner = self.inner.clone();
+        bridge::asynchronous(
+            py,
+            &self.affinity,
+            async move { inner.delete_reference(&voice, &reference).await },
+            |py, _| Ok(py.None()),
+        )
+    }
+
+    #[pyo3(signature=(voice, audio, metadata, filename="reference.wav"))]
+    fn upload_reference(
+        &self,
+        py: Python<'_>,
+        voice: String,
+        audio: Vec<u8>,
+        metadata: &Bound<'_, PyAny>,
+        filename: &str,
+    ) -> PyResult<Py<PyAny>> {
+        let metadata: core::ReferenceCreate = convert::request(metadata, "ReferenceCreate")?;
+        let filename = filename.to_owned();
+        let inner = self.inner.clone();
+        bridge::sync(
+            py,
+            async move {
+                inner
+                    .upload_reference(&voice, audio, &filename, &metadata)
+                    .await
+            },
+            |py, value| convert::serialized(py, "ReferenceInfo", value),
+        )
+    }
+
+    #[pyo3(signature=(voice, audio, metadata, filename="reference.wav"))]
+    fn upload_reference_async(
+        &self,
+        py: Python<'_>,
+        voice: String,
+        audio: Vec<u8>,
+        metadata: &Bound<'_, PyAny>,
+        filename: &str,
+    ) -> PyResult<Py<PyAny>> {
+        let metadata: core::ReferenceCreate = convert::request(metadata, "ReferenceCreate")?;
+        let filename = filename.to_owned();
+        let inner = self.inner.clone();
+        bridge::asynchronous(
+            py,
+            &self.affinity,
+            async move {
+                inner
+                    .upload_reference(&voice, audio, &filename, &metadata)
+                    .await
+            },
+            |py, value| convert::serialized(py, "ReferenceInfo", value),
+        )
+    }
+
+    #[pyo3(signature=(voice, reference, audio, metadata, filename="reference.wav"))]
+    fn replace_reference_audio(
+        &self,
+        py: Python<'_>,
+        voice: String,
+        reference: String,
+        audio: Vec<u8>,
+        metadata: &Bound<'_, PyAny>,
+        filename: &str,
+    ) -> PyResult<Py<PyAny>> {
+        let metadata: core::ReferenceUpdate = convert::request(metadata, "ReferenceUpdate")?;
+        let filename = filename.to_owned();
+        let inner = self.inner.clone();
+        bridge::sync(
+            py,
+            async move {
+                inner
+                    .replace_reference_audio(&voice, &reference, audio, &filename, &metadata)
+                    .await
+            },
+            |py, value| convert::serialized(py, "ReferenceInfo", value),
+        )
+    }
+
+    #[pyo3(signature=(voice, reference, audio, metadata, filename="reference.wav"))]
+    fn replace_reference_audio_async(
+        &self,
+        py: Python<'_>,
+        voice: String,
+        reference: String,
+        audio: Vec<u8>,
+        metadata: &Bound<'_, PyAny>,
+        filename: &str,
+    ) -> PyResult<Py<PyAny>> {
+        let metadata: core::ReferenceUpdate = convert::request(metadata, "ReferenceUpdate")?;
+        let filename = filename.to_owned();
+        let inner = self.inner.clone();
+        bridge::asynchronous(
+            py,
+            &self.affinity,
+            async move {
+                inner
+                    .replace_reference_audio(&voice, &reference, audio, &filename, &metadata)
+                    .await
+            },
+            |py, value| convert::serialized(py, "ReferenceInfo", value),
+        )
+    }
+
+    #[pyo3(signature=(*, voice_profile=None))]
+    fn expressions(&self, py: Python<'_>, voice_profile: Option<String>) -> PyResult<Py<PyAny>> {
+        let inner = self.inner.clone();
+        bridge::sync(
+            py,
+            async move {
+                match voice_profile {
+                    Some(voice_profile) => inner.voice_expressions(&voice_profile).await,
+                    None => inner.expressions().await,
+                }
+            },
+            |py, value| convert::serialized(py, "ExpressionCatalogInfo", value),
+        )
+    }
+    #[pyo3(signature=(*, voice_profile=None))]
+    fn expressions_async(
+        &self,
+        py: Python<'_>,
+        voice_profile: Option<String>,
+    ) -> PyResult<Py<PyAny>> {
+        let inner = self.inner.clone();
+        bridge::asynchronous(
+            py,
+            &self.affinity,
+            async move {
+                match voice_profile {
+                    Some(voice_profile) => inner.voice_expressions(&voice_profile).await,
+                    None => inner.expressions().await,
+                }
+            },
             |py, value| convert::serialized(py, "ExpressionCatalogInfo", value),
         )
     }
@@ -189,6 +532,7 @@ impl NativeClient {
                 "pcm_streaming" => Ok(core::RequiredFeature::PcmStreaming),
                 "expressions" => Ok(core::RequiredFeature::Expressions),
                 "speech_sessions" => Ok(core::RequiredFeature::SpeechSessions),
+                "voice_management" => Ok(core::RequiredFeature::VoiceManagement),
                 _ => Err(pyo3::exceptions::PyValueError::new_err(
                     "unknown required feature",
                 )),
@@ -209,6 +553,7 @@ impl NativeClient {
                 "pcm_streaming" => Ok(core::RequiredFeature::PcmStreaming),
                 "expressions" => Ok(core::RequiredFeature::Expressions),
                 "speech_sessions" => Ok(core::RequiredFeature::SpeechSessions),
+                "voice_management" => Ok(core::RequiredFeature::VoiceManagement),
                 _ => Err(pyo3::exceptions::PyValueError::new_err(
                     "unknown required feature",
                 )),

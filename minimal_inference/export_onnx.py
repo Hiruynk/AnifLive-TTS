@@ -420,6 +420,8 @@ def gpt_validation_inputs(seed):
 
 
 def export_onnx(args):
+    # Keep native attention and exported MatMul/Softmax evaluation aligned.
+    torch.backends.mha.set_fastpath_enabled(False)
     torch.set_num_threads(4)
     torch.manual_seed(1234)
     torch.set_grad_enabled(False)
@@ -440,14 +442,18 @@ def export_onnx(args):
     # SSL
     cnhubert.cnhubert_base_path = args.cnhubert_base_path
     ssl_model = cnhubert.get_model()
-    ssl_model = ssl_model.to(device)
+    ssl_model = ssl_model.to(device=device, dtype=torch.float32)
+    # Export explicit attention ops; HF SDPA mask construction is not traceable
+    # for the dynamic audio/text axes used by this ONNX bundle.
+    ssl_model.model.set_attn_implementation("eager")
     ssl_model.eval()
     
     # BERT
     bert_model = AutoModelForMaskedLM.from_pretrained(
-        args.bert_path, local_files_only=True, trust_remote_code=False
+        args.bert_path, local_files_only=True, trust_remote_code=False,
+        attn_implementation="eager",
     )
-    bert_model = bert_model.to(device)
+    bert_model = bert_model.to(device=device, dtype=torch.float32)
     bert_model.eval()
 
     # GPT
@@ -540,29 +546,39 @@ def export_onnx(args):
     ssl_wrapper = SSLWrapper(ssl_model.model)
     # Input: [1, T] audio 16k
     dummy_audio = torch.randn(1, 16000 * 2)
-    torch.onnx.export(
-        ssl_wrapper,
-        (dummy_audio,),
-        f"{output_dir}/ssl.onnx",
-        input_names=["audio"],
-        output_names=["last_hidden_state"],
-        dynamic_axes={"audio": {1: "time"}, "last_hidden_state": {2: "time"}},
-        opset_version=18,
-        dynamo=False
-    )
-
-    # 校验SSL模型
-    if validator:
-        validator.validate_model(
-            model_name="SSL",
-            onnx_path=f"{output_dir}/ssl.onnx",
-            pytorch_model=ssl_wrapper,
-            dummy_inputs={"audio": dummy_audio},
+    # HuBERT receives one unpadded waveform, so its bidirectional mask is
+    # identically empty. HF 5.5's mask factory cannot trace the symbolic scalar
+    # length with TorchScript; omit that no-op mask only for this export stage.
+    from transformers.models.hubert import modeling_hubert
+    original_hubert_mask = modeling_hubert.create_bidirectional_mask
+    modeling_hubert.create_bidirectional_mask = lambda **kwargs: None
+    try:
+        torch.onnx.export(
+            ssl_wrapper,
+            (dummy_audio,),
+            f"{output_dir}/ssl.onnx",
+            input_names=["audio"],
             output_names=["last_hidden_state"],
-            rtol=1e-3,
-            atol=1e-5
+            dynamic_axes={"audio": {1: "time"}, "last_hidden_state": {2: "time"}},
+            opset_version=18,
+            dynamo=False
         )
+
+        # 校验SSL模型
+        if validator:
+            validator.validate_model(
+                model_name="SSL",
+                onnx_path=f"{output_dir}/ssl.onnx",
+                pytorch_model=ssl_wrapper,
+                dummy_inputs={"audio": dummy_audio},
+                output_names=["last_hidden_state"],
+                rtol=1e-3,
+                atol=1e-5
+            )
     
+    finally:
+        modeling_hubert.create_bidirectional_mask = original_hubert_mask
+
     print("Exporting BERT...")
     # Input: input_ids [1, T], attention_mask [1, T], token_type_ids [1, T]
     dummy_input_ids = torch.randint(0, 100, (1, 20), dtype=torch.long)
@@ -574,7 +590,11 @@ def export_onnx(args):
             super().__init__()
             self.bert = bert
         def forward(self, input_ids, attention_mask, token_type_ids):
-            outputs = self.bert(input_ids=input_ids, attention_mask=attention_mask, token_type_ids=token_type_ids, output_hidden_states=True)
+            # Supply the additive padding mask explicitly instead of tracing
+            # the HF mask factory's symbolic-length dispatch.
+            dtype = self.bert.bert.embeddings.word_embeddings.weight.dtype
+            additive_mask = (1.0 - attention_mask[:, None, None, :].to(dtype)) * torch.finfo(dtype).min
+            outputs = self.bert(input_ids=input_ids, attention_mask=additive_mask, token_type_ids=token_type_ids, output_hidden_states=True)
             return torch.cat(outputs.hidden_states[-3:-2], -1)
 
     bert_wrapper = BERTWrapper(bert_model)

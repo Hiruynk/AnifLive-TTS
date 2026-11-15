@@ -1,0 +1,18 @@
+# Windows/NVIDIA V5 Turbo profile, installed over the cu128 runtime image.
+# These versions match the qualified upstream frontend and acoustic runtime.
+# The vendored Apache g2p_en is supplied by the model package assembler;
+# installing the PyPI g2p-en package would add its unused Distance dependency.
+transformers==4.57.6
+huggingface-hub==0.36.0
+x-transformers==2.7.6
+rotary-embedding-torch==0.8.3
+einx==0.3.0
+accelerate==1.12.0
+peft==0.17.1
+pytorch-lightning==2.5.6
+torchmetrics==1.5.0
+lightning-utilities==0.15.3
+resampy==0.4.3
+loguru==0.7.3
+torchcodec==0.10.0
+onnxruntime-gpu==1.22.0

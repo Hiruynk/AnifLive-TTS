@@ -1,0 +1,7 @@
+# Separate CPU conversion environment; not part of the runtime inference path.
+numpy==2.5.4
+ml-dtypes==0.6.0
+onnx==1.23.2
+protobuf==7.36.2
+safetensors==0.8.0
+typing-extensions==4.16.0

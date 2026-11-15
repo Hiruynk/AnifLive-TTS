@@ -1,0 +1,33 @@
+{
+  "schema": 1,
+  "scope": "Windows and gsv.cpp per-request measurements; connection addresses, private inputs and audio hashes omitted. Mac formal aggregate and per-round results are in MACOS_MATCHED_SUMMARY.json; Mac raw requests remain in its private qualification data.",
+  "counts": {
+    "aniflive-v5": {
+      "all": 3110,
+      "measured": 3000
+    },
+    "aniflive-v2": {
+      "all": 3110,
+      "measured": 3000
+    },
+    "gsv-v0.1.3": {
+      "all": 933,
+      "measured": 900
+    }
+  },
+  "sources": [
+    {
+      "system": "aniflive-v5",
+      "private_raw_sha256": "3f7a66bdfa8e3fe725a7ff743b2a13b1bff179a8711bad4603314fb85ffd76dd"
+    },
+    {
+      "system": "aniflive-v2",
+      "private_raw_sha256": "3bda007838268c9917f5229e2f39f98acd817b2a6d0367f4cca8a41d07a9d387"
+    },
+    {
+      "system": "gsv-v0.1.3",
+      "private_raw_sha256": "9401d50ab6767ecdb053438e9f62e86808b6b9f531a5d6f3735b80586cb7f2d0"
+    }
+  ],
+  "csv_sha256": "3e03e183cf167bc04b5c82b00dce04ed1d68c50d9d21d6cefbc5aea4da7a52c2"
+}

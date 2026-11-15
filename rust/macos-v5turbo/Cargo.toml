@@ -1,0 +1,16 @@
+[package]
+name = "aniflive-macos-v5turbo"
+default-run = "aniflive-macos-v5turbo"
+version = "0.0.1"
+edition = "2021"
+license = "PolyForm-Noncommercial-1.0.0"
+
+[workspace]
+
+[dependencies]
+mlx-rs = { git = "https://github.com/oxiglade/mlx-rs", rev = "adf439bf5361d8a02955de7aaf651b0c45900945" }
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+base64 = "0.22"

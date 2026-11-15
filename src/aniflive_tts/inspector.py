@@ -102,6 +102,7 @@ def inspect_checkpoint(path: Path, *, kind: str, allow_unsafe_pickle: bool = Fal
     config = _config(payload)
     state = _state(payload)
     evidence: list[str] = []
+    tensor_shapes_match = False
     version = str(
         config.get("version")
         or (config.get("model", {}) if isinstance(config.get("model"), dict) else {}).get("version")
@@ -129,6 +130,7 @@ def inspect_checkpoint(path: Path, *, kind: str, allow_unsafe_pickle: bool = Fal
         if getattr(bert, "shape", None) == (512, 1024) and getattr(
             audio_embedding, "shape", None
         ) == (1025, 512):
+            tensor_shapes_match = True
             evidence.append("GPT tensor shapes match the V2ProPlus export contract")
     elif kind == "sovits":
         train_config = config.get("train", {}) if isinstance(config.get("train"), dict) else {}
@@ -136,6 +138,11 @@ def inspect_checkpoint(path: Path, *, kind: str, allow_unsafe_pickle: bool = Fal
         pretrained = str(train_config.get("pretrained_s2G", ""))
         if "v2proplus" in pretrained.lower():
             evidence.append("SoVITS training config declares the V2ProPlus generator family")
+        # Official zero-shot base weights declare their family in `info`,
+        # rather than carrying a fine-tuning pretrained_s2G path.
+        info = payload.get("info", "") if isinstance(payload, dict) else ""
+        if isinstance(info, str) and "v2proplus" in info.lower():
+            evidence.append("SoVITS checkpoint metadata declares the V2ProPlus generator family")
         ssl_projection = state.get("enc_p.ssl_proj.weight")
         text_embedding = state.get("enc_p.text_embedding.weight")
         speaker_bias = state.get("sv_emb.bias")
@@ -145,6 +152,7 @@ def inspect_checkpoint(path: Path, *, kind: str, allow_unsafe_pickle: bool = Fal
             and getattr(text_embedding, "shape", None) == (732, 192)
             and getattr(speaker_bias, "shape", None) == (1024,)
         ):
+            tensor_shapes_match = True
             evidence.append("SoVITS tensor shapes match the V2ProPlus export contract")
     else:
         raise ValueError("kind must be 'gpt' or 'sovits'")
@@ -153,7 +161,7 @@ def inspect_checkpoint(path: Path, *, kind: str, allow_unsafe_pickle: bool = Fal
     # Require independent configuration and tensor-shape evidence. V2ProPlus
     # SoVITS checkpoints use ``sv_emb`` conditioning; CFM tensors belong to a
     # different model generation and must not be required here.
-    if len(evidence) < 2:
+    if not tensor_shapes_match or len(evidence) < 2:
         raise ModelInspectionError(
             f"{path} is not a verified GPT-SoVITS V2 Pro Plus {kind} checkpoint; evidence={evidence}"
         )

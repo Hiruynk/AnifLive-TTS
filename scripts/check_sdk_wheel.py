@@ -1,14 +1,18 @@
 from __future__ import annotations
 
 import argparse
+from configparser import ConfigParser
 from email.parser import Parser
 from pathlib import Path
+from packaging.markers import Marker
 from zipfile import ZipFile
 
 PRIVATE_NAMES = {
     "agents.md",
-    "aniflive_tts_v1_5_beta_rust_python_sdk_codex_plan.md",
 }
+PRIVATE_DOCUMENT_SUFFIXES = (
+    "_codex_plan.md", "_implementation_plan.md", "_master_start_prompt.md",
+)
 REQUIRED_FILES = {
     "aniflive_tts/__init__.py",
     "aniflive_tts/cli.py",
@@ -30,9 +34,11 @@ def check_wheel(path: Path) -> dict[str, str | int]:
         missing = REQUIRED_FILES - names
         if missing:
             raise ValueError("Missing package files: " + ", ".join(sorted(missing)))
-        if any(Path(name).name.lower() in PRIVATE_NAMES for name in names):
+        if any(Path(name).name.lower() in PRIVATE_NAMES
+               or Path(name).name.lower().endswith(PRIVATE_DOCUMENT_SUFFIXES)
+               for name in names):
             raise ValueError("Private instruction document in wheel")
-        if any(".local-sdk" in Path(name).parts for name in names):
+        if any({".local-sdk", ".local-stable"}.intersection(Path(name).parts) for name in names):
             raise ValueError("Local qualification artifacts in wheel")
         extensions = [name for name in names if name.startswith("aniflive_tts/_native.")
                       and name.endswith((".so", ".pyd"))]
@@ -59,10 +65,11 @@ def check_wheel(path: Path) -> dict[str, str | int]:
             raise ValueError("Expected platform-specific CPython 3.10+ ABI3 tags")
         for requirement in metadata.get_all("Requires-Dist") or []:
             _, separator, marker = requirement.partition(";")
-            if not separator or marker.strip() != 'extra == "runtime"':
+            if not separator or str(Marker(marker.strip())) != 'extra == "runtime"':
                 raise ValueError("Bare SDK must not install Python runtime dependencies")
-        entry_points = archive.read(prefix + "entry_points.txt").decode("utf-8")
-        if "aniflive-tts = aniflive_tts.cli:main" not in entry_points:
+        entry_points = ConfigParser(interpolation=None)
+        entry_points.read_string(archive.read(prefix + "entry_points.txt").decode("utf-8"))
+        if entry_points.get("console_scripts", "aniflive-tts", fallback=None) != "aniflive_tts.cli:main":
             raise ValueError("Missing runtime CLI entry point")
         return {"version": metadata["Version"], "tag": ",".join(tags),
                 "files": len(names), "native_bytes": archive.getinfo(extensions[0]).file_size}

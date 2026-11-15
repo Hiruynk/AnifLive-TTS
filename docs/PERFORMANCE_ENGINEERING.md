@@ -1,8 +1,68 @@
 # AnifLive-TTS Performance Engineering Records
 
+See [Benchmarks](BENCHMARKS.md) for the current comparison tables, HTTP protocol, source records and measurement types. This file retains the detailed engineering history.
+
+## v1.5 Integrated Release Measurements
+
+The integrated Windows source was measured on the RTX 5070 Ti with the same
+canonical Japanese text and the shared HTTP client. Each AnifLive-TTS backend has
+ten sessions and 1,000 measurements per mode (3,000 measured requests total).
+The local gsv.cpp v0.1.3 Vulkan run has three sessions and 300 measurements per
+mode (900 total). Sample counts and protocols are reported separately.
+
+| Backend | Keep-alive audible P50 / P95 | New-connection audible P50 / P95 | Complete WAV wall P50 / P95 |
+|---|---:|---:|---:|
+| AnifLive-TTS v5Turbo, 48 kHz | 80.927 / 84.332 ms | 82.222 / 85.751 ms | 206.759 / 219.387 ms |
+| AnifLive-TTS v2ProPlus, 32 kHz | 75.697 / 99.365 ms | 76.785 / 100.739 ms | 180.979 / 231.120 ms |
+| AnifLive-TTS v5Turbo, Mac Studio M5 Max, 48 kHz | 404.693 / 410.781 ms | 404.667 / 410.383 ms | 231.086 / 236.376 ms |
+| gsv.cpp v0.1.3, Vulkan, 48 kHz | 354.449 / 361.297 ms | 352.721 / 360.302 ms | 242.225 / 252.464 ms |
+
+The current source numbers are distinct from the earlier frozen qualification
+below. The [machine-readable summary](../benchmarks/V1_5_BENCHMARK_SUMMARY.json)
+contains measurement counts, precision and source/report hashes. Historical
+results and external projects are not substituted for these local runs.
+
+## Earlier Frozen Windows v5Turbo Qualification
+
+The qualified CUDA 12.8 / RTX 5070 Ti run uses v5Turbo, FP16, native four-step
+CFM and CFG 0. It retains native PyTorch reference conditioning, TensorRT 11
+acoustic engines and the validated CUDA/Triton semantic path. It is a hybrid
+backend; the historical v2ProPlus claim of no PyTorch neural execution does not
+describe this backend.
+
+Ten sessions each contain 10 warmups, 100 complete WAVs, 100 fresh-connection
+streams and 100 keep-alive streams, at concurrency one. There are 3,000 measured
+requests, plus 100 warmups and ten transport-prime requests. Audible TTFA uses
+the same 10 ms / -45 dBFS detector as the historical benchmark, excludes device
+playback latency, and includes connection establishment for fresh connections.
+
+| Metric | P50 | P95 |
+|---|---:|---:|
+| Keep-alive audible TTFA | 80.310 ms | 84.880 ms |
+| Fresh-connection audible TTFA | 81.743 ms | 86.384 ms |
+| Keep-alive first PCM packet | 66.268 ms | 70.838 ms |
+| Fresh-connection first PCM packet | 67.701 ms | 72.342 ms |
+| Complete WAV wall time | 206.096 ms | 224.512 ms |
+
+These are pooled request statistics, not the fastest session. The canonical
+short Japanese workload has pooled streaming RTF P50 0.04655 (keep-alive) and
+0.04503 (fresh connection). The [public evidence summary](../benchmarks/V1_5_BENCHMARK_SUMMARY.json)
+records the frozen source commits and report digest. This qualification is an
+input to release integration; it does not automatically qualify rebuilt engines
+or changes to the release runtime. The integrated results are reported above.
+
+The HTTP client keeps the server connection persistent even when measuring a
+fresh connection, consumes the response, then actively closes its own socket.
+Each fresh request still gets a new connection and its full connect time is
+measured. This prevents Docker Desktop's host-port forwarding from reusing a
+recent passively closed client tuple; there is no failed-request retry or
+removal of slow samples. The common [benchmark client](../scripts/benchmark_release.py)
+also distinguishes HTTP body arrival from actual PCM arrival and parses
+streaming RIFF headers before detecting audible audio.
+
 ## v1.3 Canonical Result
 
-The v1.3 release benchmark uses the external Roxy V2ProPlus package only. Ten
+The v1.3 release benchmark uses the external Roxy v2ProPlus package only. Ten
 sessions each run 10 warmups, 100 complete-WAV requests, 100 new-connection
 streaming requests, and 100 keep-alive streaming requests at concurrency 1.
 Audible TTFA is measured from client request send to the first audible PCM
@@ -30,7 +90,7 @@ API and does not start another neural runtime.
 
 ## Local Result
 
-The release workload uses two independent V2ProPlus voice packages. Each voice
+The release workload uses two independent v2ProPlus voice packages. Each voice
 runs ten sessions with 10 warmups, 100 complete-WAV requests, 100 new-connection
 streaming requests, and 100 keep-alive streaming requests per session. Formal
 requests use concurrency 1. The two transport modes are reported separately.
@@ -63,8 +123,8 @@ Streaming and complete-WAV paths use the same seed and sampling settings.
 
 | Voice package | Waveform correlation | Log-mel cosine | Speaker cosine | SI-SDR | Duration difference |
 |---|---:|---:|---:|---:|---:|
-| Miku V2ProPlus | 0.775697 | 0.995100 | 0.987893 | 1.792 dB | 0.000% |
-| Roxy V2ProPlus | 0.995861 | 0.993346 | 0.983652 | 20.794 dB | 0.629% |
+| Miku v2ProPlus | 0.775697 | 0.995100 | 0.987893 | 1.792 dB | 0.000% |
+| Roxy v2ProPlus | 0.995861 | 0.993346 | 0.983652 | 20.794 dB | 0.629% |
 
 The release gates are log-mel cosine `>=0.99`, speaker cosine `>=0.98`, and
 duration difference `<=3%`. No INT8, reduced generation steps, or PyTorch
@@ -130,3 +190,5 @@ same build, vulnerability, offline-startup, and target-host validation gates.
 - https://docs.nvidia.com/deeplearning/tensorrt/latest/getting-started/support-matrix.html
 - https://docs.nvidia.com/datacenter/tesla/drivers/cuda-toolkit-driver-and-architecture-matrix.html
 - https://docs.nvidia.com/cuda/blackwell-compatibility-guide/index.html
+
+The Mac Studio M5 Max formal run uses the same Reference, test sentence, seed, sampling settings and HTTP timing protocol as the Windows comparison. It has ten rounds and 1,000 measured requests per condition. [Mac aggregate and per-round evidence](../benchmarks/v1.5/MACOS_MATCHED_SUMMARY.json) retains all pooled and round statistics; the earlier Mac text/seed campaign is historical only.

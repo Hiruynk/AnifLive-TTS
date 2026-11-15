@@ -260,6 +260,7 @@ class ConditioningBundle:
     speaker_embedding: Any
     expression_id: str
     policy: ConditioningPolicy
+    identity_reference_id: str | None = None
 
     @classmethod
     def full_switch(cls, reference: PreparedReference) -> "ConditioningBundle":

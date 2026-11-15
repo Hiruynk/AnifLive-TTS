@@ -24,6 +24,7 @@ reports/
 *.ckpt
 *.pth
 *.onnx
+!scripts/v5_graph/*-topology.onnx
 *.onnx.data
 *.pt
 *.safetensors
@@ -42,7 +43,7 @@ secrets*
 
 # Local execution instructions
 AGENTS.md
-ANIFLIVE_TTS_V1_5_BETA_RUST_PYTHON_SDK_CODEX_PLAN.md
+*_CODEX_PLAN.md
 .local-sdk/
 
 # Native SDK build artifacts
@@ -51,3 +52,9 @@ build/
 *.so
 *.pyd
 *.dylib
+
+.local-stable/
+
+*_IMPLEMENTATION_PLAN.md
+
+*_MASTER_START_PROMPT.md

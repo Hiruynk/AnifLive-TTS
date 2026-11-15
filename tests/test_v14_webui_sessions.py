@@ -30,17 +30,17 @@ def _trust_test_client(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("ANIFLIVE_TTS_WEBUI_TRUSTED_HOSTS", "testserver")
 
 
-def _session_upstream(captured: dict[str, object]) -> httpx.AsyncClient:
+def _session_upstream(captured: dict[str, object], *, shared_voice: bool = False, native: bool = False) -> httpx.AsyncClient:
     def handler(request: httpx.Request) -> httpx.Response:
         path = request.url.path
         if path == "/openapi.json":
-            return httpx.Response(200, json={"info": {"version": "1.4.0-dev"}})
+            return httpx.Response(200, json={"info": {"version": "1.5.0" if shared_voice or native else "1.4.0-dev"}})
         if path == "/health":
             return httpx.Response(
                 200,
                 json={
                     "ready": True,
-                    "backend": "TensorRT-11",
+                    "backend": "MLX-Metal" if native else "TensorRT-11",
                     "engine_count": 9,
                     "model": "roxy-v2proplus",
                 },
@@ -50,11 +50,12 @@ def _session_upstream(captured: dict[str, object]) -> httpx.AsyncClient:
                 200,
                 json={
                     "model": "roxy-v2proplus",
-                    "version": "v2ProPlus",
-                    "backend": "TensorRT-11",
+                    "version": "v5turbo" if native else "v2ProPlus",
+                    "backend": "MLX-Metal" if native else "TensorRT-11",
                     "engine_count": 9,
-                    "sample_rate": 32000,
+                    "sample_rate": 48000 if native else 32000,
                     "pytorch_fallback": False,
+                    "voice": "" if shared_voice else "default",
                 },
             )
         if path == "/v1/models":
@@ -67,6 +68,13 @@ def _session_upstream(captured: dict[str, object]) -> httpx.AsyncClient:
             )
         if path == "/v1/expressions":
             return httpx.Response(200, json={"object": "list", **EXPRESSION_METADATA})
+        if (shared_voice or native) and path == "/v1/voices":
+            return httpx.Response(200, json={"data": [{"id": "voice_a", "default_reference_id": "ref_a"}]})
+        if shared_voice and path == "/v1/voices/voice_a/references/ref_a":
+            return httpx.Response(200, json={"prepare_state": "ready" if captured.get("prepare") else "unprepared"})
+        if shared_voice and path == "/v1/voices/voice_a/references/ref_a/prepare":
+            captured["prepare"] = True
+            return httpx.Response(202, json={"prepare_state": "queued"})
         if path == "/v1/sessions" and request.method == "POST":
             captured["create"] = json.loads(request.content)
             return httpx.Response(
@@ -108,14 +116,15 @@ def _session_upstream(captured: dict[str, object]) -> httpx.AsyncClient:
                     "x-pytorch-fallback": "false",
                     "x-tts-model": "roxy-v2proplus",
                     "x-tts-stream": "pcm_s16le",
-                    "x-tts-sample-rate": "32000",
+                    "x-tts-backend": "MLX-Metal" if native else "TensorRT-11",
+                    "x-tts-sample-rate": "48000" if native else "32000",
                     "x-tts-channels": "1",
                     "x-tts-session-id": "sess_test",
                     "x-tts-session-context": "committed-neural-v1",
                     "x-tts-session-context-policy": "A",
                     "x-tts-neural-state-continuity": "false",
                     "x-tts-acoustic-latent-continuity": "false",
-                    "x-tts-continuity-qualification": "experimental-unqualified",
+                    "x-tts-continuity-qualification": "qualified-policy-a" if native else "experimental-unqualified",
                 },
             )
         if path == "/v1/audio/cancel":
@@ -128,11 +137,11 @@ def _session_upstream(captured: dict[str, object]) -> httpx.AsyncClient:
     )
 
 
-def _app(tmp_path: Path, captured: dict[str, object]):
+def _app(tmp_path: Path, captured: dict[str, object], *, native: bool = False):
     (tmp_path / "index.html").write_text("<!doctype html>", encoding="utf-8")
     return create_webui_app(
         static_dir=tmp_path,
-        client=_session_upstream(captured),
+        client=_session_upstream(captured, native=native),
         workstation=WorkstationStore(tmp_path / "workstation"),
     )
 
@@ -205,11 +214,12 @@ def test_webui_session_proxy_preserves_order_and_resolves_each_segment(
     assert all("expression_prompt" not in segment for segment in segments)
 
 
+@pytest.mark.parametrize("native", [False, True])
 def test_webui_session_audio_is_pcm_stream_with_honest_context_header(
-    tmp_path: Path,
+    tmp_path: Path, native: bool,
 ) -> None:
     captured: dict[str, object] = {}
-    app = _app(tmp_path, captured)
+    app = _app(tmp_path, captured, native=native)
 
     with TestClient(app) as client:
         response = client.get("/api/sessions/sess_test/audio")
@@ -218,7 +228,9 @@ def test_webui_session_audio_is_pcm_stream_with_honest_context_header(
 
     assert response.status_code == 200
     assert response.content == b"\x01\x00\x02\x00\x03\x00"
-    assert response.headers["x-tensorrt-backend"] == "TensorRT-11"
+    assert response.headers["x-tts-backend" if native else "x-tensorrt-backend"] == ("MLX-Metal" if native else "TensorRT-11")
+    assert response.headers["x-tts-sample-rate"] == ("48000" if native else "32000")
+    assert response.headers["x-tts-continuity-qualification"] == ("qualified-policy-a" if native else "experimental-unqualified")
     assert response.headers["x-tts-session-context"] == "committed-neural-v1"
     assert response.headers["x-tts-session-context-policy"] == "A"
     assert response.headers["x-tts-neural-state-continuity"] == "false"
@@ -294,3 +306,26 @@ def test_webui_session_proxy_rejects_invalid_ids_and_fake_segment_fields(
     assert invalid_id.status_code == 400
     assert fake_control.status_code == 400
     assert "segments" not in captured
+
+
+def test_shared_base_requires_explicit_voice_and_prepares_default_reference(tmp_path: Path) -> None:
+    captured: dict[str, object] = {}
+    app = create_webui_app(
+        client=_session_upstream(captured, shared_voice=True),
+        workstation=WorkstationStore(tmp_path / 'workstation'),
+    )
+    with TestClient(app) as client:
+        status = client.get('/api/status').json()
+        assert status['voices'][0]['id'] == 'voice_a'
+        for voice in ('default', '../escape'):
+            response = client.post('/api/sessions', json={
+                'model': 'roxy-v2proplus', 'voice_profile': voice,
+            })
+            assert response.status_code == 400
+        assert 'create' not in captured
+        response = client.post('/api/sessions', json={
+            'model': 'roxy-v2proplus', 'voice_profile': 'voice_a',
+        })
+        assert response.status_code == 201
+        assert captured['create']['voice_profile'] == 'voice_a'
+        assert captured['prepare'] is True

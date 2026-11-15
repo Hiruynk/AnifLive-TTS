@@ -3,7 +3,40 @@ from __future__ import annotations
 import asyncio
 import json
 
+import pytest
+
 from fixture_server import FixtureServer
+
+
+def test_async_api_key_is_sent_and_filtered_from_echoed_errors(capfd):
+    from aniflive_tts import APIError, AsyncClient
+
+    key = 'fixture-async-key-"quoted"'
+
+    async def scenario(server):
+        async with AsyncClient(server.base_url, api_key=key) as client:
+            assert key not in repr(client)
+            assert (await client.health()).ready
+            server.set_override(
+                "GET", "/health", status=401,
+                body={"message": f"Rejected Bearer {key}", "code": key},
+                headers={"Retry-After": key},
+            )
+            with pytest.raises(APIError) as caught:
+                await client.health()
+        error = caught.value
+        assert error.status_code == 401
+        assert "fixture-async-key" not in str(error) + repr(error) + error.message
+        assert error.diagnostic is None
+        assert error.server_code is None
+        assert error.retry_after is None
+
+    with FixtureServer() as server:
+        asyncio.run(scenario(server))
+        for request in server.records:
+            sent = {name.lower(): value for name, value in request.headers}
+            assert sent["authorization"] == f"Bearer {key}"
+    assert "fixture-async-key" not in "".join(capfd.readouterr())
 
 
 def test_async_discovery_wav_and_incremental_pcm():

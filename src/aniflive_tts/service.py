@@ -35,7 +35,7 @@ import threading
 import time
 import wave
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field as dataclass_field, replace
 from pathlib import Path
 
 from .runtime_handoff_control import install_runtime_control
@@ -60,6 +60,7 @@ from aniflive_tts.expression import (
     ConditioningPolicy,
     ExpressionCatalog,
     ExpressionSegment,
+    ReferenceDescriptor,
     has_safe_expression_boundary,
     load_expression_catalog,
 )
@@ -74,6 +75,9 @@ from aniflive_tts.model_backend import (
     model_backend_for_manifest,
 )
 from aniflive_tts.runtime_control import WarmRetentionController
+from aniflive_tts.voices import VoiceError, VoiceStore
+from aniflive_tts.voice_library import VoiceBinding, VoiceLibrary
+from aniflive_tts.voice_api import install_voice_routes
 from aniflive_tts.speech_session import (
     SpeechSession,
     SpeechSessionError,
@@ -88,7 +92,7 @@ logging.basicConfig(
 )
 
 SERVICE_NAME = "AnifLive-TTS"
-SERVICE_VERSION = "1.5.0b1"
+SERVICE_VERSION = "1.5.0"
 MODEL_ID = os.environ.get("ANIFLIVE_TTS_MODEL_ID", "unconfigured")
 VOICE_ID = os.environ.get("ANIFLIVE_TTS_VOICE_PROFILE", "default")
 REFERENCE_TEXT = os.environ.get("ANIFLIVE_TTS_REFERENCE_TEXT", "")
@@ -181,6 +185,12 @@ class RequestError(ValueError):
     status_code = 400
 
 
+class SynthesisCancelled(RequestError):
+    """A cancelled complete request must not return a successful partial WAV."""
+
+    status_code = 409
+
+
 class RequestBodyTooLarge(RequestError):
     """The JSON request exceeds the public API's fixed memory budget."""
 
@@ -212,6 +222,7 @@ class RuntimeSettings:
     bert_path: Path
     reference_wav: Path
     profile_manifest: Path
+    dynamic_voices: bool = False
 
     @classmethod
     def from_env(cls) -> "RuntimeSettings":
@@ -241,6 +252,7 @@ class RuntimeSettings:
             bert_path=Path(bert_path).expanduser().resolve(),
             reference_wav=reference_path,
             profile_manifest=Path(profile_manifest).expanduser().resolve(),
+            dynamic_voices=os.environ.get("ANIFLIVE_TTS_REFERENCE_MODE") == "dynamic",
         )
 
 
@@ -261,6 +273,8 @@ class SynthesisOptions:
     expression_intensity: float = 0.5
     expression_policy: ConditioningPolicy = ConditioningPolicy.FULL_SWITCH
     expression_segments: tuple[ExpressionSegment, ...] = ()
+    voice_profile: str | None = None
+    voice_binding: VoiceBinding | None = dataclass_field(default=None, repr=False, compare=False)
 
 
 @dataclass(frozen=True)
@@ -317,6 +331,26 @@ class _SpeechSessionConsumerOwner:
         self._session = session
         self._close_task: asyncio.Task[None] | None = None
         self._closed = False
+        self._pcm: Iterator[bytes] | None = None
+        self._pcm_close_task: asyncio.Task[None] | None = None
+
+    def own_pcm(self, pcm: Iterator[bytes]) -> None:
+        if self._pcm is not None:
+            raise RuntimeError("Session still owns a previous PCM iterator")
+        self._pcm = pcm
+
+    async def close_pcm(self) -> None:
+        pcm = self._pcm
+        if pcm is None:
+            return
+        task = self._pcm_close_task
+        if task is None:
+            task = asyncio.create_task(run_in_threadpool(pcm.close))
+            self._pcm_close_task = task
+        await asyncio.shield(task)
+        if self._pcm is pcm:
+            self._pcm = None
+            self._pcm_close_task = None
 
     async def aclose(self) -> None:
         task = self._close_task
@@ -331,7 +365,10 @@ class _SpeechSessionConsumerOwner:
         if self._closed:
             return
         self._closed = True
-        await self._manager.detach_consumer(self._session)
+        try:
+            await self.close_pcm()
+        finally:
+            await self._manager.detach_consumer(self._session)
 
 
 class _PCMStreamOwner:
@@ -874,10 +911,12 @@ class TensorRTService:
                 reference_language=REFERENCE_LANGUAGE,
                 logger=LOGGER,
             )
-            self._streamer.prepare_reference()
-            self._load_expression_references()
+            if not self.settings.dynamic_voices:
+                self._streamer.prepare_reference()
+                self._load_expression_references()
             self._streamer.warm_frontends()
-            self._run_strict_warmup()
+            if not self.settings.dynamic_voices:
+                self._run_strict_warmup()
             self._warm_retention = WarmRetentionController(
                 pulse=self._keepwarm_pulse_with_gpu_lease,
                 inference_lock=self._inference_lock,
@@ -1003,7 +1042,7 @@ class TensorRTService:
                 if options.expression_segments:
                     conditionings = [
                         self._conditioning_for(
-                            segment, text_language=options.text_language
+                            segment, text_language=options.text_language, voice_binding=options.voice_binding
                         )
                         for segment in plan
                     ]
@@ -1123,7 +1162,7 @@ class TensorRTService:
                     if options.expression_segments:
                         conditionings = [
                             self._conditioning_for(
-                                segment, text_language=options.text_language
+                                segment, text_language=options.text_language, voice_binding=options.voice_binding
                             )
                             for segment in plan
                         ]
@@ -1220,6 +1259,8 @@ class TensorRTService:
         return options.expression_enabled
 
     def _expression_output_gain(self, options: SynthesisOptions) -> float | None:
+        if options.voice_binding is not None:
+            return 1.0
         if not self._controlled_expression_requested(options):
             return None
         if self._expression_catalog is None:
@@ -1366,6 +1407,11 @@ class TensorRTService:
         ))
         if options.expression_segments:
             _validate_expression_segment_boundaries(selections)
+        if options.voice_binding is not None:
+            for selection in selections:
+                options.voice_binding.conditioning(enabled=selection.enabled, profile=selection.profile,
+                    intensity=selection.intensity, language=options.text_language, policy=selection.policy)
+            return
         for selection in selections:
             self._validate_expression_segment(selection, options.text_language)
 
@@ -1387,8 +1433,11 @@ class TensorRTService:
             raise RequestError(f"Unknown expression profile: {profile!r}") from error
 
     def _conditioning_for(
-        self, selection: ExpressionSegment, *, text_language: str
+        self, selection: ExpressionSegment, *, text_language: str, voice_binding: VoiceBinding | None = None
     ):
+        if voice_binding is not None:
+            return voice_binding.conditioning(enabled=selection.enabled, profile=selection.profile,
+                intensity=selection.intensity, language=text_language, policy=selection.policy)
         if self._streamer is None:
             raise TensorRTRuntimeError("TensorRT pipeline is not loaded")
         if not selection.enabled:
@@ -1409,6 +1458,10 @@ class TensorRTService:
         )
 
     def _conditioning(self, options: SynthesisOptions):
+        if options.voice_binding is not None:
+            return options.voice_binding.conditioning(enabled=options.expression_enabled,
+                profile=options.expression_profile, intensity=options.expression_intensity,
+                language=options.text_language, policy=options.expression_policy)
         if self._streamer is None:
             raise TensorRTRuntimeError("TensorRT pipeline is not loaded")
         if not options.expression_enabled:
@@ -1539,8 +1592,8 @@ class TensorRTService:
         required_paths = [
             self.settings.source_dir / "run_trt_inference.py",
             self.settings.bert_path,
-            self.settings.reference_wav,
-            self.settings.profile_manifest,
+            *([] if self.settings.dynamic_voices else
+              [self.settings.reference_wav, self.settings.profile_manifest]),
             self.settings.engine_dir / "config.json",
             self.settings.engine_dir / "engine-manifest.json",
             *(self.settings.engine_dir / f"{name}.engine" for name in REQUIRED_ENGINES),
@@ -1552,7 +1605,7 @@ class TensorRTService:
             )
         if not self.settings.bert_path.is_dir():
             raise TensorRTRuntimeError("The configured tokenizer directory is invalid")
-        if not self.settings.reference_wav.is_file():
+        if not self.settings.dynamic_voices and not self.settings.reference_wav.is_file():
             raise TensorRTRuntimeError("The fixed voice reference audio is invalid")
 
     def _prepend_source_dir(self) -> None:
@@ -1569,6 +1622,26 @@ class TensorRTService:
             expected = (self.settings.source_dir / "run_trt_inference.py").resolve()
             if existing_file != expected:
                 del sys.modules["run_trt_inference"]
+
+    def prepare_dynamic_reference(self, **kwargs):
+        if self._streamer is None:
+            raise VoiceError("engine_not_ready", "Shared engine is not loaded", 503)
+        try:
+            lease = self._begin_request()
+        except ServiceBusy as error:
+            raise VoiceError("runtime_busy", "Inference is busy; prepare the reference when idle", 409) from error
+        cleanup_error = None
+        try:
+            with self._inference_lock:
+                from .expression import PreparedReferenceBank
+                bank = PreparedReferenceBank(identity_id=kwargs["reference_id"])
+                result = self._streamer.prepare_reference_profile(**kwargs, reference_bank=bank)
+                lease.ensure_valid()
+                return result
+        finally:
+            cleanup_error = self._end_request(lease)
+            if cleanup_error is not None:
+                raise TensorRTRuntimeError("Reference GPU lease cleanup failed") from cleanup_error
 
     def _run_strict_warmup(self) -> None:
         # This goes through the complete engine bundle using the actual reference
@@ -1640,6 +1713,11 @@ class RuntimeServiceManager:
         self._service = service
         self._switch_lock = threading.RLock()
         self._switching = False
+        self._source_banks = {}
+        self._source_paths = {}
+        self._source_environments = {}
+        self._v2_source_dir = Path(os.environ.get("ANIFLIVE_TTS_SOURCE_DIR", "/app/minimal_inference")).resolve()
+        self._loading_source = None
         self._active_stream_owner: str | None = None
         self._package_dir = Path(
             os.environ.get("ANIFLIVE_TTS_MODEL_PACKAGE", "/data/models/active")
@@ -1701,6 +1779,10 @@ class RuntimeServiceManager:
 
     def load(self) -> None:
         with self._switch_lock:
+            manifest = _read_json(self._package_dir / "manifest.json", "model package manifest")
+            if manifest.get("model_family") == "gsv-v5turbo" and not _native_macos():
+                from .backend.v5.runtime import V5Service
+                self._service = V5Service()
             self._service.load()
 
     def unload(self) -> None:
@@ -1711,7 +1793,14 @@ class RuntimeServiceManager:
         with self._switch_lock:
             if self._switching:
                 raise ServiceBusy("AnifLive-TTS is switching the active model")
-            return self._service.synthesize(options)
+            options, binding = self._bind_voice_options(options)
+            try:
+                if options.voice_binding is not None:
+                    self._service.validate_expression(options)
+                return self._service.synthesize(options)
+            finally:
+                if binding is not None:
+                    binding.close()
 
     def synthesize_request(
         self, options: SynthesisOptions, requested_model: str | None
@@ -1719,12 +1808,12 @@ class RuntimeServiceManager:
         with self._switch_lock:
             self._assert_active_model(requested_model)
             active_model = MODEL_ID
-            return self._service.synthesize(options), active_model
+            if self._is_v5():
+                return self._service.synthesize_request(options, requested_model)
+            return self.synthesize(options), active_model
 
     def stream_pcm(
-        self,
-        options: SynthesisOptions,
-        *,
+        self, options: SynthesisOptions, *,
         continuity_input: NeuralContinuationInput | None = None,
         continuity_capture: ContinuationCapture | None = None,
         continuity_policy: str = "A",
@@ -1732,27 +1821,38 @@ class RuntimeServiceManager:
         with self._switch_lock:
             if self._switching:
                 raise ServiceBusy("AnifLive-TTS is switching the active model")
-            # stream_pcm reserves the one request slot before returning, so a
-            # later activation observes the active producer and is rejected.
-            if (
-                continuity_input is None
-                and continuity_capture is None
-                and continuity_policy == "A"
-            ):
-                return self._service.stream_pcm(options)
-            return self._service.stream_pcm(
-                options,
-                continuity_input=continuity_input,
-                continuity_capture=continuity_capture,
-                continuity_policy=continuity_policy,
-            )
+            options, binding = self._bind_voice_options(options)
+            try:
+                if options.voice_binding is not None:
+                    self._service.validate_expression(options)
+                if continuity_input is None and continuity_capture is None and continuity_policy == "A":
+                    pcm = self._service.stream_pcm(options)
+                else:
+                    pcm = self._service.stream_pcm(options, continuity_input=continuity_input,
+                        continuity_capture=continuity_capture, continuity_policy=continuity_policy)
+            except BaseException:
+                if binding is not None:
+                    binding.close()
+                raise
+            return _OwnedPCMIterator(pcm, binding.close) if binding is not None else pcm
 
     def cancel_active_stream(self) -> bool:
+        if _native_macos():
+            # Complete-WAV synthesis holds the switch lock for its duration;
+            # native cancellation must remain responsive while it is running.
+            return self._service.cancel_active_stream()
+        if self._is_v5():
+            return self._service.cancel_active_stream()
         with self._switch_lock:
             return self._service.cancel_active_stream()
 
     @property
     def active_stream_owner(self) -> str | None:
+        if _native_macos():
+            # Do not block a cancel request behind complete-WAV synthesis.
+            return self._active_stream_owner
+        if self._is_v5():
+            return self._service.active_stream_owner
         with self._switch_lock:
             return self._active_stream_owner
 
@@ -1764,6 +1864,8 @@ class RuntimeServiceManager:
         cannot interrupt an unrelated synthesis request.
         """
 
+        if self._is_v5():
+            return self._service.cancel_stream(owner)
         with self._switch_lock:
             if self._active_stream_owner != owner:
                 return False
@@ -1782,6 +1884,10 @@ class RuntimeServiceManager:
         with self._switch_lock:
             self._assert_active_model(requested_model)
             active_model = MODEL_ID
+            if self._is_v5():
+                return self._service.prepare_stream(options, requested_model, stream_owner=stream_owner,
+                    continuity_input=continuity_input, continuity_capture=continuity_capture,
+                    continuity_policy=continuity_policy)
             segments = self._service._segments(options)
             if (
                 continuity_input is None
@@ -1817,6 +1923,10 @@ class RuntimeServiceManager:
         payload["status"] = "switching" if self._switching else payload["status"]
         payload["switching"] = self._switching
         payload["available_model_count"] = len(self.list_models())
+        payload["engine_ready"] = self.ready
+        voices = VOICE_LIBRARY.store.list_voices()
+        payload["voice_library"] = {"count": len(voices),
+                                    "ready_count": sum(voice["ready"] for voice in voices)}
         return payload
 
     def list_models(self) -> list[dict[str, Any]]:
@@ -1841,6 +1951,8 @@ class RuntimeServiceManager:
             requested = validate_safe_identifier(model_id, "model")
         except Exception as error:
             raise RequestError("model must be a safe local model identifier") from error
+        if self._is_v5() and self._service._is_busy():
+            raise ModelSwitchConflict("Cannot switch models while a synthesis request is active")
         with self._switch_lock:
             if requested == MODEL_ID and self._service.ready:
                 return {"changed": False, "model": MODEL_ID, "voice": VOICE_ID}
@@ -1855,21 +1967,29 @@ class RuntimeServiceManager:
             previous_package = self._package_dir
             previous_voice = VOICE_ID
             target_package = Path(packages[requested]["path"])
-            target_voice = validate_safe_identifier(
-                packages[requested]["manifest"].get("default_voice_profile", "default"),
-                "voice_profile",
-            )
+            target_voice = ("" if packages[requested]["manifest"].get("reference_mode") == "dynamic" else
+                validate_safe_identifier(packages[requested]["manifest"].get("default_voice_profile", "default"),
+                                         "voice_profile"))
             switch_gpu_lease = (
                 self._service._acquire_gpu_resource(
                     "inference:model-switch", busy_is_request_error=False
                 )
                 if isinstance(self._service, TensorRTService)
-                else None
+                else self._service._gpu_resource_lease.acquire("inference:model-switch") if self._is_v5() else None
             )
             self._switching = True
             unloaded = False
             try:
+                VOICE_LIBRARY.invalidate_engine()
                 self._service.unload()
+                if isinstance(self._service, TensorRTService) or self._is_v5():
+                    self._save_source_bank()
+                    # Return freed model/engine host arenas before loading a
+                    # different model under the same container memory limit.
+                    gc.collect()
+                    if sys.platform == "linux":
+                        import ctypes
+                        ctypes.CDLL("libc.so.6").malloc_trim(0)
                 unloaded = True
                 replacement = self._load_package(target_package, target_voice)
             except Exception as switch_error:
@@ -1879,6 +1999,9 @@ class RuntimeServiceManager:
                     ) from switch_error
                 LOGGER.exception("Unable to activate model %s; restoring %s", requested, MODEL_ID)
                 try:
+                    if self._loading_source is not None:
+                        self._save_source_bank(self._loading_source)
+                        self._loading_source = None
                     self._service = self._load_package(previous_package, previous_voice)
                     self._package_dir = previous_package
                 except Exception as rollback_error:
@@ -1898,24 +2021,121 @@ class RuntimeServiceManager:
             self._package_dir = target_package
             return {"changed": True, "model": MODEL_ID, "voice": VOICE_ID}
 
+    def _bind_voice_options(self, options: SynthesisOptions):
+        if options.voice_binding is not None:
+            return options, None
+        selected = options.voice_profile or VOICE_ID
+        if selected and selected == VOICE_ID:
+            return options, None
+        if not selected:
+            raise VoiceError("voice_profile_required", "Select a registered voice_profile")
+        binding = VOICE_LIBRARY.bind(selected)
+        return replace(options, voice_profile=selected, voice_binding=binding), binding
+
+    def prepare_dynamic_reference(self, **kwargs):
+        with self._switch_lock:
+            return self._service.prepare_dynamic_reference(**kwargs)
+
     def _load_package(
         self, package_dir: Path, voice_profile: str = "default"
     ) -> TensorRTService:
         from .api import configure_runtime
         from .settings import RuntimeSettings as PackageRuntimeSettings
 
+        from .model_package import resolve_contained_path
+        manifest = _read_json(package_dir / "manifest.json", "model package manifest")
+        family = manifest.get("model_family")
+        native_package = isinstance(manifest.get("native_runtime"), dict)
+        if native_package:
+            source = Path(os.environ["ANIFLIVE_TTS_SOURCE_DIR"]).resolve()
+        elif family == "gsv-v5turbo":
+            resources = manifest.get("resources")
+            if not isinstance(resources, dict):
+                raise TensorRTRuntimeError("V5 model package resources are missing")
+            source = resolve_contained_path(package_dir, resources.get("source_dir"), "v5 source")
+        else:
+            source = self._v2_source_dir
+        self._restore_source_bank(source)
+        self._loading_source = source
         os.environ["ANIFLIVE_TTS_MODEL_PACKAGE"] = str(package_dir)
         os.environ["ANIFLIVE_TTS_VOICE_PROFILE"] = voice_profile
+        if native_package:
+            # Model activation selects the target precision; startup still
+            # validates an explicitly configured environment against its package.
+            os.environ["ANIFLIVE_TTS_NATIVE_PRECISION"] = manifest["precision"]
         configure_runtime(PackageRuntimeSettings.from_env())
         _sync_runtime_identity_from_env()
-        service = TensorRTService(RuntimeSettings.from_env())
-        # A model switch retains one process-owned reference while the old
-        # service unloads and the replacement loads, eliminating the brief
-        # cross-process claim race between both CUDA lifecycles.
-        if isinstance(self._service, TensorRTService):
-            service._gpu_resource_lease = self._service._gpu_resource_lease
+        if family == "gsv-v5turbo" and not _native_macos():
+            from .backend.v5.runtime import V5Service
+            service = V5Service()
+        else:
+            service = _runtime_service(RuntimeSettings.from_env())
+        service._gpu_resource_lease = self._service._gpu_resource_lease
         service.load()
+        self._loading_source = None
         return service
+
+    def _is_v5(self) -> bool:
+        return self._service.__class__.__module__ == "aniflive_tts.backend.v5.runtime"
+
+    def _source_root(self):
+        if self._is_v5():
+            return Path(os.environ["ANIFLIVE_TTS_V5_SOURCE_DIR"]).resolve()
+        return self._service.settings.source_dir.resolve()
+
+    def _save_source_bank(self, root=None):
+        root = root or self._source_root()
+        def under(path):
+            try:
+                return Path(path).resolve().is_relative_to(root)
+            except (TypeError, ValueError, OSError):
+                return False
+        bank = {}
+        for name, module in list(sys.modules.items()):
+            if module is None:
+                continue
+            metadata = vars(module)
+            paths = ([metadata["__file__"]] if metadata.get("__file__") else [])
+            module_path = metadata.get("__path__")
+            if module_path is not None:
+                try:
+                    paths.extend(module_path)
+                except KeyError:
+                    # A failed import can leave a namespace path whose parent
+                    # module has already been removed from sys.modules.
+                    stored = vars(module_path).get("_path")
+                    if stored is None:
+                        raise
+                    paths.extend(stored)
+            if any(under(path) for path in paths):
+                bank[name] = module
+        key = str(root)
+        self._source_banks[key] = bank
+        self._source_paths[key] = list(sys.path)
+        self._source_environments[key] = self._source_environment()
+        for name, module in bank.items():
+            if sys.modules.get(name) is module:
+                del sys.modules[name]
+        sys.path[:] = [path for path in sys.path if not under(path or os.getcwd())]
+
+    @staticmethod
+    def _source_environment():
+        prefixes = ("ANIFLIVE_TTS_", "TRT_DIR", "BERT_PATH", "NLTK_DATA",
+                    "HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE", "TOKENIZERS_PARALLELISM")
+        return {key: value for key, value in os.environ.items() if key.startswith(prefixes)}
+
+    def _restore_source_bank(self, root):
+        key = str(root)
+        if key in self._source_paths:
+            sys.path[:] = self._source_paths[key]
+            saved = self._source_environments[key]
+            for name in self._source_environment().keys() - saved.keys():
+                del os.environ[name]
+            os.environ.update(saved)
+        else:
+            sys.path[:0] = [str(root), str(root / "GPT_SoVITS")]
+        sys.modules.update(self._source_banks.get(key, {}))
+        importlib.invalidate_caches()
 
     @staticmethod
     def _assert_active_model(requested_model: str | None) -> None:
@@ -1946,6 +2166,8 @@ class RuntimeServiceManager:
                 backend = model_backend_for_manifest(manifest)
                 if backend is None or not backend.supports_manifest(manifest):
                     continue
+                if isinstance(manifest.get("native_runtime"), dict) != (sys.platform == "darwin"):
+                    continue
                 model_id = validate_safe_identifier(manifest.get("model_id"), "model_id")
             except Exception:
                 LOGGER.warning("Ignoring invalid model package metadata in %s", candidate)
@@ -1960,7 +2182,32 @@ class RuntimeServiceManager:
         return packages
 
 
-SERVICE = RuntimeServiceManager(TensorRTService(RuntimeSettings.from_env()))
+def _native_macos() -> bool:
+    return (sys.platform == "darwin"
+            and os.environ.get("ANIFLIVE_TTS_MODEL_FAMILY") == "gsv-v5turbo"
+            and bool(os.environ.get("ANIFLIVE_TTS_NATIVE_WORKER")))
+
+
+def _runtime_service(settings:RuntimeSettings):
+    if _native_macos():
+        from .macos_service import MacOSV5Service
+        return MacOSV5Service(settings)
+    return TensorRTService(settings)
+
+
+def _runtime_backend_headers()->dict[str,str]:
+    if _native_macos():
+        return {"X-TTS-Backend":"MLX-Metal","X-TTS-Quality-Qualified":"false","X-TTS-Precision":getattr(SERVICE._service,"_precision","FP32")}
+    return {"X-TensorRT-Backend":"TensorRT-11","X-TensorRT-Engine-Count":str(len(REQUIRED_ENGINES))}
+
+
+SERVICE = RuntimeServiceManager(_runtime_service(RuntimeSettings.from_env()))
+VOICE_LIBRARY = VoiceLibrary(
+    VoiceStore(Path(os.environ.get("ANIFLIVE_TTS_VOICE_DIR", "/data/voices"))),
+    maximum_prepared=int(os.environ.get("ANIFLIVE_TTS_PREPARED_REFERENCE_CAPACITY", "64")),
+)
+VOICE_LIBRARY.engine_fingerprint = lambda: str(SERVICE._service._engine_manifest.get("fingerprint", "unloaded"))
+
 SESSION_MANAGER = SpeechSessionManager(
     maximum_open=int(os.environ.get("ANIFLIVE_TTS_MAX_SPEECH_SESSIONS", "8")),
     ttl_seconds=float(os.environ.get("ANIFLIVE_TTS_SPEECH_SESSION_TTL_SECONDS", "600")),
@@ -2127,7 +2374,7 @@ def _options_from_values(
 
     top_k = _integer(values.get("top_k"), "top_k", int(DEFAULTS["top_k"]))
     if top_k > 50:
-        raise RequestError("top_k must be at most 50 for the exported TensorRT sampling graph")
+        raise RequestError("top_k must be at most 50 (the Windows TensorRT sampling graph limit, shared by the native macOS backend)")
     top_p = _number(
         values.get("top_p"), "top_p", float(DEFAULTS["top_p"]), minimum=0.000001, maximum=1.0
     )
@@ -2142,15 +2389,18 @@ def _options_from_values(
     )
     if not math.isclose(speed, 1.0, rel_tol=0.0, abs_tol=1e-6):
         raise RequestError(
-            "speed must be 1.0 for this V2 Pro Plus TensorRT engine; the exported graph has no speed input"
+            "speed must be 1.0 for the active model"
         )
-    sample_steps = _integer(values.get("sample_steps"), "sample_steps", 32)
-    if sample_steps != 32:
-        raise RequestError(
-            "sample_steps must remain 32; V2 Pro Plus does not contain the V4 CFM sampler"
-        )
+    required_steps = 4 if SERVICE._is_v5() or _native_macos() else 32
+    sample_steps = _integer(values.get("sample_steps"), "sample_steps", required_steps)
+    if sample_steps != required_steps:
+        raise RequestError(f"sample_steps must remain {required_steps} for the active model")
+    if SERVICE._is_v5() and (cut_punc or values.get("noise_scale") not in (None, 0.5)):
+        raise RequestError("V5 Turbo supports only neutral noise_scale=0.5 and no cut_punc")
+    if _native_macos() and _number(values.get("cfg_rate"), "cfg_rate", 0.0, minimum=0.0) != 0.0:
+        raise RequestError("Native V5 Turbo requires CFG 0")
     if _boolean(values.get("if_sr"), "if_sr", False):
-        raise RequestError("if_sr=true is not supported by the 32 kHz V2 Pro Plus engine")
+        raise RequestError("if_sr=true is not supported by the active model")
     pause_length = _number(
         values.get("pause_length"),
         "pause_length",
@@ -2166,6 +2416,8 @@ def _options_from_values(
         maximum=10.0,
     )
     seed = _integer(values.get("seed"), "seed", int(DEFAULTS["seed"]), minimum=-1)
+    voice_profile = _optional_string(values.get("voice_profile"), "voice_profile") or VOICE_ID
+    dynamic_voice = voice_profile != VOICE_ID or SERVICE.settings.dynamic_voices
     expression_enabled = _boolean(
         values.get("_expression_enabled"), "expression.enabled", False
     )
@@ -2184,17 +2436,18 @@ def _options_from_values(
         if "_expression_policy" in values
         else None
     )
-    expression_policy = explicit_expression_policy or SERVICE.preferred_expression_policy(
-        profile=expression_profile,
-        intensity=expression_intensity,
-        language=text_language,
+    expression_policy = explicit_expression_policy or (
+        ConditioningPolicy.IDENTITY_LOCK if dynamic_voice and expression_enabled and not (SERVICE._is_v5() or _native_macos()) else
+        ConditioningPolicy.FULL_SWITCH if dynamic_voice else
+        SERVICE.preferred_expression_policy(profile=expression_profile,
+            intensity=expression_intensity, language=text_language)
     )
     parsed_expression_segments = _expression_segments(
         raw_expression_segments,
         default_enabled=expression_enabled,
         default_profile=expression_profile,
         default_intensity=expression_intensity,
-        default_policy=explicit_expression_policy,
+        default_policy=explicit_expression_policy or (ConditioningPolicy.FULL_SWITCH if SERVICE._is_v5() or _native_macos() else ConditioningPolicy.IDENTITY_LOCK if dynamic_voice else None),
         language=text_language,
     )
     resolved_text = text or "".join(segment.text for segment in parsed_expression_segments)
@@ -2214,8 +2467,10 @@ def _options_from_values(
         expression_intensity=expression_intensity,
         expression_policy=expression_policy,
         expression_segments=parsed_expression_segments,
+        voice_profile=voice_profile,
     )
-    SERVICE.validate_expression(options)
+    if not dynamic_voice:
+        SERVICE.validate_expression(options)
     return options
 
 
@@ -2223,6 +2478,11 @@ def _effective_first_context_tokens(options: SynthesisOptions) -> int:
     controlled = options.expression_enabled or any(
         segment.enabled for segment in options.expression_segments
     )
+    if _native_macos():
+        value = SERVICE.health().get("streaming", {}).get("semantic_context_tokens")
+        # Canonical mode waits for semantic EOS rather than a fixed token budget.
+        # The numeric response header uses zero for this non-fixed budget.
+        return 0 if value is None else int(value)
     if not controlled:
         return 17
     runtime_policy = SERVICE.expression_metadata().get("runtime_policy")
@@ -2232,6 +2492,24 @@ def _effective_first_context_tokens(options: SynthesisOptions) -> int:
         return max(17, int(runtime_policy.get("first_context_tokens", 17)))
     except (TypeError, ValueError):
         return 17
+
+
+def _profile_headers(result:SynthesisResult)->dict[str,str]:
+    if _native_macos():
+        return {"X-TTS-Stage-Text-Seconds":f"{float(result.profile['text_processing_seconds']):.6f}","X-TTS-Frontend-Mode":"temporary-python","X-TTS-Stage-Attribution":"frontend-wall-only"}
+    return {
+            "X-TTS-Stage-Text-Seconds": f"{float(result.profile.get('text_processing_seconds', 0.0)):.6f}",
+            "X-TTS-Stage-GPT-Encoder-Seconds": f"{float(result.profile.get('gpt_encoder_seconds', 0.0)):.6f}",
+            "X-TTS-Stage-GPT-Decode-Seconds": f"{float(result.profile.get('gpt_decode_seconds', 0.0)):.6f}",
+            "X-TTS-Stage-SoVITS-Seconds": f"{float(result.profile.get('sovits_seconds', 0.0)):.6f}",
+            "X-TTS-Stage-Postprocess-Seconds": f"{float(result.profile.get('audio_postprocess_seconds', 0.0)):.6f}",
+            "X-TTS-Semantic-Tokens": str(int(result.profile.get('semantic_tokens', 0))),
+            "X-TTS-GPT-Steps": str(int(result.profile.get('gpt_steps', 0))),
+            "X-TTS-Sample-CUDA-Graph": (
+                "true" if int(result.profile.get("sample_cuda_graph_enabled", 0)) else "false"
+            ),
+            "X-TTS-SoVITS-Invocations": str(int(result.profile.get('sovits_invocations', 0))),
+    }
 
 
 async def _tts_response(
@@ -2278,8 +2556,7 @@ async def _tts_response(
                     headers={
                         "X-TTS-Service": SERVICE_NAME,
                         "X-TTS-Version": SERVICE_VERSION,
-                        "X-TensorRT-Backend": "TensorRT-11",
-                        "X-TensorRT-Engine-Count": str(len(REQUIRED_ENGINES)),
+                        **_runtime_backend_headers(),
                         "X-PyTorch-Fallback": "false",
                         "X-TTS-Model": response_model,
                         "X-TTS-Stream": "pcm_s16le",
@@ -2290,7 +2567,7 @@ async def _tts_response(
                             recommended_prebuffer_ms
                         ),
                         "X-TTS-Queue-Ms": "0.000",
-                        "X-TTS-Pause-Mode": "adaptive",
+                        "X-TTS-Pause-Mode": "fixed-between-segments" if _native_macos() else "adaptive",
                         "X-TTS-Expression": options.expression_profile or "native",
                         "X-TTS-Expression-Policy": options.expression_policy.value,
                         "X-TTS-First-Context-Tokens": str(first_context_tokens),
@@ -2306,14 +2583,16 @@ async def _tts_response(
         result, response_model = await run_in_threadpool(
             SERVICE.synthesize_request, options, requested_model
         )
+    except VoiceError as error:
+        return JSONResponse({"code": error.code, "message": str(error)}, status_code=error.status_code)
     except RequestError as error:
         return _json_response(str(error), error.status_code)
     except Exception:
-        LOGGER.exception("TensorRT inference failed")
+        LOGGER.exception("AnifLive-TTS inference failed")
         # Do not return source/container paths or a potentially misleading
         # fallback claim.  Container logs retain the original exception.
         return _json_response(
-            "TensorRT synthesis failed; inspect the AnifLive-TTS container logs", 500
+            "Native synthesis failed; inspect the local runtime logs" if _native_macos() else "TensorRT synthesis failed; inspect the AnifLive-TTS container logs", 500
         )
 
     return Response(
@@ -2322,33 +2601,22 @@ async def _tts_response(
         headers={
             "X-TTS-Service": SERVICE_NAME,
             "X-TTS-Version": SERVICE_VERSION,
-            "X-TensorRT-Backend": "TensorRT-11",
-            "X-TensorRT-Engine-Count": str(len(REQUIRED_ENGINES)),
+            **_runtime_backend_headers(),
             "X-PyTorch-Fallback": "false",
             "X-TTS-Model": response_model,
             "X-TTS-Sample-Rate": str(result.sample_rate),
             "X-TTS-Output-Samples": str(result.output_samples),
             "X-TTS-Segments": str(result.segments),
             "X-TTS-Inference-Seconds": f"{result.elapsed_seconds:.6f}",
-            "X-TTS-Seed": str(options.seed),
+            "X-TTS-Seed": str(int(result.profile.get("actual_seed",options.seed)) if _native_macos() else options.seed),
             "X-TTS-Queue-Ms": "0.000",
-            "X-TTS-Pause-Mode": "adaptive",
+            "X-TTS-Pause-Mode": "fixed-between-segments" if _native_macos() else "adaptive",
             "X-TTS-Expression": options.expression_profile or "native",
             "X-TTS-Expression-Policy": options.expression_policy.value,
             "X-TTS-First-Context-Tokens": str(
                 int(result.profile.get("first_context_tokens", first_context_tokens))
             ),
-            "X-TTS-Stage-Text-Seconds": f"{float(result.profile.get('text_processing_seconds', 0.0)):.6f}",
-            "X-TTS-Stage-GPT-Encoder-Seconds": f"{float(result.profile.get('gpt_encoder_seconds', 0.0)):.6f}",
-            "X-TTS-Stage-GPT-Decode-Seconds": f"{float(result.profile.get('gpt_decode_seconds', 0.0)):.6f}",
-            "X-TTS-Stage-SoVITS-Seconds": f"{float(result.profile.get('sovits_seconds', 0.0)):.6f}",
-            "X-TTS-Stage-Postprocess-Seconds": f"{float(result.profile.get('audio_postprocess_seconds', 0.0)):.6f}",
-            "X-TTS-Semantic-Tokens": str(int(result.profile.get('semantic_tokens', 0))),
-            "X-TTS-GPT-Steps": str(int(result.profile.get('gpt_steps', 0))),
-            "X-TTS-Sample-CUDA-Graph": (
-                "true" if int(result.profile.get("sample_cuda_graph_enabled", 0)) else "false"
-            ),
-            "X-TTS-SoVITS-Invocations": str(int(result.profile.get('sovits_invocations', 0))),
+            **_profile_headers(result),
         },
     )
 
@@ -2394,9 +2662,8 @@ def _structured_speech_values(values: Mapping[str, Any]) -> dict[str, Any]:
         _optional_string(body.get("voice_profile"), "voice_profile") or VOICE_ID
     )
     if voice_profile != VOICE_ID:
-        raise RequestError(
-            f"voice_profile must match the active profile {VOICE_ID!r}"
-        )
+        VOICE_LIBRARY.store.get_voice(voice_profile)
+    body["voice_profile"] = voice_profile
     expression = body.get("expression") or {}
     if not isinstance(expression, dict):
         raise RequestError("expression must be an object")
@@ -2412,7 +2679,7 @@ def _structured_speech_values(values: Mapping[str, Any]) -> dict[str, Any]:
     generation = body.get("generation") or {}
     if not isinstance(generation, dict):
         raise RequestError("generation must be an object")
-    for key in ("top_k", "top_p", "temperature", "seed", "noise_scale", "speed"):
+    for key in ("top_k", "top_p", "temperature", "seed", "noise_scale", "speed", "sample_steps", "cut_punc", "if_sr"):
         if key in generation:
             body[key] = generation[key]
     body["language"] = _canonical_language(body.get("language"), "language")
@@ -2425,20 +2692,42 @@ async def lifespan(app: FastAPI):
     # Serving a deceptively successful CPU/PyTorch fallback is prohibited.
     app.state.session_model_lock = asyncio.Lock()
     SERVICE.load()
+    VOICE_LIBRARY.prepare_callback = SERVICE.prepare_dynamic_reference
     try:
+        if _native_macos():
+            VOICE_LIBRARY.prepare_on_demand = True
+            VOICE_LIBRARY.restore_registered_references()
         yield
     finally:
         await SESSION_MANAGER.clear_all_neural_contexts()
+        VOICE_LIBRARY.close()
         SERVICE.unload()
 
 
 app = FastAPI(
     title="AnifLive-TTS API",
     version=SERVICE_VERSION,
-    description="Low-latency multilingual AnifLive-TTS v1.4 development service backed by TensorRT 11.",
+    description=("Native macOS MLX/Metal speech service." if _native_macos() else "Low-latency multilingual AnifLive-TTS service backed by TensorRT 11."),
     lifespan=lifespan,
 )
 
+
+@app.middleware("http")
+async def _backend_headers(request: Request, call_next):
+    response = await call_next(request)
+    if SERVICE._is_v5():
+        for key in list(response.headers):
+            if (key.startswith("x-tensorrt-") or key == "x-pytorch-fallback"
+                or key.startswith("x-tts-stage-") or key in {
+                    "x-tts-semantic-tokens", "x-tts-gpt-steps", "x-tts-sample-cuda-graph",
+                    "x-tts-sovits-invocations", "x-tts-pause-mode", "x-tts-first-context-tokens"}):
+                del response.headers[key]
+        response.headers["X-TTS-Backend"] = "hybrid-cuda"
+    return response
+
+
+
+install_voice_routes(app, VOICE_LIBRARY, _read_json_body)
 
 install_runtime_control(
     app, SERVICE, SESSION_MANAGER,
@@ -2573,22 +2862,27 @@ async def create_speech_session(request: Request) -> JSONResponse:
             )
             if model != MODEL_ID:
                 raise RequestError(f"model must match the active model {MODEL_ID!r}")
-            if voice_profile != VOICE_ID:
-                raise RequestError(
-                    f"voice_profile must match the active profile {VOICE_ID!r}"
-                )
+            if not voice_profile:
+                raise VoiceError("voice_profile_required", "Select a registered voice_profile")
             try:
                 continuity_policy = parse_continuity_policy(
                     body.get("continuity_policy", "A")
                 )
             except ValueError as error:
                 raise RequestError(str(error)) from error
-            session = await SESSION_MANAGER.create(
-                model=model,
-                voice_profile=voice_profile,
-                sample_rate=SERVICE.sample_rate,
-                continuity_policy=continuity_policy,
-            )
+            if _native_macos() and continuity_policy is not ContinuityPolicy.NONE:
+                raise RequestError("The native research backend currently supports continuity policy A only")
+            binding = VOICE_LIBRARY.bind(voice_profile) if voice_profile != VOICE_ID else None
+            try:
+                session = await SESSION_MANAGER.create(
+                    model=model, voice_profile=voice_profile,
+                    sample_rate=SERVICE.sample_rate, continuity_policy=continuity_policy,
+                    voice_binding=binding,
+                )
+            except BaseException:
+                if binding is not None:
+                    binding.close()
+                raise
         return JSONResponse(session.public_dict(), status_code=201)
     except RequestError as error:
         return _json_response(str(error), error.status_code)
@@ -2610,7 +2904,7 @@ async def append_speech_session_segment(session_id: str, request: Request) -> JS
     try:
         body = await _read_json_body(request)
         session = await SESSION_MANAGER.get(session_id)
-        if session.model != MODEL_ID or session.voice_profile != VOICE_ID:
+        if session.model != MODEL_ID or (session.voice_profile != VOICE_ID and session.voice_binding is None):
             raise SpeechSessionError(
                 "The active model no longer matches this speech session", 409
             )
@@ -2646,6 +2940,9 @@ async def append_speech_session_segment(session_id: str, request: Request) -> JS
             text_field="text",
             language_field="language",
         )
+        if session.voice_binding is not None:
+            options = replace(options, voice_binding=session.voice_binding)
+            SERVICE.validate_expression(options)
         segment, created = await SESSION_MANAGER.append(
             session_id,
             segment_id=segment_id,
@@ -2724,16 +3021,23 @@ async def stream_speech_session_audio(session_id: str) -> Response:
                         continuity_capture=capture,
                         continuity_policy=session.continuity_policy.value,
                     )
+                    if _native_macos():
+                        owner.own_pcm(pcm)
                     if response_model != session.model or sample_rate != session.sample_rate:
                         raise RuntimeError("Speech session runtime identity changed")
                     async for chunk in iterate_in_threadpool(pcm):
                         if session.state in {"cancelled", "expired"}:
                             SERVICE.cancel_stream(session.session_id)
-                            await run_in_threadpool(pcm.close)
+                            if _native_macos():
+                                await owner.close_pcm()
+                            else:
+                                await run_in_threadpool(pcm.close)
                             break
                         if chunk:
                             output_bytes += len(chunk)
                             yield chunk
+                    if _native_macos():
+                        await owner.close_pcm()
                     if segment.pause_after_ms:
                         silent_samples = round(
                             session.sample_rate * segment.pause_after_ms / 1000
@@ -2755,7 +3059,10 @@ async def stream_speech_session_audio(session_id: str) -> Response:
                     await SESSION_MANAGER.cancel(session.session_id)
                     SERVICE.cancel_stream(session.session_id)
                     if pcm is not None:
-                        await run_in_threadpool(pcm.close)
+                        if _native_macos():
+                            await owner.close_pcm()
+                        else:
+                            await run_in_threadpool(pcm.close)
                     raise
                 except Exception:
                     if capture is not None:
@@ -2766,11 +3073,14 @@ async def stream_speech_session_audio(session_id: str) -> Response:
                     )
                     SERVICE.cancel_stream(session.session_id)
                     if pcm is not None:
-                        await run_in_threadpool(pcm.close)
+                        if _native_macos():
+                            await owner.close_pcm()
+                        else:
+                            await run_in_threadpool(pcm.close)
                     await SESSION_MANAGER.finish_segment(
                         session,
                         segment,
-                        error="TensorRT synthesis failed",
+                        error=("Native synthesis failed" if _native_macos() else "TensorRT synthesis failed"),
                     )
                     break
         finally:
@@ -2783,8 +3093,7 @@ async def stream_speech_session_audio(session_id: str) -> Response:
         headers={
             "X-TTS-Service": SERVICE_NAME,
             "X-TTS-Version": SERVICE_VERSION,
-            "X-TensorRT-Backend": "TensorRT-11",
-            "X-TensorRT-Engine-Count": str(len(REQUIRED_ENGINES)),
+            **_runtime_backend_headers(),
             "X-PyTorch-Fallback": "false",
             "X-TTS-Model": session.model,
             "X-TTS-Stream": "pcm_s16le",
@@ -2798,7 +3107,10 @@ async def stream_speech_session_audio(session_id: str) -> Response:
                 session.continuity_policy is not ContinuityPolicy.NONE
             ).lower(),
             "X-TTS-Acoustic-Latent-Continuity": "false",
-            "X-TTS-Continuity-Qualification": "experimental-unqualified",
+            "X-TTS-Continuity-Qualification": (
+                "qualified-policy-a" if session.continuity_policy is ContinuityPolicy.NONE
+                else "experimental-unqualified"
+            ),
             "Cache-Control": "no-store",
             "X-Accel-Buffering": "no",
         },
@@ -2819,6 +3131,20 @@ async def cancel_speech_session(session_id: str) -> JSONResponse:
     try:
         session = await SESSION_MANAGER.cancel(session_id)
         cancelled_audio = SERVICE.cancel_stream(session.session_id)
+        if _native_macos():
+            # The SDK closes its local audio reader before sending cancel.
+            # Acknowledge only after the response owner drains the native
+            # iterator and releases its request slot, so recovery cannot race
+            # cleanup and spuriously return Busy.
+            try:
+                async with asyncio.timeout(45.0):
+                    async with session.condition:
+                        await session.condition.wait_for(
+                            lambda: not session.audio_consumer_attached
+                        )
+            except TimeoutError:
+                LOGGER.error("Native session cancellation cleanup timed out: %s", session_id)
+                return _json_response("Native session cancellation cleanup timed out", 503)
         return JSONResponse(
             {**session.public_dict(), "active_audio_cancelled": cancelled_audio}
         )
@@ -2833,7 +3159,32 @@ async def delete_speech_session(session_id: str) -> JSONResponse:
 
 @app.get("/v1/capabilities")
 async def capabilities() -> dict[str, Any]:
+    if _native_macos():
+        return SERVICE._service.capabilities(SESSION_MANAGER.limits_dict())
     expression = SERVICE.expression_metadata()
+    if SERVICE._is_v5():
+        return {"service": SERVICE_NAME, "version": SERVICE_VERSION, "model": MODEL_ID,
+            "model_family": "gsv-v5turbo", "backend": "hybrid-cuda", "precision": "FP16",
+            "sample_rate": 48000, "languages": ["zh", "yue", "en", "ja", "ko"],
+            "streaming": {"pcm16": True, "wav": False},
+            "expression": {"native": True, "controlled_profiles": True,
+                           "continuous_vector": False, "segmented": True,
+                           "policies": expression["policies"]},
+            "reference_selection": "voice-scoped-reference-id",
+            "reference_conditioning_policies": expression["policies"],
+            "preferred_expression_policy": expression["preferred_policy"],
+            "complete_wav": True, "adaptive_punctuation_segments": False,
+            "voice_management": {"crud": True, "reference_upload": True, "reference_prepare": True,
+                "persistent": True, "transcript_required": True,
+                "reference_seconds": {"minimum": 3, "maximum": 10}},
+            "speech_sessions": {"committed_segments": True, "pcm_stream": True, "cancel": True,
+                "flush": True, "context_mode": "committed-neural-v1", "neural_state_continuity": True,
+                "acoustic_latent_continuity": False, "default_policy": "A",
+                "policies": {key: dict(value) for key, value in CONTINUITY_POLICY_CONTRACTS.items()},
+                "qualification": "qualified-policy-a",
+                "qualification_by_policy": {key: ("qualified-policy-a" if key == "A" else "experimental-unqualified")
+                                            for key in CONTINUITY_POLICY_CONTRACTS},
+                "limits": SESSION_MANAGER.limits_dict()}}
     return {
         "service": SERVICE_NAME,
         "version": SERVICE_VERSION,
@@ -2844,12 +3195,15 @@ async def capabilities() -> dict[str, Any]:
         "streaming": {"pcm16": True, "wav": False},
         "expression": {
             "native": True,
-            "controlled_profiles": expression["enabled"],
+            "controlled_profiles": expression["enabled"] or SERVICE.settings.dynamic_voices,
             "continuous_vector": False,
-            "segmented": expression["enabled"],
+            "segmented": expression["enabled"] or SERVICE.settings.dynamic_voices,
         },
         "pytorch_fallback": False,
         "adaptive_punctuation_segments": True,
+        "voice_management": {"crud": True, "reference_upload": True, "reference_prepare": True,
+                             "persistent": True, "transcript_required": True,
+                             "reference_seconds": {"minimum": 3, "maximum": 10}},
         "warm_retention_seconds": 25,
         "speech_sessions": {
             "committed_segments": True,
@@ -2864,7 +3218,9 @@ async def capabilities() -> dict[str, Any]:
                 key: dict(value)
                 for key, value in CONTINUITY_POLICY_CONTRACTS.items()
             },
-            "qualification": "experimental-unqualified",
+            "qualification": "qualified-policy-a",
+            "qualification_by_policy": {key: ("qualified-policy-a" if key == "A" else "experimental-unqualified")
+                                        for key in CONTINUITY_POLICY_CONTRACTS},
             "limits": SESSION_MANAGER.limits_dict(),
         },
     }
@@ -2876,7 +3232,38 @@ async def health() -> dict[str, Any]:
 
 
 @app.get("/v1/expressions")
-async def list_expressions() -> dict[str, Any]:
+async def list_expressions(voice_profile: str | None = None) -> dict[str, Any]:
+    if voice_profile and voice_profile != VOICE_ID:
+        try:
+            voice = VOICE_LIBRARY.store.get_voice(voice_profile)
+            refs = VOICE_LIBRARY.store.list_references(voice_profile)
+        except VoiceError as error:
+            return JSONResponse({'code': error.code, 'message': str(error)}, status_code=error.status_code)
+        backend = SERVICE.expression_metadata()
+        policy = ConditioningPolicy(backend.get('preferred_policy', 'full-switch'))
+        usable = [ref for ref in refs if ref.get('transcript')]
+        default = next((ref['emotion_id'] for ref in usable if ref['id'] == voice['default_reference_id']), None)
+        catalog = ExpressionCatalog(default, tuple(ReferenceDescriptor(
+            id=ref['id'], emotion=ref['emotion_id'], intensity=ref['intensity'],
+            reference_audio=VOICE_LIBRARY.store.audio_path(voice_profile, ref['id']),
+            reference_text=ref['transcript'], reference_language=ref['reference_language'],
+            manual_verified=ref['transcript_confirmed'], preferred_policy=policy,
+        ) for ref in usable), preferred_policy=policy)
+        metadata = catalog.public_metadata()
+        for key in ('runtime_policy', 'playback_policy'):
+            if key in backend:
+                metadata[key] = backend[key]
+            else:
+                metadata.pop(key, None)
+        for profile in metadata['profiles']:
+            members = [ref for ref in usable if ref['emotion_id'] == profile['id']]
+            profile['label'] = members[0]['emotion_label']
+            profile['aliases'] = sorted({word for ref in members for word in
+                re.split(r'[\s/|,，]+', ref['emotion_label']) if word})
+            profile['references'] = [{'id': ref['id'], 'intensity': ref['intensity'],
+                                      'prepare_state': ref['prepare_state']} for ref in members]
+        return {'object': 'list', **metadata, 'enabled': bool(usable),
+                'voice_profile': voice_profile, 'policies': backend.get('policies', [])}
     return {
         "object": "list",
         **SERVICE.expression_metadata(),
@@ -2902,13 +3289,22 @@ async def cancel_audio() -> dict[str, Any]:
 
 @app.get("/model/config")
 async def model_config() -> dict[str, Any]:
+    if _native_macos():
+        h=SERVICE.health()
+        return {"model":MODEL_ID,"voice":VOICE_ID,"version":"v5turbo","model_family":"gsv-v5turbo","backend":h["backend"],"precision":h.get("precision","FP32"),"reference_language":REFERENCE_LANGUAGE,"reference_configured":not SERVICE.settings.dynamic_voices,"languages":h.get("supported_languages",h.get("languages",[])),"sample_rate":SERVICE.sample_rate,"engine_count":h.get("engine_count",4),"pytorch_fallback":False,"prototype":h["prototype"],"quality_qualified":h["quality_qualified"],"quality_qualification_scope":h["quality_qualification_scope"],"qualification":h["qualification"],"service_version":SERVICE_VERSION,"adaptive_punctuation_segments":True}
+    if SERVICE._is_v5():
+        return {"model": MODEL_ID, "voice": "", "version": "v5turbo", "backend": "hybrid-cuda",
+                "reference_language": None, "reference_configured": False,
+                "languages": ["zh", "yue", "en", "ja", "ko", "auto", "auto_yue"],
+                "sample_rate": 48000, "engine_count": 5, "service_version": SERVICE_VERSION,
+                "adaptive_punctuation_segments": False}
     return {
         "model": MODEL_ID,
         "voice": VOICE_ID,
         "version": "v2ProPlus",
         "backend": "TensorRT-11",
         "reference_language": REFERENCE_LANGUAGE,
-        "reference_configured": True,
+        "reference_configured": not SERVICE.settings.dynamic_voices,
         "languages": ["zh", "yue", "en", "ja", "ko", "auto", "auto_yue"],
         "sample_rate": SERVICE.sample_rate,
         "engine_count": len(REQUIRED_ENGINES),
@@ -2997,39 +3393,33 @@ async def activate_model(request: Request) -> JSONResponse:
                 )
             await SESSION_MANAGER.clear_all_neural_contexts()
             result = await run_in_threadpool(SERVICE.activate, model_id)
-        return JSONResponse(
-            {
-                "code": 0,
-                "message": "Success",
-                **result,
-                "backend": "TensorRT-11",
-                "pytorch_fallback": False,
-            }
-        )
+        payload = {
+            "code": 0,
+            "message": "Success",
+            **result,
+            "backend": "MLX-Metal" if _native_macos() else "hybrid-cuda" if SERVICE._is_v5() else "TensorRT-11",
+        }
+        if not SERVICE._is_v5():
+            payload["pytorch_fallback"] = False
+        return JSONResponse(payload)
     except RequestError as error:
         return _json_response(str(error), error.status_code)
     except Exception:
-        LOGGER.exception("TensorRT model activation failed")
+        backend = "Native macOS" if _native_macos() else "TensorRT"
+        LOGGER.exception("%s model activation failed", backend)
         return _json_response(
-            "TensorRT model activation failed; inspect the AnifLive-TTS container logs",
+            f"{backend} model activation failed; inspect the AnifLive-TTS service logs",
             500,
         )
 
 
 @app.get("/v1/voices")
 async def list_voices() -> dict[str, Any]:
-    # No filesystem paths are exposed here.  The reference is intentionally
-    # fixed inside the container rather than being a caller-selectable asset.
-    return {
-        "object": "list",
-        "data": [
-            {
-                "id": VOICE_ID,
-                "reference_language": REFERENCE_LANGUAGE,
-                "reference_configured": True,
-            }
-        ],
-    }
+    data = VOICE_LIBRARY.store.list_voices()
+    if VOICE_ID:
+        data.insert(0, {"id": VOICE_ID, "reference_language": REFERENCE_LANGUAGE,
+                        "reference_configured": bool(REFERENCE_TEXT)})
+    return {"object": "list", "data": data}
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:

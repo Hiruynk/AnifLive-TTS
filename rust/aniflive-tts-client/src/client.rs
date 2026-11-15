@@ -2,7 +2,7 @@ use crate::error::transport_error;
 use crate::stream::{Stop, StreamInner};
 use crate::{ApiError, ClientConfig, ClientError, headers, models::*, routes};
 use crate::{AudioStream, StreamMetadata};
-use reqwest::header::RETRY_AFTER;
+use reqwest::header::{AUTHORIZATION, RETRY_AFTER};
 use reqwest::{Method, Response};
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
@@ -233,20 +233,40 @@ impl Client {
             request = request.json(&body);
         }
         let started = Instant::now();
-        let mut response = self
+        let response = self
             .deadline(started, async {
                 request.send().await.map_err(transport_error)
             })
             .await?;
+        self.checked_response(response, statuses, started).await
+    }
+
+    async fn checked_response(
+        &self,
+        mut response: Response,
+        statuses: &[u16],
+        started: Instant,
+    ) -> Result<Response, ClientError> {
         if statuses.contains(&response.status().as_u16()) {
             return Ok(response);
         }
         let status_code = response.status().as_u16();
+        let bearer = self
+            .inner
+            .config
+            .default_headers
+            .get(AUTHORIZATION)
+            .filter(|value| value.is_sensitive())
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.split_once(' '))
+            .filter(|(scheme, token)| scheme.eq_ignore_ascii_case("bearer") && !token.is_empty())
+            .map(|(_, token)| token);
+        let contains_bearer = |text: &str| bearer.is_some_and(|token| text.contains(token));
         let retry_after = response
             .headers()
             .get(RETRY_AFTER)
             .and_then(|v| v.to_str().ok())
-            .filter(|v| v.len() <= 256)
+            .filter(|v| v.len() <= 256 && !contains_bearer(v))
             .map(str::to_owned);
         let mut bytes = Vec::new();
         // Error status survives malformed, truncated or oversized diagnostic bodies.
@@ -281,19 +301,33 @@ impl Client {
             .as_ref()
             .and_then(|v| v.get("code"))
             .cloned()
-            .filter(|v| v.is_number() || v.as_str().is_some_and(|s| s.len() <= 128));
+            .filter(|v| {
+                v.is_number()
+                    || v.as_str()
+                        .is_some_and(|s| s.len() <= 128 && !contains_bearer(s))
+            });
         let message = value
             .as_ref()
             .and_then(|v| v.get("message"))
             .and_then(Value::as_str)
+            .filter(|s| !contains_bearer(s))
             .map(|s| s.chars().take(2048).collect())
             .unwrap_or_else(|| "service error".to_owned());
+        let diagnostic = (!bytes.is_empty())
+            .then(|| String::from_utf8_lossy(&bytes).into_owned())
+            .filter(|text| {
+                !contains_bearer(text)
+                    && !bearer.is_some_and(|token| {
+                        let escaped = Value::String(token.to_owned()).to_string();
+                        text.contains(&escaped[1..escaped.len() - 1])
+                    })
+            });
         Err(ClientError::Api(ApiError {
             status_code,
             server_code,
             message,
             retry_after,
-            diagnostic: (!bytes.is_empty()).then(|| String::from_utf8_lossy(&bytes).into_owned()),
+            diagnostic,
         }))
     }
 
@@ -332,6 +366,202 @@ impl Client {
         .await
     }
 
+    async fn multipart_json<T: DeserializeOwned, M: serde::Serialize>(
+        &self,
+        method: Method,
+        url: url::Url,
+        audio: Vec<u8>,
+        filename: &str,
+        metadata: &M,
+        statuses: &[u16],
+    ) -> Result<T, ClientError> {
+        if audio.is_empty() || audio.len() > 25 * 1024 * 1024 {
+            return Err(ClientError::InvalidConfiguration);
+        }
+        let metadata =
+            serde_json::to_string(metadata).map_err(|_| ClientError::InvalidConfiguration)?;
+        let form = reqwest::multipart::Form::new()
+            .text("metadata", metadata)
+            .part(
+                "audio",
+                reqwest::multipart::Part::bytes(audio).file_name(filename.to_owned()),
+            );
+        let request = {
+            let transport = self.inner.http.lock().unwrap_or_else(|e| e.into_inner());
+            transport
+                .as_ref()
+                .ok_or(ClientError::Closed)?
+                .request(method, url)
+                .multipart(form)
+        };
+        let started = Instant::now();
+        let response = self
+            .deadline(started, async {
+                request.send().await.map_err(transport_error)
+            })
+            .await?;
+        let response = self.checked_response(response, statuses, started).await?;
+        self.deadline(started, async {
+            if headers::content_type(response.headers())? != "application/json" {
+                return Err(ClientError::Protocol("expected JSON content type"));
+            }
+            let bytes = read_bounded(response, MAX_JSON_BYTES).await?;
+            serde_json::from_slice(&bytes).map_err(|_| ClientError::Protocol("invalid JSON schema"))
+        })
+        .await
+    }
+
+    pub async fn create_voice(&self, request: &VoiceCreate) -> Result<VoiceInfo, ClientError> {
+        let body = serde_json::to_value(request).map_err(|_| ClientError::InvalidConfiguration)?;
+        self.json_url(
+            Method::POST,
+            routes::join(self.inner.config.base_url(), routes::VOICES)?,
+            Some(body),
+            &[201],
+        )
+        .await
+    }
+    pub async fn voice(&self, id: &str) -> Result<VoiceInfo, ClientError> {
+        self.json_url(
+            Method::GET,
+            routes::voice(self.inner.config.base_url(), id, None, None)?,
+            None,
+            &[200],
+        )
+        .await
+    }
+    pub async fn update_voice(
+        &self,
+        id: &str,
+        request: &VoiceUpdate,
+    ) -> Result<VoiceInfo, ClientError> {
+        self.json_url(
+            Method::PATCH,
+            routes::voice(self.inner.config.base_url(), id, None, None)?,
+            Some(serde_json::to_value(request).map_err(|_| ClientError::InvalidConfiguration)?),
+            &[200],
+        )
+        .await
+    }
+    pub async fn delete_voice(&self, id: &str) -> Result<(), ClientError> {
+        self.response_url(
+            Method::DELETE,
+            routes::voice(self.inner.config.base_url(), id, None, None)?,
+            None,
+            &[204],
+        )
+        .await?;
+        Ok(())
+    }
+    pub async fn references(
+        &self,
+        voice: &str,
+    ) -> Result<ListResponse<ReferenceInfo>, ClientError> {
+        self.json_url(
+            Method::GET,
+            routes::voice(
+                self.inner.config.base_url(),
+                voice,
+                None,
+                Some("references"),
+            )?,
+            None,
+            &[200],
+        )
+        .await
+    }
+    pub async fn reference(&self, voice: &str, id: &str) -> Result<ReferenceInfo, ClientError> {
+        self.json_url(
+            Method::GET,
+            routes::voice(self.inner.config.base_url(), voice, Some(id), None)?,
+            None,
+            &[200],
+        )
+        .await
+    }
+    pub async fn upload_reference(
+        &self,
+        voice: &str,
+        audio: Vec<u8>,
+        filename: &str,
+        metadata: &ReferenceCreate,
+    ) -> Result<ReferenceInfo, ClientError> {
+        self.multipart_json(
+            Method::POST,
+            routes::voice(
+                self.inner.config.base_url(),
+                voice,
+                None,
+                Some("references"),
+            )?,
+            audio,
+            filename,
+            metadata,
+            &[201],
+        )
+        .await
+    }
+    pub async fn update_reference(
+        &self,
+        voice: &str,
+        id: &str,
+        request: &ReferenceUpdate,
+    ) -> Result<ReferenceInfo, ClientError> {
+        self.json_url(
+            Method::PATCH,
+            routes::voice(self.inner.config.base_url(), voice, Some(id), None)?,
+            Some(serde_json::to_value(request).map_err(|_| ClientError::InvalidConfiguration)?),
+            &[200],
+        )
+        .await
+    }
+    pub async fn replace_reference_audio(
+        &self,
+        voice: &str,
+        id: &str,
+        audio: Vec<u8>,
+        filename: &str,
+        metadata: &ReferenceUpdate,
+    ) -> Result<ReferenceInfo, ClientError> {
+        self.multipart_json(
+            Method::PATCH,
+            routes::voice(self.inner.config.base_url(), voice, Some(id), None)?,
+            audio,
+            filename,
+            metadata,
+            &[200],
+        )
+        .await
+    }
+    pub async fn prepare_reference(
+        &self,
+        voice: &str,
+        id: &str,
+    ) -> Result<ReferenceInfo, ClientError> {
+        self.json_url(
+            Method::POST,
+            routes::voice(
+                self.inner.config.base_url(),
+                voice,
+                Some(id),
+                Some("prepare"),
+            )?,
+            None,
+            &[200, 202],
+        )
+        .await
+    }
+    pub async fn delete_reference(&self, voice: &str, id: &str) -> Result<(), ClientError> {
+        self.response_url(
+            Method::DELETE,
+            routes::voice(self.inner.config.base_url(), voice, Some(id), None)?,
+            None,
+            &[204],
+        )
+        .await?;
+        Ok(())
+    }
+
     pub async fn health(&self) -> Result<Health, ClientError> {
         self.json(Method::GET, routes::HEALTH, None).await
     }
@@ -346,6 +576,18 @@ impl Client {
     }
     pub async fn expressions(&self) -> Result<ExpressionCatalogInfo, ClientError> {
         self.json(Method::GET, routes::EXPRESSIONS, None).await
+    }
+    pub async fn voice_expressions(
+        &self,
+        voice_profile: &str,
+    ) -> Result<ExpressionCatalogInfo, ClientError> {
+        if voice_profile.is_empty() {
+            return Err(ClientError::InvalidConfiguration);
+        }
+        let mut url = routes::join(self.inner.config.base_url(), routes::EXPRESSIONS)?;
+        url.query_pairs_mut()
+            .append_pair("voice_profile", voice_profile);
+        self.json_url(Method::GET, url, None, &[200]).await
     }
     pub async fn activate_model(&self, model: &str) -> Result<ActivationResult, ClientError> {
         self.json(
@@ -405,6 +647,10 @@ impl Client {
         for feature in required {
             let supported = match feature {
                 RequiredFeature::PcmStreaming => capabilities.streaming.pcm16,
+                RequiredFeature::VoiceManagement => capabilities
+                    .voice_management
+                    .as_ref()
+                    .is_some_and(|v| v.crud && v.reference_upload && v.reference_prepare),
                 // Protocol support does not imply the active package has profiles.
                 RequiredFeature::Expressions => capabilities.expression.native,
                 RequiredFeature::SpeechSessions => capabilities

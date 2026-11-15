@@ -220,7 +220,7 @@ def test_pytorch_inplace_update_cannot_mutate_onnx_inputs(tmp_path: Path, monkey
 
 @pytest.mark.parametrize("stage", ["SoVITS", "SoVITSStreaming", "SSL"])
 @pytest.mark.parametrize("fail_forward", [False, True])
-def test_waveform_reference_kernel_is_scoped_and_restored(
+def test_cpu_reference_kernel_is_scoped_and_restored(
     tmp_path, stage: str, fail_forward: bool,
 ) -> None:
     import torch
@@ -230,7 +230,8 @@ def test_waveform_reference_kernel_is_scoped_and_restored(
 
     class Reference(torch.nn.Module):
         def forward(self, value):
-            assert torch.backends.mkldnn.enabled is (not native)
+            # Every CPU comparison now uses unfused kernels, including SSL.
+            assert torch.backends.mkldnn.enabled is False
             if fail_forward:
                 raise RuntimeError("intentional forward failure")
             return value
@@ -250,6 +251,27 @@ def test_waveform_reference_kernel_is_scoped_and_restored(
         assert torch.backends.mkldnn.enabled is True
     assert passed is (not fail_forward)
     if passed:
-        assert validator.validation_results[0]["reference_execution"][
-            "native_cpu_waveform_reference"
-        ] is native
+        execution = validator.validation_results[0]["reference_execution"]
+        assert execution["torch_cpu_mkldnn"] is False
+        assert execution["native_cpu_waveform_reference"] is native
+
+
+def test_feature_budget_preserves_small_rows_and_discrete_outputs(tmp_path: Path) -> None:
+    validator = ONNXValidator(str(tmp_path))
+    reference = torch.tensor([[100.0, 0.0, -50.0], [0.001, 0.001, 0.001]], dtype=torch.float64)
+    actual = reference.numpy().copy()
+    actual[0, 1] = 0.0005
+    passed, metrics = validator._compare_tensors(
+        reference, actual, "features", 1e-3, 1e-5, feature_representation=True,
+    )
+    assert passed and not metrics["elementwise_diagnostic_passed"]
+    actual[1] *= 2
+    passed, _ = validator._compare_tensors(
+        reference, actual, "features", 1e-3, 1e-5, feature_representation=True,
+    )
+    assert not passed, "A large row must not hide corruption of a smaller row"
+    passed, _ = validator._compare_tensors(
+        torch.tensor([1, 2]), np.array([1, 3]), "ids", 2.0, 2.0,
+        feature_representation=True,
+    )
+    assert not passed, "Discrete outputs must remain exact"

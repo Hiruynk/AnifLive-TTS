@@ -307,8 +307,8 @@ def convert_model(
     *,
     gpt: Path,
     sovits: Path,
-    reference_audio: Path,
-    reference_text_file: Path,
+    reference_audio: Path | None,
+    reference_text_file: Path | None,
     reference_language: str,
     model_id: str,
     voice_profile: str,
@@ -320,8 +320,9 @@ def convert_model(
     stream_overlap_frames: int = 12,
     workspace_mib: int = 4096,
     optimization_level: int = 5,
+    shared_base: bool = False,
 ) -> Path:
-    if reference_language not in {"zh", "yue", "en", "ja", "ko"}:
+    if (reference_language is not None or not shared_base) and reference_language not in {"zh", "yue", "en", "ja", "ko"}:
         raise ConversionError(f"Unsupported reference language: {reference_language}")
     try:
         model_id = validate_safe_identifier(model_id, "model_id")
@@ -330,8 +331,11 @@ def convert_model(
         raise ConversionError(str(error)) from error
     gpt = _require(gpt, "GPT checkpoint")
     sovits = _require(sovits, "SoVITS checkpoint")
-    reference_audio = _require(reference_audio, "reference audio")
-    reference_text_file = _require(reference_text_file, "reference text")
+    if not shared_base:
+        if reference_audio is None or reference_text_file is None:
+            raise ConversionError("A legacy voice package requires reference audio and transcript")
+        reference_audio = _require(reference_audio, "reference audio")
+        reference_text_file = _require(reference_text_file, "reference text")
     source_dir = source_dir.resolve()
     shared_dir = shared_dir.resolve()
     # Official V2ProPlus training outputs may contain the bundled
@@ -343,8 +347,8 @@ def convert_model(
         if value not in sys.path:
             sys.path.insert(0, value)
     inspection = inspect_pair(gpt, sovits, allow_unsafe_pickle=allow_unsafe_pickle)
-    reference_text = reference_text_file.read_text(encoding="utf-8-sig").strip()
-    if not reference_text:
+    reference_text = "" if shared_base else reference_text_file.read_text(encoding="utf-8-sig").strip()
+    if not shared_base and not reference_text:
         raise ConversionError("Reference text is empty")
 
     output = output.resolve()
@@ -403,31 +407,32 @@ def convert_model(
             json.dumps(engine_manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
             encoding="utf-8",
         )
-        profile_dir = resolve_contained_path(
-            staging / "voices", voice_profile, "voice profile path"
-        )
-        profile_dir.mkdir(parents=True)
-        shutil.copy2(reference_audio, profile_dir / "reference.wav")
-        (profile_dir / "reference.txt").write_text(reference_text + "\n", encoding="utf-8")
-        (profile_dir / "profile.json").write_text(
-            json.dumps(
-                {
-                    "id": voice_profile,
-                    "reference_audio": "reference.wav",
-                    "reference_text": reference_text,
-                    "reference_language": reference_language,
-                    "conditioning_cache": "conditioning.pt",
-                },
-                ensure_ascii=False,
-                indent=2,
+        if not shared_base:
+            profile_dir = resolve_contained_path(
+                staging / "voices", voice_profile, "voice profile path"
             )
-            + "\n",
-            encoding="utf-8",
-        )
+            profile_dir.mkdir(parents=True)
+            shutil.copy2(reference_audio, profile_dir / "reference.wav")
+            (profile_dir / "reference.txt").write_text(reference_text + "\n", encoding="utf-8")
+            (profile_dir / "profile.json").write_text(
+                json.dumps(
+                    {
+                        "id": voice_profile,
+                        "reference_audio": "reference.wav",
+                        "reference_text": reference_text,
+                        "reference_language": reference_language,
+                        "conditioning_cache": "conditioning.pt",
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
         source_manifest = {
             "gpt": {"sha256": sha256_file(gpt), "filename": gpt.name},
             "sovits": {"sha256": sha256_file(sovits), "filename": sovits.name},
-            "reference_audio": {"sha256": sha256_file(reference_audio), "filename": reference_audio.name},
+            "reference_audio": None if shared_base else {"sha256": sha256_file(reference_audio), "filename": reference_audio.name},
             "inspection": inspection,
             "unsafe_pickle_allowed": allow_unsafe_pickle,
         }
@@ -443,8 +448,9 @@ def convert_model(
             "precision": V2PROPLUS_BACKEND.precision,
             "backend": "TensorRT-11",
             "active_engine_fingerprint": fingerprint,
-            "voice_profiles": [voice_profile],
-            "default_voice_profile": voice_profile,
+            "voice_profiles": [] if shared_base else [voice_profile],
+            "default_voice_profile": None if shared_base else voice_profile,
+            "reference_mode": "dynamic" if shared_base else "package",
             "semantic_sampling": "native-v2proplus-v1",
             "languages": ["zh", "yue", "en", "ja", "ko"],
             "created_at": dt.datetime.now(dt.timezone.utc).isoformat(),

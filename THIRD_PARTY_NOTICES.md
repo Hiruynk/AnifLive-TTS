@@ -7,7 +7,11 @@ The release bundles retain the following upstream notices and licenses.
 | Component | License | Use |
 |---|---|---|
 | Rust-backed Python SDK dependencies | Per-component upstream licenses | Locked desktop-target dependencies, including PyO3, Tokio, reqwest, rustls and AWS-LC; original notices are retained in [SDK native notices](licenses/SDK-NATIVE-THIRD-PARTY-NOTICES.txt), with versions and checksums in [the dependency inventory](licenses/SDK-NATIVE-DEPENDENCIES.json) |
+| macOS `mlx-rs` / `mlx-sys` | MIT OR Apache-2.0 | Native worker bindings pinned in `rust/macos-v5turbo/Cargo.lock`; the macOS payload builder retains both upstream license texts |
+| macOS MLX / MLX-Metal / `mlx-c` | MIT | MLX 0.32.2 native libraries and Metal kernels; the macOS builder stages their upstream notices with the worker payload |
+| macOS GPT-SoVITS frontend source | MIT | Operator-provided source for the native MLX/Metal path; its source-code license is retained in `rust/macos-v5turbo/licenses/GPT-SoVITS-MIT.txt`. Model weights and reference recordings remain separately supplied assets |
 | GPT-SoVITS | MIT | Model architecture, multilingual frontend and inference conventions; license retained in `licenses/GPT-SoVITS-MIT.txt`, with relevant vendored changes recorded in `minimal_inference/ANIFLIVE_TTS_PROVENANCE.json` |
+| GPT-SoVITS V5 Turbo source | MIT | Operator-supplied source pinned to `04a44eb977586645f33594b72af13a035a2056c6`; the V5 package assembler retains its upstream license, records file hashes in `source-lock.json`, and adds the existing Apache-licensed English G2P implementation with its separate provenance |
 | GPT-SoVITS minimal inference | Apache-2.0 | ONNX export and TensorRT inference implementation; license retained in `minimal_inference/LICENSE`, with modified-file notices and provenance in `minimal_inference/ANIFLIVE_TTS_PROVENANCE.json` |
 | GPT-SoVITS C++ | Apache-2.0 | Hot-path and persistent-buffer design reference; retained where applicable |
 | ClearerVoice-Studio `MossFormer2_SS_16K` source | Apache-2.0 | Linux Docker speech-separation backend, fetched at source revision `6b3774dc79c46ae8bed2a4fa5f706f0ac8c75c61`; source archive SHA-256 `f8f8d2f2190b9909b51e91ce886d1c7efedb7349b3ff6d3ab521451165fbd8da`. The worker image retains the upstream license at `/opt/aniflive-tts/clearvoice-source/LICENSE`; repository notice is in `licenses/CLEARERVOICE-MOSSFORMER2-NOTICE.txt` |
@@ -20,9 +24,10 @@ The release bundles retain the following upstream notices and licenses.
 | `nvidia/diar_streaming_sortformer_4spk-v2` | CC BY 4.0 | Managed diarization and overlap-evidence model, pinned to revision `5240a64075176943f677d30fa2171c780229f341`; the Q8_0 GGUF fingerprint is locked in `src/aniflive_tts/workstation_assets_lock.json`. See `licenses/NVIDIA-NEMO-SPEECH-SORTFORMER-NOTICE.md` |
 | NVIDIA TensorRT | NVIDIA Software License | TensorRT 11 runtime and engine builder |
 | PyTorch | BSD-3-Clause | Tensor and CUDA interoperability |
+| Transformers 4.57.6 V5 profile | Apache-2.0 | BERT/HuBERT frontend dependencies; the image build applies the upstream LightGlue security change from commit `676559d5022b74aaa0cee1cee0842b7f27c5320e` through [the hash-verified backport](scripts/v5_transformers_security.py), retaining the upstream copyright and license notice |
 | TorchCodec | BSD-3-Clause | Pinned Linux worker audio decoding backend used by torchaudio during speaker-vector preprocessing; license retained in `licenses/TORCHCODEC-BSD-3-CLAUSE.txt` |
 | ONNX / ONNX Runtime | Apache-2.0 / MIT | Portable graph format and validation |
-| g2p-en 2.1.0 | Apache-2.0 | Minimal English grapheme-to-phoneme runtime vendored without its unused Distance dependency; license retained beside the source, with modifications recorded in `minimal_inference/ANIFLIVE_TTS_PROVENANCE.json` |
+| g2p-en 2.1.0 | Apache-2.0 | Minimal English grapheme-to-phoneme runtime and published frontend parameter data, vendored without the unused Distance dependency; license retained beside the source, with modifications recorded in `minimal_inference/ANIFLIVE_TTS_PROVENANCE.json` and data hashes in [the frontend inventory](licenses/FRONTEND-DATA.json) |
 | NLTK library | Apache-2.0 | English tokenization and data loading library |
 | NLTK averaged perceptron taggers | MIT | `averaged_perceptron_tagger` and `averaged_perceptron_tagger_eng`; see `licenses/NLTK-DATA-NOTICES.md` |
 | CMU Pronouncing Dictionary | CMU terms | Pronunciation data distributed through NLTK Data; see `licenses/CMUDICT-NOTICE.txt` |
@@ -43,7 +48,7 @@ Apache-2.0-derived files changed for this distribution carry a prominent
 the upstream revisions, baseline file hashes, and modification categories; it
 does not relicense any upstream work.
 
-Model checkpoints, reference recordings and generated TensorRT engines are not
+TTS voice checkpoints, reference recordings and generated TensorRT engines are not
 part of the AnifLive-TTS source distribution. Users are responsible for the
 license and consent status of every model package they create.
 

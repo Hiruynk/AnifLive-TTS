@@ -64,6 +64,7 @@ fn nested(parent: &str, field: &str) -> Option<&'static str> {
         ("Capabilities", "streaming") => Some("StreamingCapabilities"),
         ("Capabilities", "expression") => Some("ExpressionCapabilities"),
         ("Capabilities", "speech_sessions") => Some("SessionCapabilities"),
+        ("Capabilities", "voice_management") => Some("VoiceManagementCapabilities"),
         ("SessionCapabilities", "limits") => Some("SessionLimits"),
         ("ServiceInfo", "health") => Some("Health"),
         ("ServiceInfo", "capabilities") => Some("Capabilities"),
@@ -73,7 +74,7 @@ fn nested(parent: &str, field: &str) -> Option<&'static str> {
 }
 pub fn record(py: Python<'_>, kind: &str, v: Value) -> PyResult<Py<PyAny>> {
     let class_name = match kind {
-        "Models" | "Voices" => "ListResponse",
+        "Models" | "Voices" | "References" => "ListResponse",
         _ => kind,
     };
     let class = py.import("aniflive_tts.sdk.types")?.getattr(class_name)?;
@@ -117,6 +118,7 @@ pub fn record(py: Python<'_>, kind: &str, v: Value) -> PyResult<Py<PyAny>> {
         } else if let Some(child) = match (kind, k.as_str()) {
             ("Models", "data") => Some("ModelInfo"),
             ("Voices", "data") => Some("VoiceInfo"),
+            ("References", "data") => Some("ReferenceInfo"),
             ("ExpressionCatalogInfo", "profiles") => Some("ExpressionProfileInfo"),
             ("SessionInfo", "segments") => Some("SegmentInfo"),
             _ => None,
@@ -168,6 +170,31 @@ pub fn chunk(py: Python<'_>, result: Option<Vec<u8>>) -> PyResult<Py<PyAny>> {
 }
 fn fields(schema: &str) -> &'static [(&'static str, &'static str)] {
     match schema {
+        "VoiceCreate" => &[("name", "str"), ("id", "str")],
+        "VoiceUpdate" => &[("name", "str")],
+        "ReferenceCreate" => &[
+            ("id", "str"),
+            ("reference_language", "str"),
+            ("transcript", "str"),
+            ("transcript_source", "str"),
+            ("transcript_confirmed", "bool"),
+            ("transcript_provider", "str"),
+            ("emotion_id", "str"),
+            ("emotion_label", "str"),
+            ("intensity", "float"),
+            ("is_default", "bool"),
+        ],
+        "ReferenceUpdate" => &[
+            ("reference_language", "str"),
+            ("transcript", "str"),
+            ("transcript_source", "str"),
+            ("transcript_confirmed", "bool"),
+            ("transcript_provider", "str"),
+            ("emotion_id", "str"),
+            ("emotion_label", "str"),
+            ("intensity", "float"),
+            ("is_default", "bool"),
+        ],
         "SynthesisRequest" => &[
             ("language", "str"),
             ("text", "str"),

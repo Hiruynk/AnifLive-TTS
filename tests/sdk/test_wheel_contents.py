@@ -174,7 +174,13 @@ def test_rejects_runtime_dependency_without_runtime_extra_marker(tmp_path: Path)
     "private_name",
     [
         "AGENTS.md",
-        "ANIFLIVE_TTS_V1_5_BETA_RUST_PYTHON_SDK_CODEX_PLAN.md",
+        "EXAMPLE_CODEX_PLAN.md",
+        "EXAMPLE_IMPLEMENTATION_PLAN.md",
+        "EXAMPLE_MASTER_START_PROMPT.md",
+        "aGeNtS.mD",
+        "Example_Codex_Plan.MD",
+        "Example_Implementation_Plan.MD",
+        "Example_Master_Start_Prompt.MD",
     ],
 )
 def test_rejects_private_instruction_documents(tmp_path: Path, private_name: str) -> None:
@@ -190,4 +196,15 @@ def test_rejects_local_qualification_artifacts(tmp_path: Path) -> None:
     files[".local-sdk/wheelhouse/qualification.json"] = b"{}"
 
     with pytest.raises(ValueError, match="qualification artifacts"):
+        CHECKER.check_wheel(_write_wheel(tmp_path, files))
+
+
+def test_accepts_maturin_metadata_format_without_changing_dependency_boundary(tmp_path: Path):
+    files = _files()
+    key = f"{DIST_INFO}/METADATA"
+    files[key] = files[key].replace(b'extra == "runtime"', b"extra == 'runtime'")
+    files[f"{DIST_INFO}/entry_points.txt"] = b"[console_scripts]\naniflive-tts=aniflive_tts.cli:main\n"
+    assert CHECKER.check_wheel(_write_wheel(tmp_path, files))["version"] == "1.5.0b1"
+    files[key] = files[key].replace(b"extra == 'runtime'", b"extra == 'other'")
+    with pytest.raises(ValueError, match="Bare SDK"):
         CHECKER.check_wheel(_write_wheel(tmp_path, files))

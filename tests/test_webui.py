@@ -63,7 +63,7 @@ def test_webui_bind_accepts_loopback_hosts_by_default(host: str) -> None:
 
 
 @pytest.mark.parametrize(
-    "host", ["0.0.0.0", "::", "192.168.1.10", "workstation.local", ""]
+    "host", ["0.0.0.0", "::", "203.0.113.10", "workstation.local", ""]
 )
 def test_webui_bind_rejects_non_loopback_hosts_by_default(host: str) -> None:
     with pytest.raises(WebUIError, match="loopback|must not be empty"):
@@ -1345,7 +1345,8 @@ def test_webui_asset_uses_current_contract_without_legacy_hardcoding() -> None:
     assert "activeTextRangeAtAudioTime" in html
     assert "buildPcmActivityTimeline" in html
     assert "elapsed / duration" not in html
-    assert "const timing = schedulePcm(context, chunk, metrics)" in html
+    assert "function schedulePcm(context, bytes, metrics, sampleRate)" in html
+    assert "const timing = schedulePcm(context, chunk, metrics, sampleRate)" in html
     assert 'el("text").addEventListener("input", clearPlaybackIndicator)' in html
     assert "v1.1" not in html
     assert "/static/" not in html

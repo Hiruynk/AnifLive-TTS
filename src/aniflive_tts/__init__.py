@@ -58,9 +58,16 @@ from .sdk import (
     TimeoutError,
     TransportError,
     VoiceInfo,
+    VoiceCreate,
+    VoiceUpdate,
+    ReferenceCreate,
+    ReferenceUpdate,
+    ReferenceInfo,
+    TranscriptSource,
+    VoiceManagementCapabilities,
 )
 
-__version__ = "1.5.0b1"
+__version__ = "1.5.0"
 
 __all__ = [
     "APIError",
@@ -122,3 +129,6 @@ __all__ = [
     "VoiceInfo",
     "__version__",
 ]
+
+__all__ += ["VoiceCreate", "VoiceUpdate", "ReferenceCreate", "ReferenceUpdate", "ReferenceInfo",
+            "TranscriptSource", "VoiceManagementCapabilities"]

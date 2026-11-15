@@ -31,6 +31,11 @@ from .types import (
     SynthesisRequest,
     SynthesisResult,
     VoiceInfo,
+    VoiceCreate,
+    VoiceUpdate,
+    ReferenceCreate,
+    ReferenceUpdate,
+    ReferenceInfo,
 )
 
 DEFAULT_MAX_WAV_BYTES = 64 * 1024 * 1024
@@ -44,6 +49,7 @@ def _native_client(
     request_timeout: float | None,
     stream_idle_timeout: float | None,
     headers: Mapping[str, str] | None,
+    api_key: str | None,
     max_wav_bytes: int,
     chunk_bytes: int,
 ) -> NativeClient:
@@ -59,6 +65,17 @@ def _native_client(
             for name, value in native_headers.items()
         ):
             raise TypeError("headers must contain only string names and values")
+
+    if api_key is not None:
+        if not isinstance(api_key, str):
+            raise TypeError("api_key must be a string or None")
+        if native_headers is None:
+            native_headers = {}
+        if any(name.lower() == "authorization" for name in native_headers):
+            raise ValueError("api_key cannot be combined with an Authorization header")
+        if not api_key or any(not 33 <= ord(char) <= 126 for char in api_key):
+            raise ValueError("api_key must be non-empty and contain only visible ASCII characters")
+        native_headers["Authorization"] = f"Bearer {api_key}"
 
     try:
         native_module = import_module("aniflive_tts._native")
@@ -156,6 +173,7 @@ class Client:
         request_timeout: float | None = 120.0,
         stream_idle_timeout: float | None = 60.0,
         headers: Mapping[str, str] | None = None,
+        api_key: str | None = None,
         max_wav_bytes: int = DEFAULT_MAX_WAV_BYTES,
         chunk_bytes: int = DEFAULT_CHUNK_BYTES,
     ) -> None:
@@ -165,6 +183,7 @@ class Client:
             request_timeout=request_timeout,
             stream_idle_timeout=stream_idle_timeout,
             headers=headers,
+            api_key=api_key,
             max_wav_bytes=max_wav_bytes,
             chunk_bytes=chunk_bytes,
         )
@@ -189,8 +208,43 @@ class Client:
     def voices(self) -> ListResponse[VoiceInfo]:
         return self._native.voices()
 
-    def expressions(self) -> ExpressionCatalogInfo:
-        return self._native.expressions()
+    def create_voice(self, request: VoiceCreate) -> VoiceInfo:
+        return self._native.create_voice(request)
+
+    def voice(self, voice_id: str) -> VoiceInfo:
+        return self._native.voice(voice_id)
+
+    def update_voice(self, voice_id: str, request: VoiceUpdate) -> VoiceInfo:
+        return self._native.update_voice(voice_id, request)
+
+    def delete_voice(self, voice_id: str) -> None:
+        self._native.delete_voice(voice_id)
+
+    def references(self, voice_id: str) -> ListResponse[ReferenceInfo]:
+        return self._native.references(voice_id)
+
+    def reference(self, voice_id: str, reference_id: str) -> ReferenceInfo:
+        return self._native.reference(voice_id, reference_id)
+
+    def prepare_reference(self, voice_id: str, reference_id: str) -> ReferenceInfo:
+        return self._native.prepare_reference(voice_id, reference_id)
+
+    def update_reference(self, voice_id: str, reference_id: str, request: ReferenceUpdate) -> ReferenceInfo:
+        return self._native.update_reference(voice_id, reference_id, request)
+
+    def delete_reference(self, voice_id: str, reference_id: str) -> None:
+        self._native.delete_reference(voice_id, reference_id)
+
+    def upload_reference(self, voice_id: str, audio: bytes, metadata: ReferenceCreate, *, filename: str = "reference.wav") -> ReferenceInfo:
+        return self._native.upload_reference(voice_id, audio, metadata, filename)
+
+    def replace_reference_audio(self, voice_id: str, reference_id: str, audio: bytes, metadata: ReferenceUpdate, *, filename: str = "reference.wav") -> ReferenceInfo:
+        return self._native.replace_reference_audio(voice_id, reference_id, audio, metadata, filename)
+
+    def expressions(self, *, voice_profile: str | None = None) -> ExpressionCatalogInfo:
+        if voice_profile is None:
+            return self._native.expressions()
+        return self._native.expressions(voice_profile=voice_profile)
 
     def activate_model(self, model: str) -> ActivationResult:
         return self._native.activate_model(model)
@@ -293,6 +347,7 @@ class AsyncClient:
         request_timeout: float | None = 120.0,
         stream_idle_timeout: float | None = 60.0,
         headers: Mapping[str, str] | None = None,
+        api_key: str | None = None,
         max_wav_bytes: int = DEFAULT_MAX_WAV_BYTES,
         chunk_bytes: int = DEFAULT_CHUNK_BYTES,
     ) -> None:
@@ -302,6 +357,7 @@ class AsyncClient:
             request_timeout=request_timeout,
             stream_idle_timeout=stream_idle_timeout,
             headers=headers,
+            api_key=api_key,
             max_wav_bytes=max_wav_bytes,
             chunk_bytes=chunk_bytes,
         )
@@ -345,9 +401,55 @@ class AsyncClient:
         self._check_loop()
         return await self._native.voices_async()
 
-    async def expressions(self) -> ExpressionCatalogInfo:
+    async def create_voice(self, request: VoiceCreate) -> VoiceInfo:
         self._check_loop()
-        return await self._native.expressions_async()
+        return await self._native.create_voice_async(request)
+
+    async def voice(self, voice_id: str) -> VoiceInfo:
+        self._check_loop()
+        return await self._native.voice_async(voice_id)
+
+    async def update_voice(self, voice_id: str, request: VoiceUpdate) -> VoiceInfo:
+        self._check_loop()
+        return await self._native.update_voice_async(voice_id, request)
+
+    async def delete_voice(self, voice_id: str) -> None:
+        self._check_loop()
+        await self._native.delete_voice_async(voice_id)
+
+    async def references(self, voice_id: str) -> ListResponse[ReferenceInfo]:
+        self._check_loop()
+        return await self._native.references_async(voice_id)
+
+    async def reference(self, voice_id: str, reference_id: str) -> ReferenceInfo:
+        self._check_loop()
+        return await self._native.reference_async(voice_id, reference_id)
+
+    async def prepare_reference(self, voice_id: str, reference_id: str) -> ReferenceInfo:
+        self._check_loop()
+        return await self._native.prepare_reference_async(voice_id, reference_id)
+
+    async def update_reference(self, voice_id: str, reference_id: str, request: ReferenceUpdate) -> ReferenceInfo:
+        self._check_loop()
+        return await self._native.update_reference_async(voice_id, reference_id, request)
+
+    async def delete_reference(self, voice_id: str, reference_id: str) -> None:
+        self._check_loop()
+        await self._native.delete_reference_async(voice_id, reference_id)
+
+    async def upload_reference(self, voice_id: str, audio: bytes, metadata: ReferenceCreate, *, filename: str = "reference.wav") -> ReferenceInfo:
+        self._check_loop()
+        return await self._native.upload_reference_async(voice_id, audio, metadata, filename)
+
+    async def replace_reference_audio(self, voice_id: str, reference_id: str, audio: bytes, metadata: ReferenceUpdate, *, filename: str = "reference.wav") -> ReferenceInfo:
+        self._check_loop()
+        return await self._native.replace_reference_audio_async(voice_id, reference_id, audio, metadata, filename)
+
+    async def expressions(self, *, voice_profile: str | None = None) -> ExpressionCatalogInfo:
+        self._check_loop()
+        if voice_profile is None:
+            return await self._native.expressions_async()
+        return await self._native.expressions_async(voice_profile=voice_profile)
 
     async def activate_model(self, model: str) -> ActivationResult:
         self._check_loop()

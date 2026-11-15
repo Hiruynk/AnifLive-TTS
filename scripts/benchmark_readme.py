@@ -165,7 +165,7 @@ class GPUSampler:
 def health_check(host: str, port: int, timeout: float) -> dict[str, Any]:
     connection = http.client.HTTPConnection(host, port, timeout=timeout)
     try:
-        connection.request("GET", "/health", headers={"Connection": "close"})
+        connection.request("GET", "/health", headers={"Connection": "keep-alive"})
         response = connection.getresponse()
         payload = response.read()
     finally:
@@ -205,7 +205,7 @@ def activate_model(host: str, port: int, model: str, timeout: float) -> dict[str
             body,
             {
                 "Content-Type": "application/json",
-                "Connection": "close",
+                "Connection": "keep-alive",
             },
         )
         response = connection.getresponse()
@@ -245,7 +245,9 @@ def request(
             body,
             {
                 "Content-Type": "application/json; charset=utf-8",
-                "Connection": "close" if owns_connection else "keep-alive",
+                # Fresh clients close after reading the response, preserving
+                # local TIME_WAIT instead of premature passive-close reuse.
+                "Connection": "keep-alive",
             },
         )
         response = connection.getresponse()
@@ -626,7 +628,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--gpu-sample-interval", type=float, default=0.1)
     parser.add_argument("--timeout", type=float, default=180)
     parser.add_argument("--locale", choices=tuple(METRIC_LABELS), default="en")
-    parser.add_argument("--release", default="1.5.0-beta.1")
+    parser.add_argument("--release", default="1.5.0")
     parser.add_argument("--report", type=Path, default=Path("reports/benchmark.json"))
     parser.add_argument("--markdown", type=Path, default=Path("reports/benchmark.md"))
     args = parser.parse_args()

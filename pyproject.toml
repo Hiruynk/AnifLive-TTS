@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "aniflive-tts"
-version = "1.5.0b1"
-description = "First-party low-latency TTS runtime for AnifEngine-Voice"
+version = "1.5.0"
+description = "Low-latency multilingual TTS with GPT-SoVITS v2ProPlus/v5Turbo and native Apple Silicon support"
 readme = "README.md"
 requires-python = ">=3.10,<3.13"
 license = "PolyForm-Noncommercial-1.0.0"
@@ -20,6 +20,7 @@ runtime = [
   "numpy>=1.26,<3",
   "pydantic>=2.10,<3",
   "uvicorn[standard]>=0.34,<1",
+  "python-multipart>=0.0.32,<1",
 ]
 
 [project.scripts]

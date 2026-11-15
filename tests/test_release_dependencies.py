@@ -83,7 +83,8 @@ def test_build_and_test_tool_versions_are_security_pinned() -> None:
     dev = (ROOT / "requirements" / "dev.txt").read_text(encoding="utf-8")
     assert 'setuptools==84.0.0' in pyproject
     assert 'wheel==0.48.0' in pyproject
-    assert "pip==26.2.1 setuptools==84.0.0 wheel==0.48.0" in dockerfile
+    assert "pip-26.2.2-py3-none-any.whl#sha256=fd7f4dfa8190e014013b9f08f3e973f4e4c26ffd179a204895533a7254813a70" in dockerfile
+    assert "setuptools==84.0.0 wheel==0.48.0" in dockerfile
     assert "pytest==9.1.1" in dev
     assert "httpx==0.28.1" in dev
     assert "httpx2" not in dev
@@ -95,9 +96,14 @@ def test_container_workflow_scans_built_image_digest() -> None:
         encoding="utf-8"
     )
     assert "aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25" in workflow
-    assert "${{ env.IMAGE }}@${{ steps.build.outputs.digest }}" in workflow
+    assert "${{ env.STAGING_IMAGE }}@${{ steps.build.outputs.digest }}" in workflow
+    assert "scanners: vuln,secret" in workflow
     assert "scripts/check_trivy_report.py" in workflow
-    assert "TRIVY-AnifLive-TTS-v1.5.0-beta.1-${{ matrix.tag }}.json" in workflow
+    assert workflow.index("scripts/check_trivy_report.py") < workflow.index(
+        "Publish the reviewed image and attestations"
+    )
+    assert "skopeo copy --all --preserve-digests" in workflow
+    assert "TRIVY-AnifLive-TTS-v1.5.0-${{ matrix.tag }}.json" in workflow
     assert "spdx-tools==0.8.3" in workflow
     assert 'pyspdxtools -i "${output}"' in workflow
 

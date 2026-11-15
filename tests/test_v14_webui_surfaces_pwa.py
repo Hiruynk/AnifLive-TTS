@@ -156,8 +156,8 @@ def test_studio_visible_branding_and_responsive_title_are_exact() -> None:
     assert 'const SURFACE_NAME = document.body.classList.contains("embedded")' in synthesis
     assert '? "AnifLive-TTS Studio"' in synthesis
     assert ': "AnifLive-TTS WebUI"' in synthesis
-    assert synthesis.count('statusApiReady: "AnifLive-TTS v1.4') == 3
-    assert 'statusApiReady: "{surface} v1.4' not in synthesis
+    assert synthesis.count('statusApiReady: "AnifLive-TTS v1.5') == 3
+    assert 'statusApiReady: "{surface} v1.5' not in synthesis
 
 
 def test_overview_activity_timeline_uses_the_wine_brand_color() -> None:

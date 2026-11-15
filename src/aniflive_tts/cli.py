@@ -40,6 +40,7 @@ def _convert(args: argparse.Namespace) -> int:
         stream_overlap_frames=args.stream_overlap_frames,
         workspace_mib=args.workspace_mib,
         optimization_level=args.optimization_level,
+        shared_base=args.shared_base,
     )
     print(result)
     return 0
@@ -98,10 +99,9 @@ def _migrate_engine_metadata(args: argparse.Namespace) -> int:
 def _serve(args: argparse.Namespace) -> int:
     os.environ["ANIFLIVE_TTS_MODEL_PACKAGE"] = str(args.model_package.resolve())
     os.environ["ANIFLIVE_TTS_SHARED_DIR"] = str(args.shared_dir.resolve())
-    os.environ.setdefault(
-        "ANIFLIVE_TTS_SOURCE_DIR",
-        str(_default_source_dir().resolve()),
-    )
+    manifest = json.loads((args.model_package / "manifest.json").read_text(encoding="utf-8"))
+    source = args.shared_dir / "official" if isinstance(manifest.get("native_runtime"), dict) else _default_source_dir()
+    os.environ.setdefault("ANIFLIVE_TTS_SOURCE_DIR", str(source.resolve()))
     from .api import create_app
     import uvicorn
 
@@ -225,9 +225,10 @@ def build_parser() -> argparse.ArgumentParser:
     convert = model_commands.add_parser("convert")
     convert.add_argument("--gpt", type=Path, required=True)
     convert.add_argument("--sovits", type=Path, required=True)
-    convert.add_argument("--reference-audio", type=Path, required=True)
-    convert.add_argument("--reference-text-file", type=Path, required=True)
-    convert.add_argument("--reference-language", required=True)
+    convert.add_argument("--reference-audio", type=Path)
+    convert.add_argument("--reference-text-file", type=Path)
+    convert.add_argument("--reference-language", default=None)
+    convert.add_argument("--shared-base", action="store_true", help="Build shared engines with an initially empty dynamic voice library")
     convert.add_argument("--model-id", required=True)
     convert.add_argument("--voice-profile", default="default")
     convert.add_argument("--output", type=Path, required=True)

@@ -6,6 +6,8 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 RUN python3 -m venv /opt/sdk-build \
     && /opt/sdk-build/bin/python -m pip install --no-cache-dir \
+       "pip @ https://files.pythonhosted.org/packages/3f/06/3e4420302363fbb71be3c7f35ce042f54bfca330e3e66b3a2e3c4cca579f/pip-26.2.2-py3-none-any.whl#sha256=fd7f4dfa8190e014013b9f08f3e973f4e4c26ffd179a204895533a7254813a70" \
+    && /opt/sdk-build/bin/python -m pip install --no-cache-dir \
        setuptools==84.0.0 wheel==0.48.0 setuptools-rust==1.13.0
 ENV PYO3_PYTHON=/opt/sdk-build/bin/python
 WORKDIR /sdk
@@ -23,10 +25,10 @@ ARG TORCH_REQUIREMENTS=requirements/torch-cu128.txt
 ARG VCS_REF=unknown
 ARG BUILD_DATE=unknown
 LABEL org.opencontainers.image.title="AnifLive-TTS"
-LABEL org.opencontainers.image.version="1.5.0-beta.1"
-LABEL org.opencontainers.image.description="First-party TTS runtime for AnifEngine-Voice"
+LABEL org.opencontainers.image.version="1.5.0"
+LABEL org.opencontainers.image.description="GPT-SoVITS v2ProPlus/v5Turbo multilingual TTS · CUDA／TensorRT（Docker）"
 LABEL org.opencontainers.image.authors="Hiruynk"
-LABEL org.opencontainers.image.vendor="AnifEngine"
+LABEL org.opencontainers.image.vendor="Hiruynk"
 LABEL org.opencontainers.image.licenses="PolyForm-Noncommercial-1.0.0"
 LABEL org.opencontainers.image.source="https://github.com/Hiruynk/AnifLive-TTS"
 LABEL org.opencontainers.image.revision="${VCS_REF}"
@@ -44,6 +46,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     HF_HUB_OFFLINE=1 \
     TRANSFORMERS_OFFLINE=1 \
     TOKENIZERS_PARALLELISM=false \
+    TORCH_CUDNN_V8_API_LRU_CACHE_LIMIT=64 \
     ANIFLIVE_TTS_SOURCE_DIR=/app/minimal_inference \
     ANIFLIVE_TTS_MODEL_PACKAGE=/data/models/active \
     ANIFLIVE_TTS_SHARED_DIR=/data/shared \
@@ -60,19 +63,31 @@ ENV DEBIAN_FRONTEND=noninteractive \
 RUN --mount=type=cache,id=aniflive-apt,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,id=aniflive-apt-lists,target=/var/lib/apt/lists,sharing=locked \
     apt-get update && apt-get install -y --no-install-recommends \
-      build-essential cmake ffmpeg libffi-dev libsndfile1 python3 python3-dev python3-pip python3-venv \
+      build-essential cmake ffmpeg libffi-dev libsndfile1 python3 python3-dev python3-venv \
     && rm -rf /var/lib/apt/lists/* \
     && python3 -m venv /opt/venv \
     && python -m pip install --upgrade \
-      pip==26.2.1 setuptools==84.0.0 wheel==0.48.0
+      "pip @ https://files.pythonhosted.org/packages/3f/06/3e4420302363fbb71be3c7f35ce042f54bfca330e3e66b3a2e3c4cca579f/pip-26.2.2-py3-none-any.whl#sha256=fd7f4dfa8190e014013b9f08f3e973f4e4c26ffd179a204895533a7254813a70" \
+      setuptools==84.0.0 wheel==0.48.0
 
 COPY requirements /tmp/requirements
 COPY scripts/shared_assets_lock.json /tmp/shared_assets_lock.json
 RUN --mount=type=cache,id=aniflive-pip,target=/root/.cache/pip,sharing=locked \
-    python -m pip install -r "/tmp/${TORCH_REQUIREMENTS}" \
+    export PIP_NO_CACHE_DIR=0 \
+    && python -m pip install -r "/tmp/${TORCH_REQUIREMENTS}" \
     && python -m pip install -r /tmp/requirements/base.txt \
     && python -m pip install -r /tmp/requirements/tensorrt11-cu12-linux.txt \
     && python -m pip install --no-deps tensorrt-cu12==11.2.1.2
+
+# CUDA 12.8 is the qualified V5 target. Keep its frontend dependencies and
+# upstream security backport in the default image, so existing launchers can
+# activate either V2ProPlus or V5 without a second runtime installation.
+COPY scripts/v5_transformers_security.py /tmp/v5_transformers_security.py
+RUN if [[ "${TORCH_REQUIREMENTS}" == "requirements/torch-cu128.txt" ]]; then \
+      python -m pip install --no-cache-dir -r /tmp/requirements/v5-cu128.txt \
+      && python /tmp/v5_transformers_security.py \
+      && python -m pip check; \
+    fi
 
 # split-lang's CJK extras install overlapping MeCab modules. Reinstall the
 # selected BSD/Apache-licensed Korean bindings last so imports are deterministic.
@@ -187,8 +202,8 @@ assert text.english.g2p("AnifLive-TTS speaks English.")
 assert LangSegmenter.getTexts("Hello，初めまして。", default_lang="ja")
 PY
 
-# Refresh the inherited image's crypto packages after dependency installation.
-RUN --mount=type=cache,id=aniflive-apt,target=/var/cache/apt,sharing=locked     --mount=type=cache,id=aniflive-apt-lists,target=/var/lib/apt/lists,sharing=locked     apt-get update && apt-get install -y --no-install-recommends --only-upgrade       openssl libssl3t64 gnupg gnupg2 gnupg-utils gpg gpgv gpgconf gpg-agent gpgsm dirmngr keyboxd     && rm -rf /var/lib/apt/lists/*
+# Refresh the inherited image's package manager, headers and crypto packages.
+RUN --mount=type=cache,id=aniflive-apt,target=/var/cache/apt,sharing=locked     --mount=type=cache,id=aniflive-apt-lists,target=/var/lib/apt/lists,sharing=locked     apt-get update && apt-get install -y --no-install-recommends --only-upgrade       apt libapt-pkg6.0t64 linux-libc-dev openssl libssl3t64 gnupg gnupg2 gnupg-utils gpg gpgv gpgconf gpg-agent gpgsm dirmngr keyboxd     && rm -rf /var/lib/apt/lists/*
 
 EXPOSE 9880 9890
 ENTRYPOINT ["/app/scripts/entrypoint.sh"]

@@ -1,8 +1,6 @@
 # 安裝與共享資源
 
-本文件說明如何從全新 clone 建立 Windows 開發環境、下載轉換器所需的共享資源，
-再建立可供 Docker 使用的模型套件。所有 Python 套件只安裝在專案 `.venv`；
-不修改系統 Python 或 CUDA。
+本指南為 **CUDA／TensorRT（Docker）** 準備模型套件及共享資源，以下命令使用獨立的 Windows `.venv`。**Apple Silicon（macOS／MLX／Metal）** 請參閱 [macOS 安裝指南](MACOS_INSTALLATION_ZH.md)。
 
 ## 前置條件
 
@@ -52,8 +50,29 @@ D:\models\shared\
 └── shared-assets.json
 ```
 
+## v2ProPlus 轉換
+
+```powershell
+.\.venv\Scripts\aniflive-tts.exe model convert `
+  --gpt D:\models\voice.ckpt --sovits D:\models\voice.pth `
+  --reference-audio D:\models\reference.wav `
+  --reference-text-file D:\models\reference.txt --reference-language ja `
+  --model-id my-v2proplus --voice-profile default `
+  --shared-dir D:\models\shared --output D:\models\my-v2proplus
+```
+
+轉換器會匯出 ONNX、建立 FP16 TensorRT 引擎及驗證模型套件。`--allow-unsafe-pickle` 只適用於可信任的 checkpoint。
+
+## v5Turbo 套件
+
+`gsv-v5turbo` 家族使用 FP16、48 kHz、4-step CFM 及 CFG 0。請依照 [v5Turbo 建置指南](V1_5_V5_BUILD.md)準備；`model rebuild-engines` 是 v2ProPlus 的流程。重新建置引擎後，先在目標 GPU 驗證再部署。
+
+## Python SDK
+
+wheel 安裝及同步／非同步範例見 [SDK 使用手冊](SDK_ZH.md)。
+
 ## 後續步驟
 
-以 `--shared-dir D:\models\shared` 執行 README 的模型轉換命令。轉換完成後，
+以 `--shared-dir D:\models\shared` 執行上方 v2ProPlus 轉換命令。轉換完成後，
 把模型套件放到 `.env` 指定的 `ANIFLIVE_TTS_MODELS_DIR`，再明確建立 Docker image。
 後續只重建 container 時會使用既有 image、模型 bind mount 與 cache，不會重新下載。

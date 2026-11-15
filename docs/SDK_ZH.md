@@ -1,22 +1,20 @@
-# Python SDK（Beta）
+# Python SDK
 
-AnifLive-TTS Python SDK 是連接 AnifLive-TTS 服務的型別化用戶端。Python facade 透過內附的 Rust 傳輸核心呼叫 canonical HTTP API；既有伺服器、WebUI 與 Studio 繼續並存。
+於 v1.5-beta 引入的 AnifLive-TTS Python SDK，是連接服務的型別化用戶端。Python facade 透過內附的 Rust 傳輸核心呼叫 canonical HTTP API；既有伺服器、WebUI 與 Studio 繼續並存。
 
 ## 下載與安裝
 
-v1.5.0-beta 發布後，請開啟 [GitHub Releases](https://github.com/Hiruynk/AnifLive-TTS/releases)，選擇 `v1.5.0-beta`，並從 **Assets** 下載符合作業系統及架構的 `.whl`。本機預覽期間使用隨附的 wheel。
+從 [GitHub Releases](https://github.com/Hiruynk/AnifLive-TTS/releases) → **Assets** 下載符合作業系統及架構的 v1.5 `.whl`，或使用發行套件隨附的 wheel。
 
 安裝下載的 wheel（請將範例路徑換成實際檔案位置）：
 
 ```bash
-python -m pip install /path/to/aniflive_tts-1.5.0b1-cp310-abi3-manylinux_2_28_x86_64.whl
+python -m pip install /path/to/aniflive_tts-1.5.0-cp310-abi3-linux_x86_64.whl
 ```
 
-Linux x64 wheel 已於 CPython 3.10–3.12 驗證。Windows x64 與 macOS arm64 工作流程已備妥，尚待原生平台驗證。用戶端 wheel 不需要本機 CUDA、TensorRT、模型套件或 Docker。
+用戶端需要 CPython 3.10–3.12，wheel 涵蓋 Linux x64、Windows x64 及 macOS arm64。SDK 透過 HTTP 連接已啟動的服務；原生 Mac 服務安裝見 [macOS 安裝指南](MACOS_INSTALLATION_ZH.md)。
 
-此版本發布至套件索引後，可使用 `python -m pip install aniflive-tts==1.5.0b1`。伺服器指令請安裝 `runtime` extra，例如 `python -m pip install 'aniflive-tts[runtime]==1.5.0b1'`；它提供 Python 伺服器相依套件，推理仍沿用部署環境鎖定的 CUDA／TensorRT 相依套件。
-
-從原始碼 checkout 開發：
+從原始碼 checkout 開發或使用伺服器指令時，安裝 `runtime` extra，並依照所選後端的安裝指南準備推理依賴：
 
 ```bash
 python -m pip install -e '.[runtime]'
@@ -41,9 +39,30 @@ async def check_async_health() -> None:
 
 預設連線逾時為 10 秒、完整請求逾時為 120 秒、串流讀取閒置逾時為 60 秒。PCM 呼叫的 request timeout 只涵蓋請求建立至收到回應標頭；idle timeout 則限制等待串流資料的時間，串流本身沒有整體期限。`request_timeout=None` 會停用 request limit；`stream_idle_timeout=None` 會停用串流閒置逾時。AsyncClient 會綁定首次呼叫所在的 event loop。
 
+## API Key 認證
+
+若端點接受 Bearer 認證，可將 `api_key` 傳給任一用戶端。SDK 會在每個請求中加入 `Authorization: Bearer <api_key>`。請從環境變數或密鑰儲存服務讀取 key。
+
+```python
+import os
+
+from aniflive_tts import AsyncClient, Client
+
+api_key = os.environ["ANIFLIVE_TTS_API_KEY"]
+
+with Client("https://tts.example.com", api_key=api_key) as client:
+    health = client.health()
+
+async def check_authenticated_health() -> None:
+    async with AsyncClient("https://tts.example.com", api_key=api_key) as client:
+        health = await client.health()
+```
+
+`api_key` 預設為 `None`。傳入的 key 須非空，且只包含可見 ASCII 字元。`headers` 仍可用於傳送自訂標頭。如需自行設定 `Authorization`，請省略 `api_key`。同時提供兩者會引發 `ValueError`，不分標頭名稱的大小寫。SDK 會隱藏除錯輸出中的 Bearer key，並略去回顯該 key 的錯誤細節。
+
 ## 查詢服務並檢查相容性
 
-Client 提供 `health()`、`capabilities()`、`models()`、`voices()`、`expressions()`、`activate_model(model)` 與 `probe()`。`probe()` 會明確查詢 health 和 capabilities，並檢查服務 contract；建立 client 時不會自動探測。若應用程式依賴特定功能，請傳入 required features：
+Client 提供 `health()`、`capabilities()`、`models()`、`voices()`、`expressions()`、`activate_model(model)` 與 `probe()`。使用 `expressions(voice_profile="<voice-id>")` 可查詢已註冊聲線的情感 Reference 及強度；不傳入參數則沿用模型的預設目錄，同步及非同步 Client 均支援。`probe()` 會明確查詢 health 和 capabilities，並檢查服務 contract；建立 client 時不會自動探測。若應用程式依賴特定功能，請傳入 required features：
 
 ```python
 from aniflive_tts import AsyncClient, RequiredFeature
@@ -55,7 +74,42 @@ async def check_required_features() -> None:
         )
 ```
 
-可要求 `PCM_STREAMING`、`EXPRESSIONS` 和 `SPEECH_SESSIONS`。若服務不符合要求，會引發 `CompatibilityError`。`capabilities.streaming.wav` 描述增量 WAV 串流功能；值為 `false` 表示不支援串流 WAV。完整 WAV 合成仍可使用 `stream=false`。
+可要求 `PCM_STREAMING`、`EXPRESSIONS`、`SPEECH_SESSIONS` 和 `VOICE_MANAGEMENT`。若服務不符合要求，會引發 `CompatibilityError`。
+
+`capabilities.streaming.wav` 描述增量 WAV 串流功能；值為 `false` 表示不支援串流 WAV。完整 WAV 合成仍可使用 `stream=false`。
+
+## 登錄 Zero-shot 聲線
+
+共享 v2ProPlus 套件可在空白聲線庫下啟動。先檢查
+`RequiredFeature.VOICE_MANAGEMENT`，然後依次呼叫
+`create_voice(VoiceCreate(...))`、
+`upload_reference(voice_id, audio_bytes, ReferenceCreate(...))` 及
+`prepare_reference(voice_id, reference_id)`。準備工作是非同步的；透過
+`reference(...)` 查詢，直至 `prepare_state == "ready"`。將回傳的 Voice ID
+填入 `synthesize()`、`stream()` 或 `create_session()` 的 `voice_profile`。
+`AsyncClient` 提供相同操作，配合 `await` 使用。
+
+[sdk_voice_reference.py](../examples/sdk_voice_reference.py) 提供完整的
+上傳 → 準備 → WAV 範例。Reference 須包含 3–10 秒語音及對應逐字稿。英文句子
+逐字稿應使用正常大小寫；上游前端會將全大寫單字拆成逐個字母。ASR 結果使用
+`transcript_source="asr"` 並記錄 provider；人工確認則是獨立的
+`transcript_confirmed` 欄位。
+
+聲線庫管理使用 `voice()`、`update_voice()`、`delete_voice()`、`references()`、
+`update_reference()`、`replace_reference_audio()` 及 `delete_reference()`。
+音訊與 metadata 會在重啟後保留，GPU conditioning 則需重新準備。只改標籤不需
+重算 conditioning；使用中的請求及 Session 會保留所選聲線。情感透過
+`Expression(profile=reference_id_or_emotion_id, intensity=...)` 選擇最接近的
+Reference，並非連續插值。狀態及欄位詳見
+[Voice / Reference API 契約](V1_5_VOICE_API.md)。
+
+## v2ProPlus 與 v5Turbo 行為
+
+v2ProPlus 輸出 32 kHz；v5Turbo 使用 `gsv-v5turbo`、FP16、原生 4-step CFM、CFG 0，輸出 48 kHz。Backend 顯示名稱為 CUDA／TensorRT（Docker）；原生 Mac 服務使用 Apple Silicon（macOS／MLX／Metal）。請讀取 response 或 stream metadata 取得取樣率。
+
+v5 backend 接受全部五種 Reference-conditioning policy：`full-switch`、`identity-lock`、`semantic-style`、`acoustic-style` 及 `sv-only`。`full-switch` 是預設值，可按 ID 選取已儲存 Reference；已儲存的 `emotion_id` 加上受支援的離散強度亦可選出相應 Reference。其他 policy 對應至 v5 可用的語義、風格及 CFM voice-anchor 元件；v5 沒有獨立的 v2ProPlus SV encoder。服務沿用既有 Voice、Reference 及 Speech Session 欄位與路由。
+
+目前 Mac FP16 worker 支援全部五種 policy、完整 WAV、PCM 串流及逐段 expression。凍結 FP32 rollback worker 保留原有 policy 集；選策略前請查詢 capabilities 的 `expression.policies` 和 `expression.complete_policies`。Mac 串流在 AR EOS 及完整 CFM 後才開始輸出。Session A 支援 flush、取消及恢復；Session policy B–F 仍屬研究功能，並非正式 API 承諾。取消完整 WAV 請求會以 HTTP 409 結束且不回傳部分音訊，之後服務可繼續合成。詳見 [macOS API 說明](API_ZH.md#macos-apple-silicon-行為)及[平台矩陣](V1_5_PLATFORM_MATRIX.md)。
 
 ## 儲存完整 WAV
 
@@ -121,7 +175,7 @@ with Client("http://127.0.0.1:9880") as client:
 
 ## 使用 speech session
 
-Speech session 會將有序 segments 附加至遠端 session，並提供單一 raw PCM consumer。依賴 session 時，請先要求 `PCM_STREAMING` 和 `SPEECH_SESSIONS`。Session handle 提供 `id` 和不可變的 `initial_info`；呼叫 `get()` 取得最新伺服器狀態。
+Speech session 會將有序 segments 附加至遠端 session，並提供單一 raw PCM consumer。依賴 session 時，請先要求 `PCM_STREAMING` 和 `SPEECH_SESSIONS`。Session handle 提供 `id` 和不可變的 `initial_info`；呼叫 `get()` 取得最新伺服器狀態。macOS 正式支援 Session A；策略 B–F 仍屬研究功能，並非正式 API 承諾。
 
 有限批次合成的順序是：附加所有 segments、flush，然後開啟 audio stream 並讀取至 EOF：
 
@@ -161,4 +215,4 @@ SDK 的基底例外是 `AnifLiveTTSError`。Client 端錯誤包含 `TransportErr
 
 SDK 不會自動重試，包括 HTTP 429。請自行判斷操作是否適合重試，並在自訂政策中參考 `retry_after`。逾時或遺失回應不代表遠端操作已回復原狀。HTTPS 憑證驗證維持啟用、redirect 預設停用，且預設不讀取環境 proxy 變數。請依部署需求明確設定傳輸選項。
 
-Canonical client surface 不提供舊式 flat routes、本機 model 路徑、參考音訊上傳或 reference override。SDK 是用戶端程式庫；請另行安裝並執行 AnifLive-TTS 服務。
+Canonical client surface 不提供舊式 flat routes 或本機伺服器 model 路徑。SDK 是用戶端程式庫；請另行安裝並執行 AnifLive-TTS 服務。

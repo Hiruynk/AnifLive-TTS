@@ -1,9 +1,8 @@
 # Docker Deployment
 
-The generic image supports `cu128` and a provisional `cu126` profile. Models,
-shared resources, cache, and reports are host bind mounts. The serving
-entrypoint only validates and serves; it never downloads dependencies or
-builds engines.
+**CUDA／TensorRT（Docker）** serves v2ProPlus (32 kHz) and v5Turbo (48 kHz, FP16, 4-step CFM, CFG 0). Models, shared resources and caches use host bind mounts. Prepare the model package before starting the API.
+
+The measured host is RTX 5070 Ti with CUDA 12.8, TensorRT 11 and Triton. For **Apple Silicon（macOS／MLX／Metal）**, see the [macOS installation guide](MACOS_INSTALLATION_EN.md).
 
 ```powershell
 Copy-Item .env.example .env
@@ -19,8 +18,8 @@ ANIFLIVE_TTS_CACHE_HOST_DIR=D:/models/cache
 ANIFLIVE_TTS_REPORTS_DIR=D:/models/reports
 ```
 
-Build the image, then rebuild and validate the hardware-specific engines inside
-the target Linux container:
+For v2ProPlus packages only, build the image, then rebuild and validate the
+hardware-specific engines inside the target Linux container:
 
 ```powershell
 docker compose build
@@ -31,6 +30,10 @@ docker compose run --rm --entrypoint aniflive-tts aniflive-tts `
   --shared-dir /data/shared --source-dir /app/minimal_inference --enqueue
 .\scripts\run_docker.ps1 -CudaProfile cu128
 ```
+
+## v5Turbo packages
+
+Use a `gsv-v5turbo` package prepared with the [v5Turbo build guide](V1_5_V5_BUILD.md). The v2ProPlus `model rebuild-engines` command above builds v2ProPlus engines; v5Turbo uses its own builders. Validate newly built engines on the target GPU before deployment.
 
 For `cu126`, add `-f docker-compose.yml -f docker-compose.cu126.yml` to both
 `docker compose` commands and start with `-CudaProfile cu126`.
@@ -46,10 +49,6 @@ exports an immutable digest, image-derived SPDX SBOM, and BuildKit provenance
 record for each CUDA profile. Follow [release image verification](RELEASE_VERIFICATION.md)
 before changing package visibility or deploying a published tag.
 
-CUDA 12.8 passed full GPU E2E on RTX 5070 Ti. The CUDA 12.6 compatibility
-profile uses the same security-patched PyTorch 2.10 baseline, but currently has
-source and build-policy validation only. Validate the resulting `cu126` image
-separately on a compatible host before publishing or deploying that tag.
+CUDA 12.8 is tested on RTX 5070 Ti. CUDA 12.6 uses the same PyTorch 2.10 baseline and has source/build checks; GPU operation still needs validation on a compatible host.
 
-Character assets and external routing configuration belong in private
-deployment overlays outside the generic image and source release.
+Keep model/Reference data and routing credentials in persistent host directories and deployment configuration.

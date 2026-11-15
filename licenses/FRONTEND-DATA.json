@@ -1,0 +1,49 @@
+{
+  "schema": "aniflive-frontend-data-provenance-v1",
+  "scope": "Published multilingual frontend data, not user voice recordings or TTS speaker checkpoints",
+  "upstream_repository": "https://github.com/GPT-SoVITS-Devel/GPT-SoVITS_minimal_inference",
+  "upstream_revision": "6916eb2e9c227aeb28468ce6fa86ad5b17ead532",
+  "upstream_license": "Apache-2.0; retain separate upstream data notices",
+  "license_files": [
+    "minimal_inference/LICENSE",
+    "licenses/CMUDICT-NOTICE.txt",
+    "minimal_inference/GPT_SoVITS/text/g2p_en/LICENSE.txt"
+  ],
+  "upstream_exact_files": [
+    {
+      "file": "minimal_inference/GPT_SoVITS/text/engdict_cache.pickle",
+      "upstream_blob": "935da5b95f403f02968c192ef3885ed3298feb74",
+      "sha256": "9bff9393f4b192d873a11335efc8f124771087b6dc847d34fd240c2846889d2b"
+    },
+    {
+      "file": "minimal_inference/GPT_SoVITS/text/namedict_cache.pickle",
+      "upstream_blob": "a9a9dc3986ad88d93685c63643248e6234d5c011",
+      "sha256": "559552094c4a6e995213e3fa586330e078ef8cb3a7a95a3109e945111cd2bfc1"
+    },
+    {
+      "file": "minimal_inference/GPT_SoVITS/text/g2pw/polyphonic.pickle",
+      "upstream_blob": "fbe46ce1dcc498e4cc508f5a68e77bee3428a393",
+      "sha256": "f425246160a32c578557cd3151cd0bb97f5f44c3aaf65e718dd2c3213c04fb4b"
+    },
+    {
+      "file": "minimal_inference/GPT_SoVITS/text/ja_userdic/userdict.csv",
+      "upstream_blob": "2be580b461185ce18c9000d9ec6c8032623e17fd",
+      "sha256": "d857e443ee48d9641096816a98996669602895411e4330d7d91d1dbe1103389f"
+    }
+  ],
+  "japanese_compiled_dictionary": {
+    "file": "minimal_inference/GPT_SoVITS/text/ja_userdic/user.dict",
+    "source": "minimal_inference/GPT_SoVITS/text/ja_userdic/userdict.csv",
+    "source_sha256": "d857e443ee48d9641096816a98996669602895411e4330d7d91d1dbe1103389f",
+    "sha256": "b44817ce96e24be7bcfdd009d834b5237fe044dc9ed5f2f9709f71da9d506fed",
+    "rebuild_byte_equal": true,
+    "builder": "pyopenjtalk-plus 0.4.1.post8 mecab_dict_index"
+  },
+  "english_g2p_parameters": {
+    "file": "minimal_inference/GPT_SoVITS/text/g2p_en/checkpoint20.npz",
+    "upstream_package": "g2p-en 2.1.0",
+    "license": "Apache-2.0",
+    "sha256": "b8af35e4596d8dd5836dfd3fe9b2ba4f97b9c311efe8879544cbcfcbd566d8c6",
+    "license_file": "minimal_inference/GPT_SoVITS/text/g2p_en/LICENSE.txt"
+  }
+}

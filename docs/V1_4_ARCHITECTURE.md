@@ -127,7 +127,7 @@ retained or claimed. The API and stream headers mark B-F as experimental and
 unqualified until the fixed-seed A-F report and long-form quality gates run on
 the production RTX 5070 Ti TensorRT environment.
 
-AnifEngine-Voice remains responsible for turn control, partial LLM output,
+The calling application handles turn control, partial LLM output,
 speech planning, interruption policy and expression planning.
 
 ## Local Data

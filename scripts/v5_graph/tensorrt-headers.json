@@ -1,0 +1,85 @@
+{
+  "version": "11.2.1.2",
+  "commit": "505170043e0e2799bfcfe8fab777a78d2fb52854",
+  "files": [
+    {
+      "bytes": 413386,
+      "git_blob_sha1": "837bf22f3cccc7ebaba84ad9b8058c4da92ae3c5",
+      "sha256": "6b4068af7ff651a800be9907544a1766283dfcf080295a3b09feb5f1ffa614ac",
+      "name": "NvInfer.h"
+    },
+    {
+      "bytes": 62102,
+      "git_blob_sha1": "f2a992dd303041d09ef41d95fdacb024e0453cad",
+      "sha256": "d68f32455b5d869123b4e936243abe45a89ac489e35bb1c6aef47ac970b71872",
+      "name": "NvInferImpl.h"
+    },
+    {
+      "bytes": 4008,
+      "git_blob_sha1": "d1b94e38deee74586cd94922fde5f4affd540f9b",
+      "sha256": "3e10fe5b85545f2e956e6935271badf0b1c72553b698000a61d46d69c5d53030",
+      "name": "NvInferLegacyDims.h"
+    },
+    {
+      "bytes": 1540,
+      "git_blob_sha1": "006cc555de22c9ad164b10811d0bf09f9c7602c7",
+      "sha256": "b3290404a076f3492dc627ffdfc3b1fa803ea0eccc49f23986d645a2d23a63c7",
+      "name": "NvInferPlugin.h"
+    },
+    {
+      "bytes": 8962,
+      "git_blob_sha1": "d50962140b4235a708e15f831717ba9d9973ea86",
+      "sha256": "759f354754e64bf4d1e68d7df796c155c46f8a27541bf1912ba13e79a5a26fc2",
+      "name": "NvInferPluginBase.h"
+    },
+    {
+      "bytes": 6138,
+      "git_blob_sha1": "c92cff36e0d2c1f8a6902b17129695219db714fd",
+      "sha256": "106692e986b690fd2b3c26f8dab5caa8027b4d3cca6ce6006c5351392f1bded4",
+      "name": "NvInferPluginUtils.h"
+    },
+    {
+      "bytes": 217648,
+      "git_blob_sha1": "1e0c56f85857190f2d8d00ad2c4949f04ffc0519",
+      "sha256": "dd795beae7f612066897f8c3db2314fdfee219e7efa67e0a5781d1061dae3643",
+      "name": "NvInferRuntime.h"
+    },
+    {
+      "bytes": 26849,
+      "git_blob_sha1": "0080e87d1f5f41eca103329c45d1364626a65477",
+      "sha256": "ec38759dbf8a5538c4cd30890f1764658bc2dcec87e95ac18148e476cbe1671b",
+      "name": "NvInferRuntimeBase.h"
+    },
+    {
+      "bytes": 9968,
+      "git_blob_sha1": "364d9db31a292f09f720ad5f6df0191051bc12af",
+      "sha256": "eff4c0251cb4813bbc7fe34c6b28fdb6c08734c27ae53b07974d2557bf1431be",
+      "name": "NvInferRuntimeCommon.h"
+    },
+    {
+      "bytes": 41676,
+      "git_blob_sha1": "6828cea0cb138b1e1030e0787eaad27ea6718ec7",
+      "sha256": "d4db4236da9c03e543949247a75478b5ce68fc84eb30cd15b35081b94c8d8391",
+      "name": "NvInferRuntimePlugin.h"
+    },
+    {
+      "bytes": 1837,
+      "git_blob_sha1": "5c838f49f6ade171fcac5e88dde8b523656a2009",
+      "sha256": "69aa045e8fd3b6a82efbf3f0be7de84816ba8a8151473afe64a0406df719b981",
+      "name": "NvInferVersion.h"
+    },
+    {
+      "bytes": 5816,
+      "git_blob_sha1": "436278a19661e389f76d5c0d8f99568ec70d1e38",
+      "sha256": "a36f12c8115152f4cec674ab414a3029fcde9871b6ccf33d4f95fb49f1f4fc7a",
+      "name": "NvOnnxConfig.h"
+    },
+    {
+      "bytes": 28958,
+      "git_blob_sha1": "37ebe83a1e478b8932522faead0fd989002ef7d0",
+      "sha256": "1443c9411e030ac35b8a549392745731515485367579ace586156806ece11d60",
+      "name": "NvOnnxParser.h"
+    }
+  ],
+  "repository": "https://github.com/NVIDIA/TensorRT"
+}

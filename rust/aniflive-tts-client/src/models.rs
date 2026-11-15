@@ -210,6 +210,8 @@ pub struct Capabilities {
     #[serde(default)]
     pub speech_sessions: Option<SessionCapabilities>,
     #[serde(default)]
+    pub voice_management: Option<VoiceManagementCapabilities>,
+    #[serde(default)]
     pub model_family: Option<String>,
     #[serde(default)]
     pub precision: Option<String>,
@@ -249,6 +251,16 @@ pub struct VoiceInfo {
     pub id: String,
     pub reference_language: String,
     pub reference_configured: bool,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub default_reference_id: Option<String>,
+    #[serde(default)]
+    pub ready: bool,
+    #[serde(default)]
+    pub reference_count: u64,
+    #[serde(default)]
+    pub source: Option<String>,
     #[serde(flatten)]
     pub extra: Extra,
 }
@@ -304,6 +316,7 @@ pub enum RequiredFeature {
     PcmStreaming,
     Expressions,
     SpeechSessions,
+    VoiceManagement,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServiceInfo {
@@ -423,4 +436,125 @@ pub struct SessionInfo {
     pub active_audio_cancelled: Option<bool>,
     #[serde(flatten)]
     pub extra: Extra,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VoiceManagementCapabilities {
+    #[serde(default)]
+    pub crud: bool,
+    #[serde(default)]
+    pub reference_upload: bool,
+    #[serde(default)]
+    pub reference_prepare: bool,
+    #[serde(default)]
+    pub persistent: bool,
+    #[serde(default)]
+    pub transcript_required: bool,
+    #[serde(default)]
+    pub reference_seconds: Option<Extra>,
+    #[serde(flatten)]
+    pub extra: Extra,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct VoiceCreate {
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+}
+#[derive(Clone, Serialize, Deserialize)]
+pub struct VoiceUpdate {
+    pub name: String,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct ReferenceCreate {
+    pub reference_language: Language,
+    pub transcript: String,
+    pub transcript_source: String,
+    pub transcript_confirmed: bool,
+    pub emotion_label: String,
+    pub intensity: f64,
+    pub is_default: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub emotion_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub transcript_provider: Option<String>,
+}
+impl ReferenceCreate {
+    pub fn new(reference_language: Language, transcript: impl Into<String>) -> Self {
+        Self {
+            reference_language,
+            transcript: transcript.into(),
+            transcript_source: "manual".into(),
+            transcript_confirmed: false,
+            emotion_label: "Neutral".into(),
+            intensity: 0.5,
+            is_default: false,
+            id: None,
+            emotion_id: None,
+            transcript_provider: None,
+        }
+    }
+}
+
+#[derive(Clone, Default, Serialize, Deserialize)]
+pub struct ReferenceUpdate {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reference_language: Option<Language>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub transcript: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub transcript_source: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub transcript_confirmed: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub transcript_provider: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub emotion_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub emotion_label: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub intensity: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub is_default: Option<bool>,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct ReferenceInfo {
+    pub id: String,
+    pub voice_id: String,
+    pub emotion_id: String,
+    pub emotion_label: String,
+    pub intensity: f64,
+    pub reference_language: String,
+    pub transcript: String,
+    pub transcript_source: String,
+    pub transcript_confirmed: bool,
+    #[serde(default)]
+    pub transcript_provider: Option<String>,
+    pub is_default: bool,
+    pub duration_seconds: f64,
+    pub audio_sha256: String,
+    pub revision: u64,
+    pub conditioning_revision: u64,
+    pub prepare_state: String,
+    #[serde(default)]
+    pub error_code: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+    #[serde(flatten)]
+    pub extra: Extra,
+}
+impl std::fmt::Debug for ReferenceInfo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ReferenceInfo")
+            .field("id", &self.id)
+            .field("voice_id", &self.voice_id)
+            .field("prepare_state", &self.prepare_state)
+            .field("revision", &self.revision)
+            .finish_non_exhaustive()
+    }
 }

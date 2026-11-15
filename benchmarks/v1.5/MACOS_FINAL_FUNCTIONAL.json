@@ -1,0 +1,258 @@
+{
+  "kind": "aniflive_tts_macos_final_functional",
+  "schema": 1,
+  "date": "2026-11-15",
+  "base_commit": "28d61bb (contains a63abbb)",
+  "host": "Mac Studio M5 Max 40-core GPU, 128 GB, macOS 27.0",
+  "fp32_functional_candidate": {
+    "name": "fp32-f1",
+    "location": "local private candidate directory frozen/fp32-candidate-f1 (not committed)",
+    "packages": {
+      "package_mode": "macos-v5turbo-v15-fp32-functional-f1",
+      "shared_base": "macos-v5turbo-v15-fp32-shared-functional-f1"
+    },
+    "precision": "FP32",
+    "worker_sha256": "31c716d3b527aca5030b4fc49aa0eb85dbe0acad7bfe807510eda2bc8c85d96d",
+    "worker_source_commit": "a1ed8d2967cfda3b852e3580b3d356ffe1b44317",
+    "engine_fingerprint": "eae6092c781121aa7e6e658078200e3230ff75a7e0df9a952d68039dee76f3c5",
+    "assembly": "scripts/macos-qualification/fp32_functional_candidate.py: weights, MLX runtime, reference inputs and voice profile hard-linked from the frozen FP32 package; p1 worker payload installed by fp16_package_refresh.py (now precision-aware, unlinks metadata before writing)",
+    "worker_reports": {
+      "conditioning_components": [
+        "semantic",
+        "style",
+        "acoustic_prompt"
+      ],
+      "request_sampling": true,
+      "synthesize_cancel": true
+    },
+    "numeric_equivalence": "reused p1 evidence: p1 worker in FP32 bit-identical to the frozen FP32 worker on 10 complete/stream cases; engine fingerprint equals that evidence package; no neural code changed",
+    "frozen_fp32_package": "unchanged (all file SHA-256 identical before/after assembly); remains baseline/rollback with its original worker",
+    "frozen_fp16_p1_package": "unchanged (SHA256SUMS verified)"
+  },
+  "runs": {
+    "fp32_shared_base": {
+      "model": "macos-v5turbo-v15-fp32-shared-functional-f1",
+      "precision": "FP32",
+      "engine_fingerprint": "eae6092c781121aa7e6e658078200e3230ff75a7e0df9a952d68039dee76f3c5",
+      "passed": true,
+      "checks": [
+        {
+          "check": "contract: health, capabilities and model-config name one active model and precision",
+          "passed": true
+        },
+        {
+          "check": "contract: the loaded worker reports separate conditioning components and request sampling",
+          "passed": true
+        },
+        {
+          "check": "contract: Session A advertised as committed-neural-v1 / qualified-policy-a, B-F not offered",
+          "passed": true
+        },
+        {
+          "check": "contract: product flags stay scoped (not prototype; overall quality not claimed qualified)",
+          "passed": true
+        },
+        {
+          "check": "contract: /v1/expressions lists the voice's references and only backend-supported policies",
+          "passed": true
+        },
+        {
+          "check": "selection: A->B->A returns to A's conditioning and output without B mixed in",
+          "passed": true
+        },
+        {
+          "check": "selection: semantic-style takes semantic from the emotion reference, style/acoustic prompt from the identity",
+          "passed": true
+        },
+        {
+          "check": "selection: segmented request keeps order, inherits and overrides expressions",
+          "passed": true
+        },
+        {
+          "check": "selection: a later neutral request is unchanged",
+          "passed": true
+        },
+        {
+          "check": "sampling: worker reports and applies top_k=20, top_p=0.9, temperature=0.8 deterministically",
+          "passed": true
+        },
+        {
+          "check": "format: complete WAV is 48 kHz mono PCM16",
+          "passed": true
+        },
+        {
+          "check": "format: PCM stream is s16le 48 kHz mono with the same budget as the complete WAV (onset trim only)",
+          "passed": true
+        },
+        {
+          "check": "session: policy A append/flush/play completes both segments",
+          "passed": true
+        },
+        {
+          "check": "session: audio headers match the shared WebUI contract",
+          "passed": true
+        },
+        {
+          "check": "session: cancel after first PCM stops the session",
+          "passed": true
+        },
+        {
+          "check": "session: a new session after cancel recovers exactly",
+          "passed": true
+        },
+        {
+          "check": "cancel: in-flight complete WAV returns 409 with no audio",
+          "passed": true
+        },
+        {
+          "check": "cancel: the next synthesis recovers exactly",
+          "passed": true
+        },
+        {
+          "check": "sdk: async complete equals the sync result; async stream produced PCM",
+          "passed": true
+        }
+      ],
+      "report_sha256": "dce3fb4940ba70b08f00a9c6c7a5a9c3fbd6f704bb6fba1657af32d953a1b915"
+    },
+    "fp16_p1_shared_base": {
+      "model": "macos-v5turbo-v15-fp16-shared",
+      "precision": "FP16",
+      "engine_fingerprint": "eae6092c781121aa7e6e658078200e3230ff75a7e0df9a952d68039dee76f3c5",
+      "passed": true,
+      "checks": [
+        {
+          "check": "contract: health, capabilities and model-config name one active model and precision",
+          "passed": true
+        },
+        {
+          "check": "contract: the loaded worker reports separate conditioning components and request sampling",
+          "passed": true
+        },
+        {
+          "check": "contract: Session A advertised as committed-neural-v1 / qualified-policy-a, B-F not offered",
+          "passed": true
+        },
+        {
+          "check": "contract: product flags stay scoped (not prototype; overall quality not claimed qualified)",
+          "passed": true
+        },
+        {
+          "check": "contract: /v1/expressions lists the voice's references and only backend-supported policies",
+          "passed": true
+        },
+        {
+          "check": "selection: A->B->A returns to A's conditioning and output without B mixed in",
+          "passed": true
+        },
+        {
+          "check": "selection: semantic-style takes semantic from the emotion reference, style/acoustic prompt from the identity",
+          "passed": true
+        },
+        {
+          "check": "selection: segmented request keeps order, inherits and overrides expressions",
+          "passed": true
+        },
+        {
+          "check": "selection: a later neutral request is unchanged",
+          "passed": true
+        },
+        {
+          "check": "sampling: worker reports and applies top_k=20, top_p=0.9, temperature=0.8 deterministically",
+          "passed": true
+        },
+        {
+          "check": "format: complete WAV is 48 kHz mono PCM16",
+          "passed": true
+        },
+        {
+          "check": "format: PCM stream is s16le 48 kHz mono with the same budget as the complete WAV (onset trim only)",
+          "passed": true
+        },
+        {
+          "check": "session: policy A append/flush/play completes both segments",
+          "passed": true
+        },
+        {
+          "check": "session: audio headers match the shared WebUI contract",
+          "passed": true
+        },
+        {
+          "check": "session: cancel after first PCM stops the session",
+          "passed": true
+        },
+        {
+          "check": "session: a new session after cancel recovers exactly",
+          "passed": true
+        },
+        {
+          "check": "cancel: in-flight complete WAV returns 409 with no audio",
+          "passed": true
+        },
+        {
+          "check": "cancel: the next synthesis recovers exactly",
+          "passed": true
+        },
+        {
+          "check": "sdk: async complete equals the sync result; async stream produced PCM",
+          "passed": true
+        }
+      ],
+      "report_sha256": "db71ba820418d424b2b7a810f1f4fe0fa9d8e76cd6371884b7c1acf76b7ae4aa"
+    }
+  },
+  "webui": {
+    "upstream": "fp32-f1 shared base",
+    "launch": "ANIFLIVE_TTS_WEBUI_DIR=$PWD/webui python -m aniflive_tts webui",
+    "checks": [
+      {
+        "check": "select voice registered test voice; voice-scoped emotion catalog loaded (angry/calm/happy/sad)",
+        "passed": true
+      },
+      {
+        "check": "mark text happy (intensity 0.70) and play via Session A; server used happy05 full-switch; 1.68 s received, 0 underruns",
+        "passed": true
+      },
+      {
+        "check": "select model fp32-functional-f1 (package mode); exclusive load completed; play 1.64 s",
+        "passed": true
+      },
+      {
+        "check": "select voice again and play; 1.64 s received",
+        "passed": true
+      },
+      {
+        "check": "no session rejected for context or qualification headers (committed-neural-v1 / qualified-policy-a / policy A)",
+        "passed": true
+      }
+    ]
+  },
+  "fixes": [
+    {
+      "area": "src/aniflive_tts/macos_service.py expression_metadata",
+      "problem": "on a shared base model (no package catalog) /v1/expressions?voice_profile=... returned policies [] although the worker supports all five",
+      "fix": "policies always come from the loaded worker's conditioning capability",
+      "test": "tests/test_macos_reference_selection.py::test_shared_base_without_package_catalog_still_reports_worker_policies"
+    }
+  ],
+  "unit_tests": {
+    "mac_related": "48 passed (reference selection, voice library restore, qualification metadata, API contract)",
+    "full_suite": "1257 passed, 50 failed, 13 errors; identical failure set before this change (onnx/dataset-factory/Windows environment; test_webui asset string, naming scan decode, release preflight topology)"
+  },
+  "not_rerun": "five-language matrix, multi-seed quality and benchmark timing (no neural computation changed)",
+  "remaining_issues": [
+    "WebUI emotion menu: under automated mouse input in an embedded browser, clicking an emotion option did not apply it; keyboard selection (arrow + Enter) did. Not reproduced by hand, so not confirmed as a product defect.",
+    "WebUI shows a 'TensorRT fixed value' label under speed on the MLX-Metal backend (shared UI wording).",
+    "The package-mode FP32 candidate, like the frozen FP32 package, ships no package expression catalog; emotions come from voice-library references."
+  ],
+  "private_data_committed": false,
+  "integration_source_commit": "0f76b631ed74e6480b5163a49abb8a7da43effff",
+  "sanitization": "Private voice identifier omitted; actual results unchanged.",
+  "integration_followup": {
+    "shared_base_sdk_discovery": "Backend native expression support is advertised independently of whether a package catalog exists",
+    "mouse_selection": "Normal selected-text emotion menu mouse selection passed in the Windows browser fixture; the Mac automation-only observation is not a confirmed product defect",
+    "speed_hint": "Changed to active-model wording in all three UI languages",
+    "prebuilt_install": "Runtime/SDK wheel installation path connected; 4 real filesystem cases plus Bash syntax passed on Docker. New installer not rerun on a Mac host.",
+    "runtime_payload": "Received and ZIP checksum verified from orphaned private transfer branch; asset history not merged"
+  }
+}

@@ -55,7 +55,11 @@ def test_capabilities_reserve_expression_interface(monkeypatch) -> None:
             "E": {"name": "expression-aware", "phones_bert": True, "semantic_tokens": 64, "expression_aware": True, "boundary_adaptive": False},
             "F": {"name": "boundary-adaptive", "phones_bert": True, "semantic_tokens": 64, "expression_aware": True, "boundary_adaptive": True},
         },
-        "qualification": "experimental-unqualified",
+        "qualification": "qualified-policy-a",
+        "qualification_by_policy": {
+            key: ("qualified-policy-a" if key == "A" else "experimental-unqualified")
+            for key in "ABCDEF"
+        },
         "limits": {
             "maximum_open": 8,
             "ttl_seconds": 600.0,
@@ -63,6 +67,37 @@ def test_capabilities_reserve_expression_interface(monkeypatch) -> None:
             "maximum_characters": 16000,
         },
     }
+
+
+def test_v5_capabilities_discover_all_conditioning_policies(monkeypatch) -> None:
+    client = _client(monkeypatch)
+    module = importlib.import_module("aniflive_tts.service")
+    policies = [policy.value for policy in module.ConditioningPolicy]
+    monkeypatch.setattr(module.SERVICE, "_is_v5", lambda: True)
+    monkeypatch.setattr(module.SERVICE, "expression_metadata", lambda: {
+        "policies": policies, "preferred_policy": "full-switch"})
+    with client:
+        response = client.get("/v1/capabilities")
+    assert response.status_code == 200
+    assert response.json()["expression"]["policies"] == policies
+    assert response.json()["reference_conditioning_policies"] == policies
+    assert response.json()["speech_sessions"]["qualification_by_policy"]["B"] == "experimental-unqualified"
+
+
+def test_macos_config_forwards_scoped_qualification(monkeypatch) -> None:
+    client = _client(monkeypatch)
+    module = importlib.import_module("aniflive_tts.service")
+    monkeypatch.setattr(module.SERVICE, "_sample_rate", 48000)
+    qualification = {"reference_validation": "accepted_with_documented_exceptions", "current_runtime": "not_assessed"}
+    monkeypatch.setattr(module, "_native_macos", lambda: True)
+    monkeypatch.setattr(module.SERVICE, "health", lambda: {
+        "backend": "MLX-Metal", "prototype": False, "quality_qualified": False,
+        "quality_qualification_scope": "all original gates", "qualification": qualification})
+    with client:
+        response = client.get("/model/config")
+    assert response.status_code == 200
+    assert response.json()["prototype"] is False
+    assert response.json()["qualification"] == qualification
 
 
 def test_speech_session_streams_committed_segments_and_is_idempotent(
@@ -302,7 +337,7 @@ def test_runtime_stream_owner_prevents_cross_session_cancel(monkeypatch) -> None
     manager = module.RuntimeServiceManager(fake)
     monkeypatch.setattr(module, "MODEL_ID", "voice")
     _, pcm, _, _ = manager.prepare_stream(
-        SimpleNamespace(text="Hello."),
+        SimpleNamespace(text="Hello.", voice_profile=None, voice_binding=None),
         "voice",
         stream_owner="session-a",
     )
@@ -315,7 +350,7 @@ def test_runtime_stream_owner_prevents_cross_session_cancel(monkeypatch) -> None
     assert manager.active_stream_owner is None
 
     _, unopened, _, _ = manager.prepare_stream(
-        SimpleNamespace(text="Unopened."),
+        SimpleNamespace(text="Unopened.", voice_profile=None, voice_binding=None),
         "voice",
         stream_owner="session-c",
     )

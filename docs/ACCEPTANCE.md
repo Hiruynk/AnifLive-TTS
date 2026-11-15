@@ -1,5 +1,30 @@
 # AnifLive-TTS Acceptance Records
 
+## v1.5 Windows V5 Turbo Qualification Input
+
+The frozen Windows V5 Turbo line passed 32/32 official PyTorch acoustic
+comparisons across the multilingual/seed matrix. Minimum log-mel cosine was
+0.999826288, minimum speaker cosine 0.996917172, and duration difference was
+zero. Neural checks found no NaN/Inf. Exact-output claims are tied to the
+specified qualified control and acoustic/cache context, rather than to an
+arbitrary engine rebuilt with the same settings.
+
+The user confirmed eight complete-WAV pairs, eight reconstructed-stream pairs,
+and one cold/warm stream pair were normal with no obvious difference: 17 groups,
+34 clips. These are actual qualitative listening responses; no numeric scores
+were inferred. Arrival-based replay of all 2,000 measured stream requests found
+no underruns. See the [public summary](../benchmarks/V1_5_BENCHMARK_SUMMARY.json)
+and [performance record](PERFORMANCE_ENGINEERING.md).
+
+Release integration reproduced all 32 qualified complete/stream PCM outputs
+exactly. Real multi-Reference ID/emotion selection, A/B/A requests, Session
+output and restart persistence passed. V5-to-V2-to-V5 and same-family switching
+restored the frozen PCM exactly. V2's existing historical audio qualification
+is retained; this release does not require a new V2 quality campaign.
+Remaining platform and packaging status is recorded in the
+[platform matrix](V1_5_PLATFORM_MATRIX.md). Rebuilt TensorRT plans remain
+unqualified until separately validated; they did not replace the frozen plans.
+
 ## v1.3 Passed On CUDA 12.8 / RTX 5070 Ti
 
 | Gate | Result |

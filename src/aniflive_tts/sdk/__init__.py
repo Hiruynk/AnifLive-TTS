@@ -57,6 +57,13 @@ from .types import (
     StreamMetadata,
     StreamingCapabilities,
     VoiceInfo,
+    VoiceCreate,
+    VoiceUpdate,
+    ReferenceCreate,
+    ReferenceUpdate,
+    ReferenceInfo,
+    TranscriptSource,
+    VoiceManagementCapabilities,
 )
 
 __all__ = [
@@ -118,3 +125,6 @@ __all__ = [
     "TransportError",
     "VoiceInfo",
 ]
+
+__all__ += ["VoiceCreate", "VoiceUpdate", "ReferenceCreate", "ReferenceUpdate", "ReferenceInfo",
+            "TranscriptSource", "VoiceManagementCapabilities"]

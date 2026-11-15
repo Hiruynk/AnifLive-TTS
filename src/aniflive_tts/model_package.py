@@ -190,38 +190,42 @@ def _compatible_gpu_memory(recorded: Any, current: Any) -> bool:
 
 def select_engine_dir(package_dir: Path, manifest: dict[str, Any]) -> Path:
     package_dir = package_dir.resolve()
+    def rebuild(reason: str) -> EngineRebuildRequired:
+        if manifest.get("model_family") == "gsv-v5turbo":
+            return EngineRebuildRequired(f"ENGINE_REBUILD_REQUIRED: {reason}. Supply a V5 Turbo engine bundle built for this runtime.")
+        return _engine_rebuild_required(reason)
     expected = manifest.get("active_engine_fingerprint")
     if not expected:
-        raise _engine_rebuild_required("model package has no engine fingerprint")
+        raise rebuild("model package has no engine fingerprint")
     try:
         expected = validate_safe_identifier(expected, "active_engine_fingerprint")
         engine_dir = resolve_contained_path(
             package_dir / "engines", expected, "engine fingerprint path"
         )
     except PackageValidationError as error:
-        raise _engine_rebuild_required(str(error)) from error
+        raise rebuild(str(error)) from error
     try:
         engine_manifest_path = resolve_contained_path(
             engine_dir, "engine-manifest.json", "engine manifest path"
         )
     except PackageValidationError as error:
-        raise _engine_rebuild_required(str(error)) from error
+        raise rebuild(str(error)) from error
     if not engine_manifest_path.is_file():
-        raise _engine_rebuild_required(f"engine bundle is missing: {engine_dir}")
+        raise rebuild(f"engine bundle is missing: {engine_dir}")
     try:
         engine_manifest = json.loads(engine_manifest_path.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
-        raise _engine_rebuild_required("engine-manifest.json is unreadable") from error
+        raise rebuild("engine-manifest.json is unreadable") from error
     if not isinstance(engine_manifest, dict):
-        raise _engine_rebuild_required("engine-manifest.json must contain an object")
+        raise rebuild("engine-manifest.json must contain an object")
     if engine_manifest.get("fingerprint") != expected:
-        raise _engine_rebuild_required(
+        raise rebuild(
             "engine manifest fingerprint does not match active_engine_fingerprint"
         )
     runtime = runtime_fingerprint()
     recorded = engine_manifest.get("runtime", {})
     if not isinstance(recorded, dict):
-        raise _engine_rebuild_required("engine runtime fingerprint is missing")
+        raise rebuild("engine runtime fingerprint is missing")
     for key in ENGINE_COMPATIBILITY_KEYS:
         package_value = recorded.get(key)
         runtime_value = runtime[key]
@@ -232,12 +236,57 @@ def select_engine_dir(package_dir: Path, manifest: dict[str, Any]) -> Path:
         else:
             matches = str(package_value) == str(runtime_value)
         if not matches:
-            raise _engine_rebuild_required(
+            raise rebuild(
                 f"{key} mismatch: package={package_value!r}, runtime={runtime_value!r}"
             )
+    if manifest.get("model_family") == "gsv-v5turbo":
+        from .model_backend import V5TURBO_BACKEND
+        if engine_manifest.get("kind") != V5TURBO_BACKEND.engine_manifest_kind:
+            raise rebuild("invalid v5 engine manifest kind")
+        files = engine_manifest.get("files")
+        names = ("ar_neural", "encoder", "dit", "dit_579", "vocoder",
+                 "attention_guard", "gemv_guard", "layernorm_plugin", "weight_l2", "joint_graph")
+        if not isinstance(files, dict) or set(files) != set(names):
+            raise rebuild("v5 engine file inventory is incomplete")
+        for name in names:
+            try:
+                path = resolve_contained_path(engine_dir, files[name], f"v5 {name}")
+            except PackageValidationError as error:
+                raise rebuild(str(error)) from error
+            if not path.is_file():
+                raise rebuild(f"missing v5 engine resource: {name}")
+        plan = resolve_contained_path(engine_dir, files["ar_neural"], "v5 ar_neural")
+        report_path = plan.parent / "report.json"
+        try:
+            report = json.loads(report_path.read_text(encoding="utf-8"))
+            weights = report["projection_aot_weights"]
+            required = {
+                "requires_native_k8_pointer_alignment_bytes": 16,
+                "native_k8_alignment_guard_version": 2,
+                "requires_gemv_pointer_alignment_bytes": 16,
+                "requires_fused_native_prefix_mask": True,
+                "native_k8_alignment_guard_sha256": sha256_file(resolve_contained_path(engine_dir, files["attention_guard"], "attention guard")),
+                "gemv_alignment_guard_sha256": sha256_file(resolve_contained_path(engine_dir, files["gemv_guard"], "GEMV guard")),
+            }
+            if (not isinstance(report, dict) or any(report.get(k) != v for k, v in required.items())
+                    or report["build"]["sha256"] != sha256_file(plan)
+                    or not isinstance(weights, list)):
+                raise ValueError("invalid AR plan metadata")
+            ffn2 = sorted((row for row in weights if isinstance(row, dict) and
+                           isinstance(row.get("index"), int) and row["index"] % 4 == 3),
+                          key=lambda row: row["index"])
+            if ([row["index"] for row in ffn2] != list(range(3, 96, 4)) or any(
+                    row.get("input_features") != 2048 or row.get("output_features") != 512
+                    or not isinstance(row.get("native_sha256"), str)
+                    or not re.fullmatch(r"[0-9a-f]{64}", row["native_sha256"])
+                    for row in ffn2)):
+                raise ValueError("invalid AR plan metadata")
+        except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError) as error:
+            raise rebuild("v5 AR plan sidecar is missing or invalid") from error
+        return engine_dir
     missing = [stage for stage in STAGE_ORDER if not (engine_dir / f"{stage}.engine").is_file()]
     if missing:
-        raise _engine_rebuild_required("missing TensorRT engines: " + ", ".join(missing))
+        raise rebuild("missing TensorRT engines: " + ", ".join(missing))
     return engine_dir
 
 

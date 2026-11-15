@@ -1,9 +1,6 @@
 # Installation And Shared Assets
 
-This guide starts from a fresh clone, creates an isolated Windows environment,
-downloads the shared resources required by the converter, and prepares a model
-package for Docker. Python packages are installed only in the project `.venv`;
-the system Python and CUDA installation are not modified.
+Prepare a model package and shared resources for **CUDA／TensorRT（Docker）**. The commands below use an isolated Windows `.venv`. For **Apple Silicon（macOS／MLX／Metal）**, use the [macOS installation guide](MACOS_INSTALLATION_EN.md).
 
 ## Prerequisites
 
@@ -55,9 +52,30 @@ D:\models\shared\
 └── shared-assets.json
 ```
 
+## v2ProPlus conversion
+
+```powershell
+.\.venv\Scripts\aniflive-tts.exe model convert `
+  --gpt D:\models\voice.ckpt --sovits D:\models\voice.pth `
+  --reference-audio D:\models\reference.wav `
+  --reference-text-file D:\models\reference.txt --reference-language ja `
+  --model-id my-v2proplus --voice-profile default `
+  --shared-dir D:\models\shared --output D:\models\my-v2proplus
+```
+
+The converter exports ONNX, builds FP16 TensorRT engines and validates the package. Use `--allow-unsafe-pickle` only with a trusted checkpoint.
+
+## v5Turbo package
+
+The `gsv-v5turbo` family uses FP16, 48 kHz, four CFM steps and CFG 0. Follow the [v5Turbo build guide](V1_5_V5_BUILD.md); `model rebuild-engines` is the v2ProPlus workflow. Validate rebuilt engines on the target GPU before deployment.
+
+## Python SDK
+
+See the [SDK manual](SDK_EN.md) for wheel installation and sync/async examples.
+
 ## Next Steps
 
-Run the model conversion command in the README with
+Run the v2ProPlus conversion command above with
 `--shared-dir D:\models\shared`. Place the resulting model package under the
 `ANIFLIVE_TTS_MODELS_DIR` configured in `.env`, then explicitly build the
 Docker image. Later container recreation reuses the existing image, bind-mounted

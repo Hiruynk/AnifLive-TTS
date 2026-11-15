@@ -411,7 +411,8 @@ class TensorRTFixedReferenceStreamer:
             ssl_content = self.engine.model_ssl({"audio": ssl_audio})["last_hidden_state"]
             self.logger.info("Preparing reference: TensorRT VQ enqueue")
             codes = self.engine.model_vq({"ssl_content": ssl_content})["codes"]
-            prompt_semantic = codes[0, 0][None, :]
+            # Engine outputs are reusable scratch buffers; each Reference owns its cache.
+            prompt_semantic = codes[0, 0][None, :].clone()
 
             self.logger.info("Preparing reference: TensorRT spectrogram enqueue")
             wav_ref = self._load_audio(reference_wav, self.sample_rate)
@@ -421,7 +422,7 @@ class TensorRTFixedReferenceStreamer:
                     .to(self.engine.device)
                     .to(self.engine.precision)
                 }
-            )["spectrogram"]
+            )["spectrogram"].clone()
 
             self.logger.info("Preparing reference: TensorRT speaker embedding enqueue")
             sv_wav = wav16k
@@ -440,12 +441,13 @@ class TensorRTFixedReferenceStreamer:
                 copied = min(int(speaker_embedding.shape[-1]), expected_sv_size)
                 padded[:, :copied] = speaker_embedding[:, :copied]
                 speaker_embedding = padded
-            speaker_embedding = speaker_embedding.to(self.engine.precision)
+            speaker_embedding = speaker_embedding.to(self.engine.precision).clone()
 
             self.logger.info("Preparing reference: multilingual text frontend and TensorRT BERT")
             phones, bert, _ = self.engine.get_phones_and_bert(
                 reference_text, reference_language, self.engine.version
             )
+            bert = bert.clone()
 
         self.logger.info("Preparing reference: synchronize CUDA stream")
         torch.cuda.synchronize(self.engine.stream)
@@ -519,6 +521,7 @@ class TensorRTFixedReferenceStreamer:
         normalize_semantic_onset: bool = False,
         semantic_onset_threshold_dbfs: float = -45.0,
         semantic_onset_retain_ms: int = 40,
+        reference_bank: PreparedReferenceBank | None = None,
     ) -> PreparedReference:
         reference = self._prepare_reference(
             reference_id=reference_id,
@@ -529,7 +532,7 @@ class TensorRTFixedReferenceStreamer:
             semantic_onset_threshold_dbfs=semantic_onset_threshold_dbfs,
             semantic_onset_retain_ms=semantic_onset_retain_ms,
         )
-        self.reference_bank.add(reference)
+        (self.reference_bank if reference_bank is None else reference_bank).add(reference)
         return reference
 
     def warm_frontends(self) -> None:
@@ -543,6 +546,9 @@ class TensorRTFixedReferenceStreamer:
             ("안녕하세요.", "all_ko"),
         )
         started = time.perf_counter()
+        self._warm_input_ids = self.torch.zeros(
+            (1, 32), dtype=self.torch.int64, device=self.engine.device
+        )
         with self.torch.cuda.stream(self.engine.stream):
             for text, language in samples:
                 self.engine.get_phones_and_bert(
@@ -1333,6 +1339,12 @@ class TensorRTFixedReferenceStreamer:
             resolved_conditionings = (conditioning,) * len(segments)
         if not resolved_conditionings:
             raise ValueError("segments must not be empty")
+        identity_reference_id = (
+            resolved_conditionings[0].identity_reference_id or self.reference_bank.identity_id
+        )
+        if any((item.identity_reference_id or self.reference_bank.identity_id) != identity_reference_id
+               for item in resolved_conditionings):
+            raise ValueError("All request references must belong to the same voice identity")
         if chunk_length is None:
             chunk_length = self.streaming_chunk_length()
         if chunk_length < 8:
@@ -1390,7 +1402,7 @@ class TensorRTFixedReferenceStreamer:
             not in {"0", "false", "no", "off"}
         )
         controlled_expression = any(
-            item.expression_id != self.reference_bank.identity_id
+            item.expression_id != identity_reference_id
             for item in resolved_conditionings
         )
         package_runtime_policy = (
@@ -1848,13 +1860,13 @@ class TensorRTFixedReferenceStreamer:
                 segment_progressive_refill_enabled = bool(
                     progressive_refill_enabled
                     and segment_conditioning.expression_id
-                    != self.reference_bank.identity_id
+                    != identity_reference_id
                     and segment_progressive_refill_tokens > 0
                     and segment_progressive_refill_seconds > 0.0
                 )
                 segment_profile["progressive_refill_expression_active"] = int(
                     segment_conditioning.expression_id
-                    != self.reference_bank.identity_id
+                    != identity_reference_id
                 )
                 segment_profile["progressive_refill_enabled"] = int(
                     segment_progressive_refill_enabled
@@ -2608,7 +2620,7 @@ class TensorRTFixedReferenceStreamer:
                             published_samples=published_refill_samples,
                             baseline_compatible=(
                                 segment_conditioning.expression_id
-                                == self.reference_bank.identity_id
+                                == identity_reference_id
                             ),
                         )
                         )

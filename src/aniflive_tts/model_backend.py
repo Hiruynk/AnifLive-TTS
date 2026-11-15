@@ -61,9 +61,24 @@ class V2ProPlusBackend:
         }
 
 
+@dataclass(frozen=True, slots=True)
+class V5TurboBackend(V2ProPlusBackend):
+    model_family: str = "gsv-v5turbo"
+    display_name: str = "GPT-SoVITS V5 Turbo, TensorRT 11 and CUDA"
+    engine_manifest_kind: str = "aniflive-tts-gsv-v5turbo-tensorrt11-engines"
+
+
+@dataclass(frozen=True, slots=True)
+class V5TurboMacOSBackend(V5TurboBackend):
+    precision: str = "FP16"
+    display_name: str = "GPT-SoVITS V5 Turbo, macOS MLX/Metal"
+    engine_manifest_kind: str = "aniflive-tts-gsv-v5turbo-mlx-metal"
+
+
+V5TURBO_BACKEND = V5TurboBackend()
 V2PROPLUS_BACKEND = V2ProPlusBackend()
 MODEL_BACKENDS: Mapping[str, ModelBackend] = MappingProxyType(
-    {V2PROPLUS_BACKEND.model_family: V2PROPLUS_BACKEND}
+    {V2PROPLUS_BACKEND.model_family: V2PROPLUS_BACKEND, V5TURBO_BACKEND.model_family: V5TURBO_BACKEND}
 )
 
 
@@ -74,5 +89,8 @@ def get_model_backend(model_family: object) -> ModelBackend | None:
 
 
 def model_backend_for_manifest(manifest: Mapping[str, Any]) -> ModelBackend | None:
+    if manifest.get("model_family") == "gsv-v5turbo" and isinstance(manifest.get("native_runtime"), Mapping):
+        precision = manifest.get("precision")
+        return V5TurboMacOSBackend(precision=precision) if precision in {"FP16", "FP32"} else None
     return get_model_backend(manifest.get("model_family"))
 

@@ -21,11 +21,36 @@ jobs:
           cache: pip
       - name: Activate pinned Rust toolchain
         run: rustup show active-toolchain
-      - name: Install static test dependencies
+      - name: Reclaim unused hosted-runner SDK space
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install -r requirements/dev.txt
-          python -m pip install -e ".[runtime]"
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h /
+      - name: Install static check tools
+        run: |
+          python -m pip install --no-cache-dir --upgrade pip
+          python -m pip install --no-cache-dir -r requirements/dev.txt
+      - name: Ruff
+        run: ruff check src tests scripts
+      - name: Install runtime test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y ffmpeg
+          python -m pip install --no-cache-dir -e ".[runtime]"
+          python -m pip install --no-cache-dir torch==2.10.0+cpu torchaudio==2.10.0+cpu --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install --no-cache-dir -r requirements/ci-runtime.txt
+          python -m pip install --no-cache-dir --no-deps tensorrt-cu12==11.2.1.2
+      - name: SDK public typing
+        run: mypy --config-file mypy-sdk.ini
+      - name: Install isolated V5 Transformers security test dependencies
+        run: |
+          python -m venv --system-site-packages "$RUNNER_TEMP/v5-security"
+          "$RUNNER_TEMP/v5-security/bin/python" -m pip install --no-cache-dir 'transformers==4.57.6'
+      - name: V5 Transformers security tests
+        run: '"$RUNNER_TEMP/v5-security/bin/python" -m pytest -q tests/test_v5_transformers_security.py'
+      - name: Full static, API, runtime, and workstation suite
+        env:
+          ANIFLIVE_TTS_VOICE_DIR: ${{ runner.temp }}/aniflive-test-voices
+        run: pytest -q --ignore=tests/test_v5_transformers_security.py tests rust/aniflive-tts-python/tests
       - name: Rust quality
         run: |
           cargo fmt --all -- --check
@@ -37,11 +62,5 @@ jobs:
         run: |
           cargo install cargo-audit --version 0.22.2 --locked
           cargo audit --file Cargo.lock
-      - name: Ruff
-        run: ruff check src tests scripts
-      - name: SDK public typing
-        run: mypy --config-file mypy-sdk.ini
-      - name: Full static, API, runtime, and workstation suite
-        run: pytest -q tests rust/aniflive-tts-python/tests
       - name: Release security gate
-        run: python scripts/check_release_security.py --expected-version 1.5.0b1
+        run: python scripts/check_release_security.py --expected-version 1.5.0

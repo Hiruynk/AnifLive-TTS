@@ -4,7 +4,7 @@
 
 ### Highlights
 
-- The first-party TTS runtime for AnifEngine-Voice, built for low-latency, high-quality multilingual voice cloning.
+- A TTS runtime built for low-latency, high-quality multilingual voice cloning.
 - Eight neural inference stages run through FP16 TensorRT 11 with no PyTorch model fallback.
 - Canonical, legacy GPT-SoVITS, and OpenAI-compatible APIs support Putonghua/Mandarin (`zh`), Cantonese (`yue`), English (`en`), Japanese (`ja`), and Korean (`ko`).
 - v1 launches with GPT-SoVITS V2ProPlus model packaging and inference. More GPT-SoVITS model generations are planned without changing the public API contract.
@@ -23,7 +23,7 @@
 
 ### 重點
 
-- AnifEngine-Voice 的第一方 TTS，專注於低延遲、高音質的多語言語音複製。
+- 專注於低延遲、高音質的多語言語音複製 TTS。
 - 八個神經網絡推理階段均使用 FP16 TensorRT 11 執行，不會回退至 PyTorch 模型推理。
 - 標準 API、GPT-SoVITS 舊版相容 API 及 OpenAI 相容 API 支援普通話（`zh`）、廣東話（`yue`）、英文（`en`）、日文（`ja`）及韓文（`ko`）。
 - v1 首發支援 GPT-SoVITS V2ProPlus 模型封裝與推理，未來會在維持公開 API 規格的前提下支援更多 GPT-SoVITS 模型世代。

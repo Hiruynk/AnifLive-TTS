@@ -178,12 +178,50 @@ def test_native_loop_affinity_does_not_keep_finished_loop_alive():
             return weakref.ref(asyncio.get_running_loop())
 
         original = asyncio.run(first())
-        gc.collect()
-        assert original() is None
-
         async def second():
             with pytest.raises(RuntimeError, match="different event loop"):
                 await client.health_async()
 
+        # Native entry drains references already deferred by completed bridge
+        # tasks; the live client must still reject another loop and must not
+        # own the original loop strongly.
         asyncio.run(second())
+        gc.collect()
+        assert original() is None, _loop_referrer_diagnostic(original())
         client.close()
+
+
+def _loop_referrer_diagnostic(loop):
+    """Report only object types on failure; never include object values."""
+    if loop is None:
+        return "loop was released before diagnostic collection"
+    import gc
+    from collections import Counter
+    from types import FrameType
+
+    referrers = gc.get_referrers(loop)
+    def name(value):
+        return f"{type(value).__module__}.{type(value).__qualname__}"
+    counts = Counter(name(value) for value in referrers)
+    chain = Counter(
+        name(parent)
+        for value in referrers
+        if isinstance(value, (asyncio.Future, FrameType))
+        for parent in gc.get_referrers(value)
+    )
+    return (f"loop retained; refcount_with_diagnostic_reference={sys.getrefcount(loop)}; "
+            f"referrer_types={dict(counts.most_common(16))}; "
+            f"future_or_frame_parent_types={dict(chain.most_common(16))}")
+
+
+def test_loop_referrer_diagnostic_reports_types_without_values():
+    class Target:
+        pass
+
+    target = Target()
+    holder = [target, "secret-value-must-not-appear"]
+    diagnostic = _loop_referrer_diagnostic(target)
+    assert holder[0] is target
+    assert "refcount_with_diagnostic_reference=" in diagnostic
+    assert "builtins.list" in diagnostic
+    assert "secret-value-must-not-appear" not in diagnostic

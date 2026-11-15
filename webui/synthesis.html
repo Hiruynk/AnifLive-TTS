@@ -1439,7 +1439,7 @@
               <span id="generationSpeedLabel" data-i18n="generationSpeed">Speed</span>
               <output class="generation-fixed" aria-labelledby="generationSpeedLabel">
                 <strong>1.0×</strong>
-                <small data-i18n="generationSpeedFixed">TensorRT 固定值</small>
+                <small data-i18n="generationSpeedFixed">目前模型固定值</small>
               </output>
             </div>
           </div>
@@ -1519,7 +1519,7 @@
   <script src="/assets/playback_model.js?v=1.4.0-editorial20"></script>
   <script src="/assets/annotation_editor.js?v=1.4.0-editorial20"></script>
   <script>
-    const SAMPLE_RATE = 32000;
+    const DEFAULT_SAMPLE_RATE = 32000;
     const SURFACE_NAME = document.body.classList.contains("embedded")
       ? "AnifLive-TTS Studio"
       : "AnifLive-TTS WebUI";
@@ -1604,7 +1604,7 @@
         generationTemperature: "Temperature",
         generationNoiseScale: "Noise scale",
         generationSpeed: "Speed",
-        generationSpeedFixed: "fixed by TensorRT",
+        generationSpeedFixed: "fixed for the active model",
         abTitle: "A/B blind compare",
         abCurrentNote: "A uses the current controls above · B uses these controls",
         abGenerate: "Generate blind pair",
@@ -1636,8 +1636,8 @@
         statusCancelled: "Playback and inference cancelled",
         statusSwitching: "Unloading {current} and loading {target}. Only one voice remains loaded at a time...",
         statusActivated: "{model} is loaded exclusively and ready to play",
-        statusApiReady: "AnifLive-TTS v1.4 · Core v{version} ready · Voice: {model}",
-        errorTensorRt: "The response did not use the required TensorRT 11 execution path",
+        statusApiReady: "AnifLive-TTS v1.5 · Core v{version} ready · Voice: {model}",
+        errorTensorRt: "The response has an unsupported audio backend or sample rate",
         errorIncompletePcm: "The PCM stream ended with an incomplete sample",
         errorNoAudibleAudio: "The stream contained no audible audio",
         errorServiceNotReady: "The service is not ready yet",
@@ -1711,7 +1711,7 @@
         generationTemperature: "Temperature",
         generationNoiseScale: "Noise scale",
         generationSpeed: "速度",
-        generationSpeedFixed: "TensorRT 固定值",
+        generationSpeedFixed: "目前模型固定值",
         abTitle: "A/B 盲聽",
         abCurrentNote: "A 使用上方目前設定 · B 使用下列設定",
         abGenerate: "產生盲聽組合",
@@ -1743,8 +1743,8 @@
         statusCancelled: "已停止播放，推理亦已取消",
         statusSwitching: "正在徹底卸載 {current} 並載入 {target}，期間不會同時載入兩套音色...",
         statusActivated: "{model} 已完成獨佔載入，可以立即播放",
-        statusApiReady: "AnifLive-TTS v1.4 · 核心 v{version} 已就緒 · 目前音色：{model}",
-        errorTensorRt: "回應不是指定的 TensorRT 11 執行路徑",
+        statusApiReady: "AnifLive-TTS v1.5 · 核心 v{version} 已就緒 · 目前音色：{model}",
+        errorTensorRt: "回應的音訊後端或取樣率不受支援",
         errorIncompletePcm: "PCM 串流以不完整取樣結束",
         errorNoAudibleAudio: "串流未包含可聽音訊",
         errorServiceNotReady: "服務尚未準備完成",
@@ -1818,7 +1818,7 @@
         generationTemperature: "Temperature",
         generationNoiseScale: "Noise scale",
         generationSpeed: "速度",
-        generationSpeedFixed: "TensorRT 固定值",
+        generationSpeedFixed: "当前模型固定值",
         abTitle: "A/B 盲听",
         abCurrentNote: "A 使用上方当前设置 · B 使用下列设置",
         abGenerate: "生成盲听组合",
@@ -1850,8 +1850,8 @@
         statusCancelled: "已停止播放，推理也已取消",
         statusSwitching: "正在彻底卸载 {current} 并载入 {target}，期间不会同时载入两套音色...",
         statusActivated: "{model} 已完成独占载入，可以立即播放",
-        statusApiReady: "AnifLive-TTS v1.4 · 核心 v{version} 已就绪 · 当前音色：{model}",
-        errorTensorRt: "响应没有使用指定的 TensorRT 11 执行路径",
+        statusApiReady: "AnifLive-TTS v1.5 · 核心 v{version} 已就绪 · 当前音色：{model}",
+        errorTensorRt: "响应的音频后端或采样率不受支持",
         errorIncompletePcm: "PCM 数据流以不完整采样结束",
         errorNoAudibleAudio: "数据流中没有可听音频",
         errorServiceNotReady: "服务尚未准备完成",
@@ -1984,6 +1984,7 @@
         bucketMax: -1,
         bucketSamples: 0,
         receivedSamples: 0,
+        sampleRate: DEFAULT_SAMPLE_RATE,
         playedSeconds: 0,
         playbackActive: false,
         complete: false,
@@ -2013,6 +2014,8 @@
       continuityPolicy: "A",
       model: "",
       models: [],
+      voices: null,
+      voiceProfile: "default",
       expressions: { enabled: false, profiles: [], policies: [] },
       annotationsValid: true,
       apiVersion: "",
@@ -2054,6 +2057,7 @@
     }
     function profileLabel(profile) {
       return PROFILE_LABELS[profile]?.[state.locale]
+        || state.expressions.profiles?.find(record => record.id === profile)?.label
         || String(profile || "").replaceAll("-", " ").replace(/\b\w/g, value => value.toUpperCase());
     }
     function profileColor(profile) {
@@ -2074,7 +2078,7 @@
       const response = await fetch("/api/resolve-expression", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt }),
+        body: JSON.stringify({ prompt, voice_profile: state.voiceProfile }),
         cache: "no-store"
       });
       const data = await response.json().catch(() => ({}));
@@ -2083,7 +2087,7 @@
     }
     function updatePlayAvailability() {
       el("play").disabled = Boolean(
-        state.switching || !state.model || state.controller || !state.annotationsValid
+        state.switching || !state.model || !state.voiceProfile || state.controller || !state.annotationsValid
       );
       renderBlindPair();
       scheduleSegmentSequenceRender();
@@ -2109,23 +2113,31 @@
       onStatus: (key, kind) => setStatus(key, kind)
     });
     function renderModels() {
-      el("modelCurrent").textContent = state.model || "--";
+      const selectedVoice = state.voices?.find(voice => voice.id === state.voiceProfile);
+      el("modelCurrent").textContent = state.voices === null
+        ? state.model || "--" : selectedVoice?.name || selectedVoice?.id || "--";
       const menu = el("modelMenu");
       menu.replaceChildren();
-      state.models.forEach(model => {
+      const choices = state.models.flatMap(model => model.id === state.model && state.voices !== null
+        ? state.voices.map(voice => ({ model, voice })) : [{ model, voice: null }]);
+      choices.forEach(({ model, voice }) => {
         const option = document.createElement("button");
         option.className = "model-option";
         option.type = "button";
         option.role = "option";
         option.tabIndex = -1;
         option.dataset.model = model.id;
-        option.setAttribute("aria-selected", String(model.id === state.model));
-        option.textContent = `${model.id}${model.id === state.model ? ` · ${t("activeModel")}` : ""}`;
-        option.addEventListener("click", () => chooseModel(model.id));
+        if (voice) option.dataset.voice = voice.id;
+        const selected = voice ? voice.id === state.voiceProfile : model.id === state.model;
+        option.setAttribute("aria-selected", String(selected));
+        const label = voice ? voice.name || voice.id : model.id;
+        option.textContent = `${label}${selected ? ` · ${t("activeModel")}` : ""}`;
+        option.addEventListener("click", () => chooseModel(model.id, voice?.id));
         option.addEventListener("keydown", handleModelOptionKeydown);
         menu.append(option);
       });
-      el("modelButton").disabled = state.switching || state.models.length < 2;
+      el("modelButton").disabled = state.switching || !choices.length
+        || (state.voices === null && state.models.length < 2);
     }
     function ttsLanguageName(code) {
       return t({ ja: "ttsLanguageJa", zh: "ttsLanguageZh", yue: "ttsLanguageYue",
@@ -2571,16 +2583,42 @@
       el("modelMenu").hidden = false;
       el("modelButton").setAttribute("aria-expanded", "true");
       const options = modelOptions();
-      const selected = Math.max(0, options.findIndex(option => option.dataset.model === state.model));
+      const selected = Math.max(0, options.findIndex(option => option.getAttribute("aria-selected") === "true"));
       options[focusTarget === "last" ? options.length - 1 : selected]?.focus();
     }
     function closeModelMenu() {
       el("modelMenu").hidden = true;
       el("modelButton").setAttribute("aria-expanded", "false");
     }
-    function chooseModel(target) {
+    async function chooseModel(target, voice) {
       closeModelMenu();
       el("modelButton").focus();
+      if (voice && !state.switching) {
+        stopCurrent("");
+        state.voiceProfile = voice;
+        state.switching = true;
+        invalidateBlindPair();
+        renderModels();
+        updatePlayAvailability();
+        try {
+          const response = await fetch(`/api/status?voice_profile=${encodeURIComponent(voice)}`, { cache: "no-store" });
+          const data = await response.json();
+          if (!response.ok || !data.ready) throw new Error(data.error || `HTTP ${response.status}`);
+          if (state.voiceProfile !== voice) return;
+          applyStatus(data);
+        } catch (error) {
+          const translated = localizedError(error);
+          setStatus(translated.key, "error", translated.vars || {});
+          return;
+        } finally {
+          state.switching = false;
+          renderModels();
+          updatePlayAvailability();
+        }
+        const selected = state.voices.find(item => item.id === voice);
+        setStatus("statusApiReady", "", { model: selected.name || voice, version: state.apiVersion });
+        return;
+      }
       if (!target || target === state.model || state.switching) return;
       switchModel(target);
     }
@@ -2589,7 +2627,7 @@
       const index = options.indexOf(event.currentTarget);
       if (event.key === "Enter" || event.key === " ") {
         event.preventDefault();
-        chooseModel(event.currentTarget.dataset.model);
+        chooseModel(event.currentTarget.dataset.model, event.currentTarget.dataset.voice);
         return;
       }
       let target = -1;
@@ -2677,7 +2715,7 @@
       context.lineWidth = 1;
       context.stroke();
       const peaks = waveformPeaks();
-      const receivedSeconds = waveform.receivedSamples / SAMPLE_RATE;
+      const receivedSeconds = waveform.receivedSamples / waveform.sampleRate;
       const playedSeconds = Math.min(receivedSeconds, Math.max(0, waveform.playedSeconds));
       const playedRatio = receivedSeconds > 0 ? playedSeconds / receivedSeconds : 0;
       drawPeakTrace(context, peaks, width, height, "rgba(187,165,220,.56)");
@@ -2852,14 +2890,14 @@
       if (statusKey) setStatus(statusKey);
     }
     async function getAudioContext() {
-      if (!state.audio) state.audio = new AudioContext({ latencyHint: "interactive", sampleRate: SAMPLE_RATE });
+      if (!state.audio) state.audio = new AudioContext({ latencyHint: "interactive" });
       if (state.audio.state === "suspended") await state.audio.resume();
       return state.audio;
     }
     function writeAscii(view, offset, value) {
       for (let index = 0; index < value.length; index++) view.setUint8(offset + index, value.charCodeAt(index));
     }
-    function createWavBlob(chunks, pcmBytes) {
+    function createWavBlob(chunks, pcmBytes, sampleRate) {
       const buffer = new ArrayBuffer(44 + pcmBytes);
       const view = new DataView(buffer);
       writeAscii(view, 0, "RIFF");
@@ -2869,8 +2907,8 @@
       view.setUint32(16, 16, true);
       view.setUint16(20, 1, true);
       view.setUint16(22, 1, true);
-      view.setUint32(24, SAMPLE_RATE, true);
-      view.setUint32(28, SAMPLE_RATE * 2, true);
+      view.setUint32(24, sampleRate, true);
+      view.setUint32(28, sampleRate * 2, true);
       view.setUint16(32, 2, true);
       view.setUint16(34, 16, true);
       writeAscii(view, 36, "data");
@@ -2919,8 +2957,8 @@
         label.textContent = t("downloadAudio");
       }, 700);
     }
-    function firstAudibleSample(channel) {
-      const frameSamples = Math.max(1, Math.round(SAMPLE_RATE * .010));
+    function firstAudibleSample(channel, sampleRate) {
+      const frameSamples = Math.max(1, Math.round(sampleRate * .010));
       const threshold = 10 ** (-45 / 20);
       for (let begin = 0; begin < channel.length; begin += frameSamples) {
         const end = Math.min(channel.length, begin + frameSamples);
@@ -2935,8 +2973,8 @@
       }
       return -1;
     }
-    function lastAudibleSample(channel) {
-      const frameSamples = Math.max(1, Math.round(SAMPLE_RATE * .010));
+    function lastAudibleSample(channel, sampleRate) {
+      const frameSamples = Math.max(1, Math.round(sampleRate * .010));
       const threshold = 10 ** (-45 / 20);
       for (let end = channel.length; end > 0; end -= frameSamples) {
         const begin = Math.max(0, end - frameSamples);
@@ -2951,12 +2989,12 @@
       }
       return -1;
     }
-    function schedulePcm(context, bytes, metrics) {
+    function schedulePcm(context, bytes, metrics, sampleRate) {
       const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
       const samples = bytes.byteLength / 2;
       const channel = new Float32Array(samples);
       for (let i = 0; i < samples; i++) channel[i] = view.getInt16(i * 2, true) / 32768;
-      const buffer = context.createBuffer(1, samples, SAMPLE_RATE);
+      const buffer = context.createBuffer(1, samples, sampleRate);
       buffer.copyToChannel(channel, 0);
       const source = context.createBufferSource();
       source.buffer = buffer;
@@ -2969,7 +3007,7 @@
       }
       const scheduledStart = state.nextStart;
       source.start(scheduledStart);
-      state.nextStart += samples / SAMPLE_RATE;
+      state.nextStart += samples / sampleRate;
       state.sources.push(source);
       source.onended = () => {
         state.sources = state.sources.filter(item => item !== source);
@@ -2978,18 +3016,18 @@
         if (!state.sources.length && !state.controller) {
           el("stop").disabled = true;
           if (!state.muted) {
-            updateWaveformPlayback(state.waveform.receivedSamples / SAMPLE_RATE, false);
+            updateWaveformPlayback(state.waveform.receivedSamples / state.waveform.sampleRate, false);
           }
         }
       };
-      const first = firstAudibleSample(channel);
-      const last = lastAudibleSample(channel);
+      const first = firstAudibleSample(channel, sampleRate);
+      const last = lastAudibleSample(channel, sampleRate);
       return {
         scheduledStart,
         firstAudibleSample: first,
         lastAudibleSample: last,
-        firstAudibleContextTime: first < 0 ? NaN : scheduledStart + first / SAMPLE_RATE,
-        lastAudibleContextTime: last < 0 ? NaN : scheduledStart + last / SAMPLE_RATE
+        firstAudibleContextTime: first < 0 ? NaN : scheduledStart + first / sampleRate,
+        lastAudibleContextTime: last < 0 ? NaN : scheduledStart + last / sampleRate
       };
     }
     function showMetrics(m) {
@@ -3024,7 +3062,7 @@
       const ready = Boolean(state.ab.samples && state.ab.order.length === 2);
       const busy = Boolean(state.controller || state.switching);
       el("abGenerate").disabled = Boolean(
-        busy || !state.model || !state.annotationsValid
+        busy || !state.model || !state.voiceProfile || !state.annotationsValid
       );
       el("abSampleOne").disabled = busy || !ready;
       el("abSampleTwo").disabled = busy || !ready;
@@ -3044,13 +3082,25 @@
       }
       return joined;
     }
-    function pcmChunkHasAudibleSample(bytes) {
+    function pcmChunkHasAudibleSample(bytes, sampleRate) {
       const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
       const channel = new Float32Array(bytes.byteLength / 2);
       for (let index = 0; index < channel.length; index += 1) {
         channel[index] = view.getInt16(index * 2, true) / 32768;
       }
-      return firstAudibleSample(channel) >= 0;
+      return firstAudibleSample(channel, sampleRate) >= 0;
+    }
+    function pcmResponseSampleRate(headers) {
+      const backend = headers.get("x-tts-backend") || headers.get("x-tensorrt-backend");
+      const sampleRate = Number(headers.get("x-tts-sample-rate"));
+      const expectedRates = { "TensorRT-11": 32000, "hybrid-cuda": 48000, "MLX-Metal": 48000 };
+      const fallback = headers.get("x-pytorch-fallback");
+      if (!Object.hasOwn(expectedRates, backend) || sampleRate !== expectedRates[backend]
+          || (backend === "TensorRT-11" && fallback !== "false")
+          || (fallback !== null && fallback !== "false")) {
+        throw i18nError("errorTensorRt");
+      }
+      return sampleRate;
     }
     async function postSessionJson(path, payload, signal = undefined) {
       const response = await fetch(path, {
@@ -3079,7 +3129,7 @@
         "/api/sessions",
         {
           model,
-          voice_profile: "default",
+          voice_profile: state.voiceProfile,
           continuity_policy: state.continuityPolicy
         },
         controller.signal
@@ -3142,10 +3192,7 @@
         const detail = await response.json().catch(() => ({}));
         throw new Error(detail.error || `HTTP ${response.status}`);
       }
-      if (
-        response.headers.get("x-tensorrt-backend") !== "TensorRT-11"
-        || response.headers.get("x-pytorch-fallback") !== "false"
-      ) throw i18nError("errorTensorRt");
+      const sampleRate = pcmResponseSampleRate(response.headers);
       metrics.upstream = Number(response.headers.get("x-upstream-ttfa-ms"));
       metrics.prebufferMs = Number(response.headers.get("x-tts-recommended-prebuffer-ms")) || 32;
       const chunks = [];
@@ -3179,25 +3226,26 @@
         pcmBytes += saved.byteLength;
         if (
           !Number.isFinite(metrics.activeChunkArrival)
-          && pcmChunkHasAudibleSample(saved)
+          && pcmChunkHasAudibleSample(saved, sampleRate)
         ) metrics.activeChunkArrival = arrival;
       }
       if (carry !== null) throw i18nError("errorIncompletePcm");
       await sessionRequest.finish();
       if (!Number.isFinite(metrics.activeChunkArrival)) throw i18nError("errorNoAudibleAudio");
       metrics.complete = performance.now() - started;
-      metrics.duration = pcmBytes / 2 / SAMPLE_RATE;
+      metrics.duration = pcmBytes / 2 / sampleRate;
       metrics.rtf = metrics.complete / 1000 / metrics.duration;
       state.activeSessionId = null;
       return {
         chunks,
         bytes: concatPcmChunks(chunks, pcmBytes),
-        blob: createWavBlob(chunks, pcmBytes),
+        blob: createWavBlob(chunks, pcmBytes, sampleRate),
+        sampleRate,
         metrics
       };
     }
     async function generateBlindPair() {
-      if (state.controller || state.switching || !state.model) return;
+      if (state.controller || state.switching || !state.model || !state.voiceProfile) return;
       const sourceText = el("text").value;
       const text = sourceText.trim();
       if (!text) {
@@ -3265,13 +3313,14 @@
       const runId = state.runId;
       state.muted = false;
       resetPcmWaveform();
+      state.waveform.sampleRate = sample.sampleRate;
       for (const chunk of sample.chunks) appendPcmWaveform(chunk);
       state.waveform.complete = true;
       startPlaybackIndicator(sample.text, sample.language, context, runId);
       const timing = schedulePcm(context, sample.bytes, {
         prebufferMs: sample.metrics.prebufferMs,
         underruns: 0
-      });
+      }, sample.sampleRate);
       if (state.playback?.runId === runId) {
         state.playback.firstScheduledContextTime = timing.scheduledStart;
         state.playback.firstAudibleContextTime = timing.firstAudibleContextTime;
@@ -3279,7 +3328,7 @@
         state.playback.receivedDurationSeconds = sample.metrics.duration;
         const acoustic = globalThis.AnifLiveTTSPlaybackModel.buildPcmActivityTimeline(
           sample.chunks,
-          SAMPLE_RATE
+          sample.sampleRate
         );
         state.playback.acousticTimeline = globalThis.AnifLiveTTSPlaybackModel.alignTextTimelineToAudio(
           state.playback.timeline,
@@ -3287,8 +3336,8 @@
         );
         state.playback.responseComplete = true;
         state.playback.actualDurationSeconds = Math.max(
-          1 / SAMPLE_RATE,
-          timing.lastAudibleContextTime - timing.firstAudibleContextTime + 1 / SAMPLE_RATE
+          1 / sample.sampleRate,
+          timing.lastAudibleContextTime - timing.firstAudibleContextTime + 1 / sample.sampleRate
         );
       }
       state.download = {
@@ -3331,7 +3380,7 @@
     }
 
     async function play() {
-      if (state.switching || !state.model) return;
+      if (state.switching || !state.model || !state.voiceProfile) return;
       if (state.controller) stopCurrent("");
       const sourceText = el("text").value;
       const text = sourceText.trim();
@@ -3387,10 +3436,8 @@
           const detail = await response.json().catch(() => ({}));
           throw new Error(detail.error || `HTTP ${response.status}`);
         }
-        if (
-          response.headers.get("x-tensorrt-backend") !== "TensorRT-11" ||
-          response.headers.get("x-pytorch-fallback") !== "false"
-        ) throw i18nError("errorTensorRt");
+        const sampleRate = pcmResponseSampleRate(response.headers);
+        state.waveform.sampleRate = sampleRate;
         metrics.upstream = Number(response.headers.get("x-upstream-ttfa-ms"));
         metrics.prebufferMs = Number(response.headers.get("x-tts-recommended-prebuffer-ms")) || 32;
         const reader = response.body.getReader();
@@ -3424,7 +3471,7 @@
             appendPcmWaveform(savedChunk);
           }
           if (chunk.byteLength && !state.muted) {
-            const timing = schedulePcm(context, chunk, metrics);
+            const timing = schedulePcm(context, chunk, metrics, sampleRate);
             if (
               state.playback?.runId === runId
               && !Number.isFinite(state.playback.firstScheduledContextTime)
@@ -3455,7 +3502,7 @@
                   timing.lastAudibleContextTime
                 );
               }
-              state.playback.receivedDurationSeconds = pcmBytes / 2 / SAMPLE_RATE;
+              state.playback.receivedDurationSeconds = pcmBytes / 2 / sampleRate;
             }
             showMetrics(metrics);
           }
@@ -3464,14 +3511,14 @@
         await sessionRequest.finish();
         if (!Number.isFinite(metrics.activeChunkArrival)) throw i18nError("errorNoAudibleAudio");
         metrics.complete = performance.now() - started;
-        metrics.duration = totalBytes / 2 / SAMPLE_RATE;
+        metrics.duration = totalBytes / 2 / sampleRate;
         metrics.rtf = metrics.complete / 1000 / metrics.duration;
         state.waveform.complete = true;
         scheduleWaveformRender();
         if (state.playback?.runId === runId) {
           const acoustic = globalThis.AnifLiveTTSPlaybackModel.buildPcmActivityTimeline(
             pcmChunks,
-            SAMPLE_RATE
+            sampleRate
           );
           state.playback.acousticTimeline = (
             globalThis.AnifLiveTTSPlaybackModel.alignTextTimelineToAudio(
@@ -3485,16 +3532,16 @@
             && Number.isFinite(state.playback.lastAudibleContextTime)
           ) {
             state.playback.actualDurationSeconds = Math.max(
-              1 / SAMPLE_RATE,
+              1 / sampleRate,
               state.playback.lastAudibleContextTime
                 - state.playback.firstAudibleContextTime
-                + 1 / SAMPLE_RATE
+                + 1 / sampleRate
             );
           }
         }
         showMetrics(metrics);
         state.download = {
-          blob: createWavBlob(pcmChunks, pcmBytes),
+          blob: createWavBlob(pcmChunks, pcmBytes, sampleRate),
           fileName: downloadFileName(state.model, state.language)
         };
         el("downloadAudio").disabled = false;
@@ -3516,7 +3563,7 @@
           if (activeSessionId) void cancelSpeechSession(activeSessionId);
           state.controller = null;
           if (!state.sources.length && !state.muted) {
-            updateWaveformPlayback(state.waveform.receivedSamples / SAMPLE_RATE, false);
+            updateWaveformPlayback(state.waveform.receivedSamples / state.waveform.sampleRate, false);
           }
           updatePlayAvailability();
           el("stop").disabled = state.sources.length === 0;
@@ -3618,6 +3665,9 @@
       const previousModel = state.model;
       state.models = Array.isArray(data.models) ? data.models : [];
       state.model = health.model;
+      state.voices = Array.isArray(data.voices) ? data.voices : null;
+      state.voiceProfile = state.voices === null ? "default"
+        : state.voices.some(voice => voice.id === state.voiceProfile) ? state.voiceProfile : "";
       if (previousModel && previousModel !== state.model) invalidateBlindPair();
       state.expressions = data.expressions || { enabled: false, profiles: [], policies: [] };
       state.apiVersion = data.api_version || "";
@@ -3630,7 +3680,6 @@
       annotationEditor.setDisabled(false);
       annotationEditor.setCatalog(state.expressions, state.language);
       updatePlayAvailability();
-      el("modelButton").disabled = state.models.length < 2;
     }
     async function switchModel(target) {
       if (!target || target === state.model || state.switching) return;
@@ -3662,7 +3711,7 @@
         el("progress").classList.remove("active");
         annotationEditor.setDisabled(false);
         updatePlayAvailability();
-        el("modelButton").disabled = state.models.length < 2;
+        renderModels();
       }
     }
 

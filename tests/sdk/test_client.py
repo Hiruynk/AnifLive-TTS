@@ -5,6 +5,41 @@ import pytest
 from fixture_server import FixtureServer
 
 
+def test_sync_api_key_and_custom_headers():
+    from aniflive_tts import Client
+
+    key = "fixture-sync-key"
+    headers = {"X-Request-Source": "fixture"}
+    with FixtureServer() as server:
+        with Client(server.base_url, api_key=key, headers=headers) as client:
+            assert key not in repr(client)
+            assert client.health().ready
+        sent = {name.lower(): value for name, value in server.records[-1].headers}
+        assert sent["authorization"] == f"Bearer {key}"
+        assert sent["x-request-source"] == "fixture"
+        assert headers == {"X-Request-Source": "fixture"}
+
+        with Client(server.base_url, headers={"Authorization": "Basic fixture"}) as client:
+            assert client.health().ready
+        sent = {name.lower(): value for name, value in server.records[-1].headers}
+        assert sent["authorization"] == "Basic fixture"
+
+
+@pytest.mark.parametrize("client_name", ["Client", "AsyncClient"])
+def test_api_key_validation_does_not_expose_credentials(client_name):
+    import aniflive_tts
+
+    client = getattr(aniflive_tts, client_name)
+    url = "http://127.0.0.1:1"
+    with pytest.raises(ValueError, match="api_key cannot be combined") as conflict:
+        client(url, api_key="fixture-key", headers={"aUtHoRiZaTiOn": "Bearer custom-key"})
+    assert "fixture-key" not in str(conflict.value)
+    assert "custom-key" not in repr(conflict.value)
+    with pytest.raises(ValueError, match="api_key must be non-empty") as invalid:
+        client(url, api_key="fixture-invalid\nkey")
+    assert "fixture-invalid" not in repr(invalid.value)
+
+
 def test_sync_discovery_reuses_connection_and_preserves_unknown_fields():
     from aniflive_tts import Client
 

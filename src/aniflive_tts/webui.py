@@ -595,8 +595,11 @@ def resolve_expression_prompt(
     }
     matches: list[str] = []
     for profile in sorted(available):
-        aliases = (profile, profile.replace("-", " "), *_EXPRESSION_ALIASES.get(profile, ()))
-        if any(_contains_alias(normalised, alias) for alias in aliases):
+        record = next(record for record in records if record.get('id') == profile)
+        aliases = (profile, profile.replace("-", " "), *_EXPRESSION_ALIASES.get(profile, ()),
+                   record.get('label', ''), *record.get('aliases', ()))
+        if any(isinstance(alias, str) and alias and
+               _contains_alias(normalised, _normalise_prompt(alias)) for alias in aliases):
             matches.append(profile)
     if len(matches) > 1:
         raise WebUIError("The expression request is ambiguous: " + ", ".join(matches))
@@ -631,8 +634,8 @@ async def _read_json(client: httpx.AsyncClient, path: str) -> dict[str, Any]:
     return value
 
 
-async def _read_expression_metadata(client: httpx.AsyncClient) -> dict[str, Any]:
-    response = await client.get("/v1/expressions")
+async def _read_expression_metadata(client: httpx.AsyncClient, voice_profile: str | None = None) -> dict[str, Any]:
+    response = await client.get("/v1/expressions", params={'voice_profile': voice_profile} if voice_profile else None)
     if response.status_code == 404:
         return {
             "object": "list",
@@ -648,7 +651,7 @@ async def _read_expression_metadata(client: httpx.AsyncClient) -> dict[str, Any]
     return value
 
 
-async def verify_upstream(client: httpx.AsyncClient) -> dict[str, Any]:
+async def verify_upstream(client: httpx.AsyncClient, voice_profile: str | None = None) -> dict[str, Any]:
     openapi, health, config, models, expressions = await asyncio.gather(
         _read_json(client, "/openapi.json"),
         _read_json(client, "/health"),
@@ -664,17 +667,29 @@ async def verify_upstream(client: httpx.AsyncClient) -> dict[str, Any]:
         raise UpstreamContractError("/v1/models did not return any local models")
     active = [record for record in records if isinstance(record, Mapping) and record.get("active")]
     active_model = health.get("model")
+    backend = config.get("backend")
+    expected_version, expected_rate = {
+        "TensorRT-11": ("v2ProPlus", 32000),
+        "hybrid-cuda": ("v5turbo", 48000),
+        "MLX-Metal": ("v5turbo", 48000),
+    }.get(backend, (None, None))
+    if expected_version is None:
+        raise UpstreamContractError(f"Unknown AnifLive-TTS backend: {backend!r}")
     checks = {
         "health ready": (health.get("ready"), True),
-        "health backend": (health.get("backend"), EXPECTED_BACKEND),
-        "health engine count": (health.get("engine_count"), EXPECTED_ENGINE_COUNT),
+        "health backend": (health.get("backend"), backend),
         "config model": (config.get("model"), active_model),
-        "config version": (config.get("version"), "v2ProPlus"),
-        "config backend": (config.get("backend"), EXPECTED_BACKEND),
-        "config engine count": (config.get("engine_count"), EXPECTED_ENGINE_COUNT),
-        "config sample rate": (config.get("sample_rate"), EXPECTED_SAMPLE_RATE),
-        "config PyTorch fallback": (config.get("pytorch_fallback"), False),
+        "config version": (config.get("version"), expected_version),
+        "config sample rate": (config.get("sample_rate"), expected_rate),
     }
+    if backend == EXPECTED_BACKEND:
+        checks.update({
+            "health engine count": (health.get("engine_count"), EXPECTED_ENGINE_COUNT),
+            "config engine count": (config.get("engine_count"), EXPECTED_ENGINE_COUNT),
+            "config PyTorch fallback": (config.get("pytorch_fallback"), False),
+        })
+    elif backend == "MLX-Metal":
+        checks["config neural fallback"] = (config.get("pytorch_fallback"), False)
     failures = [
         f"{name}: got {actual!r}, expected {expected!r}"
         for name, (actual, expected) in checks.items()
@@ -684,6 +699,13 @@ async def verify_upstream(client: httpx.AsyncClient) -> dict[str, Any]:
         failures.append("model registry must identify exactly one active health model")
     if failures:
         raise UpstreamContractError("AnifLive-TTS preflight failed: " + "; ".join(failures))
+    voices = None
+    if _version_tuple(version) >= (1, 5, 0):
+        voices = (await _read_json(client, "/v1/voices")).get("data")
+        if not isinstance(voices, list):
+            raise UpstreamContractError("/v1/voices did not return a voice list")
+        if voice_profile:
+            expressions = await _read_expression_metadata(client, voice_profile)
     return {
         "ready": True,
         "api_version": version,
@@ -691,7 +713,74 @@ async def verify_upstream(client: httpx.AsyncClient) -> dict[str, Any]:
         "config": config,
         "models": records,
         "expressions": expressions,
+        "voices": voices,
     }
+
+
+def _webui_voice(value: Any, status: Mapping[str, Any]) -> str:
+    voices = status.get("voices")
+    if voices is None:
+        if value not in (None, "default"):
+            raise WebUIError("voice_profile must be default")
+        return "default"
+    available = {voice.get("id") for voice in voices if isinstance(voice, Mapping)}
+    if not isinstance(value, str) or value not in available:
+        raise WebUIError("Select an available voice_profile")
+    return value
+
+
+async def _prepare_webui_voice(client: httpx.AsyncClient, voice: str, status: Mapping[str, Any],
+                               expressions: list[ResolvedExpression] | None = None,
+                               metadata: Mapping[str, Any] | None = None) -> None:
+    if status.get("voices") is None:
+        return
+    if voice == status.get("config", {}).get("voice") and status["config"].get("reference_configured"):
+        return
+    record = next(item for item in status["voices"] if item["id"] == voice)
+    reference = record.get("default_reference_id")
+    if not reference:
+        raise WebUIError("Set a default reference for the selected voice")
+    targets = {reference}
+    for expression in expressions or ():
+        if expression.enabled:
+            profile = next((profile for profile in (metadata or {}).get('profiles', [])
+                            if profile['id'] == expression.profile), None)
+            if profile and profile.get('references'):
+                selected = min(profile['references'], key=lambda ref: (abs(ref['intensity']-expression.intensity), ref['id']))
+                targets.add(selected['id'])
+    for reference in sorted(targets):
+        path = f"/v1/voices/{voice}/references/{reference}"
+        current = await _read_json(client, path)
+        if current.get("prepare_state") == "ready":
+            continue
+        response = await client.post(path + "/prepare", json={})
+        response.raise_for_status()
+        deadline = time.monotonic() + 60
+        while time.monotonic() < deadline:
+            current = await _read_json(client, path)
+            if current.get("prepare_state") == "ready":
+                break
+            if current.get("prepare_state") == "failed":
+                raise WebUIError("Voice reference preparation failed: " + str(current.get("error_code")))
+            await asyncio.sleep(0.1)
+        else:
+            raise WebUIError("Voice reference preparation timed out")
+
+
+def _stream_header_contract(status: Mapping[str, Any]) -> dict[str, str]:
+    config = status.get("config", {})
+    backend = config.get("backend", EXPECTED_BACKEND)
+    if backend == EXPECTED_BACKEND:
+        headers = {"x-tensorrt-backend": EXPECTED_BACKEND,
+                   "x-tensorrt-engine-count": str(EXPECTED_ENGINE_COUNT),
+                   "x-pytorch-fallback": "false"}
+    else:
+        headers = {"x-tts-backend": backend}
+        if backend == "MLX-Metal":
+            headers["x-pytorch-fallback"] = "false"
+    return {**headers, "x-tts-stream": "pcm_s16le",
+            "x-tts-sample-rate": str(config.get("sample_rate", EXPECTED_SAMPLE_RATE)),
+            "x-tts-channels": "1"}
 
 
 def _speech_payload(
@@ -702,12 +791,13 @@ def _speech_payload(
     model: str,
     expression: ResolvedExpression,
     generation: Mapping[str, int | float] | None = None,
+    voice_profile: str = "default",
 ) -> dict[str, Any]:
     if (text is None) == (segments is None):
         raise WebUIError("Exactly one of text or segments must be provided")
     payload: dict[str, Any] = {
         "model": model,
-        "voice_profile": "default",
+        "voice_profile": voice_profile,
         "language": language,
         "stream": True,
         "response_format": "pcm",
@@ -968,7 +1058,7 @@ def create_webui_app(
 
     app = FastAPI(
         title=surface_name,
-        version="1.5.0b1",
+        version="1.5.0",
         lifespan=lifespan,
     )
 
@@ -2424,7 +2514,7 @@ def create_webui_app(
         return JSONResponse(
             {
                 "product": surface_name,
-                "workspace_version": "1.5.0b1",
+                "workspace_version": "1.5.0",
                 "active_model": health.get("model"),
                 "gpu": health.get("gpu", {}),
                 "backend": health.get("backend"),
@@ -3266,7 +3356,7 @@ def create_webui_app(
                 status_code=503, headers={"Cache-Control": "no-store", "Retry-After": "5"},
             )
         try:
-            current = await verify_upstream(request.app.state.client)
+            current = await verify_upstream(request.app.state.client, request.query_params.get('voice_profile'))
             request.app.state.status = current
             return JSONResponse(current, headers={"Cache-Control": "no-store"})
         except Exception as error:
@@ -3281,10 +3371,10 @@ def create_webui_app(
             prompt = body.get("prompt")
             if prompt is not None and not isinstance(prompt, str):
                 raise WebUIError("prompt must be a string")
-            result = resolve_expression_prompt(
-                prompt,
-                request.app.state.status.get("expressions", {}),
-            )
+            metadata = request.app.state.status.get("expressions", {})
+            if body.get('voice_profile') and request.app.state.status.get('voices') is not None:
+                metadata = await _read_expression_metadata(request.app.state.client, body['voice_profile'])
+            result = resolve_expression_prompt(prompt, metadata)
             return JSONResponse(asdict(result), headers={"Cache-Control": "no-store"})
         except (json.JSONDecodeError, WebUIError) as error:
             return _json_error(str(error), 400)
@@ -3383,9 +3473,7 @@ def create_webui_app(
             }
             if model not in known_models:
                 raise WebUIError("model is not available locally")
-            voice_profile = body.get("voice_profile", "default")
-            if voice_profile != "default":
-                raise WebUIError("voice_profile must be default")
+            voice_profile = _webui_voice(body.get("voice_profile"), request.app.state.status)
             continuity_policy = body.get("continuity_policy", "A")
             if not isinstance(continuity_policy, str):
                 raise WebUIError("continuity_policy must be one of A, B, C, D, E or F")
@@ -3395,6 +3483,7 @@ def create_webui_app(
         except (json.JSONDecodeError, WebUIError) as error:
             return _json_error(str(error), 400)
         try:
+            await _prepare_webui_voice(request.app.state.client, voice_profile, request.app.state.status)
             response = await request.app.state.client.post(
                 "/v1/sessions",
                 json={
@@ -3407,6 +3496,8 @@ def create_webui_app(
         except httpx.HTTPError as error:
             LOGGER.warning("Speech session creation failed: %s", error)
             return _json_error(f"{surface_name} session connection failed", 502)
+        except WebUIError as error:
+            return _json_error(str(error), 409)
 
     @app.post("/api/sessions/{session_id}/segments")
     async def append_webui_speech_session_segment(
@@ -3455,9 +3546,15 @@ def create_webui_app(
             ):
                 raise WebUIError("pause_after_ms must be an integer between 0 and 10000")
             generation = _validated_generation(body.get("generation"))
+            expression_metadata = request.app.state.status.get("expressions", {})
+            session_voice = None
+            if request.app.state.status.get('voices') is not None:
+                session = await _read_json(request.app.state.client, f'/v1/sessions/{safe_session_id}')
+                session_voice = session['voice_profile']
+                expression_metadata = await _read_expression_metadata(request.app.state.client, session_voice)
             resolved = resolve_expression_prompt(
                 expression_prompt,
-                request.app.state.status.get("expressions", {}),
+                expression_metadata,
             )
         except (json.JSONDecodeError, WebUIError) as error:
             return _json_error(str(error), 400)
@@ -3473,6 +3570,9 @@ def create_webui_app(
         if paragraph_id is not None:
             payload["paragraph_id"] = paragraph_id
         try:
+            if session_voice:
+                await _prepare_webui_voice(request.app.state.client, session_voice,
+                    request.app.state.status, [resolved], expression_metadata)
             response = await request.app.state.client.post(
                 f"/v1/sessions/{safe_session_id}/segments",
                 json=payload,
@@ -3573,17 +3673,11 @@ def create_webui_app(
 
         expected_model = request.app.state.status.get("health", {}).get("model")
         required = {
-            "x-tensorrt-backend": EXPECTED_BACKEND,
-            "x-tensorrt-engine-count": str(EXPECTED_ENGINE_COUNT),
-            "x-pytorch-fallback": "false",
+            **_stream_header_contract(request.app.state.status),
             "x-tts-model": expected_model,
-            "x-tts-stream": "pcm_s16le",
-            "x-tts-sample-rate": str(EXPECTED_SAMPLE_RATE),
-            "x-tts-channels": "1",
             "x-tts-session-id": safe_session_id,
             "x-tts-session-context": "committed-neural-v1",
             "x-tts-acoustic-latent-continuity": "false",
-            "x-tts-continuity-qualification": "experimental-unqualified",
         }
         mismatches = [
             f"{name}={upstream_response.headers.get(name)!r}"
@@ -3591,6 +3685,12 @@ def create_webui_app(
             if not isinstance(expected, str)
             or upstream_response.headers.get(name) != expected
         ]
+        qualification = upstream_response.headers.get("x-tts-continuity-qualification")
+        policy = upstream_response.headers.get("x-tts-session-context-policy")
+        if qualification not in {"qualified-policy-a", "experimental-unqualified"} or (
+            qualification == "qualified-policy-a" and policy != "A"
+        ):
+            mismatches.append(f"x-tts-continuity-qualification={qualification!r}")
         if mismatches:
             await owner.aclose()
             return JSONResponse(
@@ -3652,6 +3752,7 @@ def create_webui_app(
                 "X-Upstream-TTFA-Ms": f"{upstream_ttfa_ms:.3f}",
                 "X-TTS-Session-Context-Policy": context_policy,
                 "X-TTS-Neural-State-Continuity": neural_continuity,
+                "X-TTS-Continuity-Qualification": qualification,
                 "Cache-Control": "no-store",
                 "X-Accel-Buffering": "no",
             }
@@ -3675,6 +3776,7 @@ def create_webui_app(
             model = body.get("model")
             expression_prompt = body.get("expression_prompt")
             generation = _validated_generation(body.get("generation"))
+            voice_profile = _webui_voice(body.get("voice_profile"), request.app.state.status)
             if (text is None) == (raw_segments is None):
                 raise WebUIError("Exactly one of text or segments must be provided")
             if raw_segments is not None and expression_prompt is not None:
@@ -3691,6 +3793,8 @@ def create_webui_app(
             if model not in known_models:
                 raise WebUIError("model is not available locally")
             expression_metadata = request.app.state.status.get("expressions", {})
+            if request.app.state.status.get('voices') is not None:
+                expression_metadata = await _read_expression_metadata(request.app.state.client, voice_profile)
             if raw_segments is not None:
                 upstream_segments, resolved_items, text = _resolve_webui_segments(
                     raw_segments,
@@ -3718,6 +3822,7 @@ def create_webui_app(
             model=model,
             expression=resolved,
             generation=generation,
+            voice_profile=voice_profile,
         )
         lock: asyncio.Lock = request.app.state.speech_lock
         if lock.locked():
@@ -3730,6 +3835,8 @@ def create_webui_app(
         started = time.perf_counter()
         busy_deadline = started + 1.5
         try:
+            await _prepare_webui_voice(request.app.state.client, voice_profile, request.app.state.status,
+                                       resolved_items, expression_metadata)
             cancellation_sent = False
             while True:
                 upstream_response = await request.app.state.client.send(
@@ -3759,6 +3866,9 @@ def create_webui_app(
             lock.release()
             LOGGER.warning("Speech request failed: %s", error)
             return _json_error(f"{surface_name} upstream connection failed", 502)
+        except WebUIError as error:
+            lock.release()
+            return _json_error(str(error), 409)
         owner = _UpstreamSpeechOwner(
             app=app,
             response=upstream_response,
@@ -3786,13 +3896,8 @@ def create_webui_app(
 
         upstream_ttfa_ms = (time.perf_counter() - started) * 1000.0
         required = {
-            "x-tensorrt-backend": EXPECTED_BACKEND,
-            "x-tensorrt-engine-count": str(EXPECTED_ENGINE_COUNT),
-            "x-pytorch-fallback": "false",
+            **_stream_header_contract(request.app.state.status),
             "x-tts-model": model,
-            "x-tts-stream": "pcm_s16le",
-            "x-tts-sample-rate": str(EXPECTED_SAMPLE_RATE),
-            "x-tts-channels": "1",
         }
         mismatches = [
             f"{name}={upstream_response.headers.get(name)!r}"

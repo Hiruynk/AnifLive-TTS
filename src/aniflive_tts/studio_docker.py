@@ -108,7 +108,7 @@ def launch(args) -> dict:
     local_data = local / args.data_directory
     data = host + "/" + args.data_directory
     state = data + "/workstation"
-    for relative in ("workstation", "models", "shared", "cache", "imports", "private"):
+    for relative in ("workstation", "models", "shared", "cache", "voices", "imports", "private"):
         (local_data / relative).mkdir(parents=True, exist_ok=True)
     studio_image = digest_image(args.studio_image)
     worker_image = digest_image(args.worker_image)
@@ -192,6 +192,7 @@ def launch(args) -> dict:
         "--mount", f"type=bind,source={data}/models,target=/data/models,readonly",
         "--mount", f"type=bind,source={data}/shared,target=/data/shared,readonly",
         "--mount", f"type=bind,source={data}/cache,target=/data/cache",
+        "--mount", f"type=bind,source={data}/voices,target=/data/voices",
         "--mount", f"type=bind,source={data}/private/runtime-control.token,target=/runtime-control.token,readonly",
         "-e", "ANIFLIVE_TTS_WORKSTATION_DIR=/data/workstation",
         "-e", "ANIFLIVE_TTS_MODEL_PACKAGE=/data/models/active",
@@ -225,9 +226,9 @@ def main():
     parser.add_argument("--project-root", type=Path, default=Path("/workspace"))
     parser.add_argument("--host-project-root", required=True)
     parser.add_argument("--data-directory", default="data")
-    parser.add_argument("--studio-image", default="aniflive-tts-studio:1.5.0-beta.1-cu128")
-    parser.add_argument("--worker-image", default="aniflive-tts-workstation-worker:1.5.0-beta.1-cu128")
-    parser.add_argument("--runtime-image", default="aniflive-tts:1.5.0-beta.1-cu128")
+    parser.add_argument("--studio-image", default="aniflive-tts-studio:1.5.0-cu128")
+    parser.add_argument("--worker-image", default="aniflive-tts-workstation-worker:1.5.0-cu128")
+    parser.add_argument("--runtime-image", default="aniflive-tts:1.5.0-cu128")
     parser.add_argument("--port", type=int, default=9891)
     parser.add_argument("--api-port", type=int, default=9882)
     parser.add_argument("--json", action="store_true")

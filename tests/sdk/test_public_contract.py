@@ -57,13 +57,13 @@ def test_python_and_rust_package_versions_match() -> None:
 def test_server_advertised_version_matches_package_without_importing_runtime() -> None:
     import aniflive_tts
 
-    tree = ast.parse((SOURCE_PACKAGE / "service.py").read_text())
+    tree = ast.parse((SOURCE_PACKAGE / "service.py").read_text(encoding="utf-8"))
     versions = [ast.literal_eval(node.value) for node in tree.body
                 if isinstance(node, ast.Assign) and any(
                     isinstance(target, ast.Name) and target.id == "SERVICE_VERSION"
                     for target in node.targets)]
     assert versions == [aniflive_tts.__version__]
-    tree = ast.parse((SOURCE_PACKAGE / "webui.py").read_text())
+    tree = ast.parse((SOURCE_PACKAGE / "webui.py").read_text(encoding="utf-8"))
     versions = [ast.literal_eval(keyword.value) for node in ast.walk(tree)
                 if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
                 and node.func.id == "FastAPI" for keyword in node.keywords

@@ -6,6 +6,8 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 RUN python3 -m venv /opt/sdk-build \
     && /opt/sdk-build/bin/python -m pip install --no-cache-dir \
+       "pip @ https://files.pythonhosted.org/packages/3f/06/3e4420302363fbb71be3c7f35ce042f54bfca330e3e66b3a2e3c4cca579f/pip-26.2.2-py3-none-any.whl#sha256=fd7f4dfa8190e014013b9f08f3e973f4e4c26ffd179a204895533a7254813a70" \
+    && /opt/sdk-build/bin/python -m pip install --no-cache-dir \
        setuptools==84.0.0 wheel==0.48.0 setuptools-rust==1.13.0
 ENV PYO3_PYTHON=/opt/sdk-build/bin/python
 WORKDIR /sdk
@@ -19,10 +21,14 @@ RUN --mount=type=cache,id=aniflive-sdk-cargo-registry,target=/usr/local/cargo/re
 
 FROM ${BASE_IMAGE}
 
-ARG VERSION=1.5.0-beta.1
+ARG VERSION=1.5.0
+ARG VCS_REF=unknown
+ARG BUILD_DATE=unknown
 LABEL org.opencontainers.image.version="${VERSION}" \
       org.opencontainers.image.licenses="PolyForm-Noncommercial-1.0.0" \
-      org.opencontainers.image.source="https://github.com/Hiruynk/AnifLive-TTS"
+      org.opencontainers.image.source="https://github.com/Hiruynk/AnifLive-TTS" \
+      org.opencontainers.image.revision="${VCS_REF}" \
+      org.opencontainers.image.created="${BUILD_DATE}"
 
 # Development-only source overlay. The explicit v1.3 production base is the
 # immutable golden runtime; the resulting image is labeled with the requested release version.
@@ -32,10 +38,10 @@ LABEL org.opencontainers.image.version="${VERSION}" \
 COPY --from=sdk-wheel /wheels/ /tmp/aniflive-sdk-wheels/
 RUN python -m pip install --no-deps --force-reinstall /tmp/aniflive-sdk-wheels/*.whl \
     && rm -rf /tmp/aniflive-sdk-wheels
+COPY src /app/src
+COPY pyproject.toml README.md LICENSE LICENSING.md THIRD_PARTY_NOTICES.md /app/
+COPY licenses /app/licenses
 COPY webui /app/webui
-COPY scripts/build_gpt_step_short.py /app/scripts/build_gpt_step_short.py
-COPY minimal_inference/export_onnx.py /app/minimal_inference/export_onnx.py
-COPY minimal_inference/onnx_to_fp16.py /app/minimal_inference/onnx_to_fp16.py
-COPY minimal_inference/run_trt_inference.py /app/minimal_inference/run_trt_inference.py
-COPY minimal_inference/GPT_SoVITS/process_ckpt.py /app/minimal_inference/GPT_SoVITS/process_ckpt.py
-COPY minimal_inference/GPT_SoVITS/module/models.py /app/minimal_inference/GPT_SoVITS/module/models.py
+COPY scripts /app/scripts
+COPY minimal_inference /app/minimal_inference
+RUN chmod 0755 /app/scripts/entrypoint.sh

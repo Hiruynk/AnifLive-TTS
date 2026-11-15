@@ -1,0 +1,22 @@
+{
+  "_template_only": true,
+  "_notice": "Illustrative only: supply an authorized converted model package and generate its complete checksums.json. A shared base contains no fixed voice or reference.",
+  "format": "aniflive-tts-model-package",
+  "schema": 1,
+  "model_id": "replace-with-a-model-id",
+  "model_family": "gsv-v5turbo",
+  "precision": "FP16",
+  "reference_mode": "dynamic",
+  "voice_profiles": [],
+  "default_voice_profile": null,
+  "native_runtime": {
+    "worker_binary": "native/bin/aniflive-macos-v5turbo",
+    "models_dir": "native/models",
+    "metal_library": "native/lib"
+  },
+  "qualification": "not-assessed",
+  "sample_rate": 48000,
+  "cfm_steps": 4,
+  "cfg_rate": 0.0,
+  "native_mandarin": false
+}

@@ -39,7 +39,30 @@ pub(crate) fn metadata(headers: &HeaderMap) -> Result<SynthesisMetadata, ClientE
         sample_rate,
         model: safe.get("x-tts-model").cloned(),
         service_version: safe.get("x-tts-version").cloned(),
-        backend: safe.get("x-tensorrt-backend").cloned(),
+        backend: safe
+            .get("x-tts-backend")
+            .or_else(|| safe.get("x-tensorrt-backend"))
+            .cloned(),
         headers: safe,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use reqwest::header::HeaderValue;
+
+    #[test]
+    fn backend_metadata_supports_metal_cuda_and_legacy_tensorrt() {
+        for (header, value) in [
+            ("x-tts-backend", "MLX-Metal"),
+            ("x-tts-backend", "hybrid-cuda"),
+            ("x-tensorrt-backend", "TensorRT-11"),
+        ] {
+            let mut headers = HeaderMap::new();
+            headers.insert(header, HeaderValue::from_static(value));
+            headers.insert("x-tts-sample-rate", HeaderValue::from_static("48000"));
+            assert_eq!(metadata(&headers).unwrap().backend.as_deref(), Some(value));
+        }
+    }
 }

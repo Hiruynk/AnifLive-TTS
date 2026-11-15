@@ -68,6 +68,7 @@ class RequiredFeature(_StringEnum):
     PCM_STREAMING = "pcm_streaming"
     EXPRESSIONS = "expressions"
     SPEECH_SESSIONS = "speech_sessions"
+    VOICE_MANAGEMENT = "voice_management"
 
 
 @dataclass(frozen=True, slots=True)
@@ -298,6 +299,7 @@ class Capabilities:
     warm_retention_seconds: float | None = None
     speech_sessions: SessionCapabilities | None = None
     extra: Mapping[str, Any] = field(default_factory=dict, repr=False)
+    voice_management: VoiceManagementCapabilities | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "languages", _freeze_sequence(self.languages))
@@ -352,6 +354,11 @@ class VoiceInfo:
     reference_language: str
     reference_configured: bool
     extra: Mapping[str, Any] = field(default_factory=dict, repr=False)
+    name: str | None = None
+    default_reference_id: str | None = None
+    ready: bool = False
+    reference_count: int = 0
+    source: str | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "extra", _freeze_extra(self.extra))
@@ -599,3 +606,104 @@ __all__ = [
     "StreamingCapabilities",
     "VoiceInfo",
 ]
+
+
+class TranscriptSource(_StringEnum):
+    MANUAL = "manual"
+    ASR = "asr"
+    IMPORTED = "imported"
+
+
+@dataclass(frozen=True, slots=True)
+class VoiceManagementCapabilities:
+    crud: bool = False
+    reference_upload: bool = False
+    reference_prepare: bool = False
+    persistent: bool = False
+    transcript_required: bool = False
+    reference_seconds: Mapping[str, Any] | None = field(default=None, repr=False)
+    extra: Mapping[str, Any] = field(default_factory=dict, repr=False)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "extra", _freeze_extra(self.extra))
+        if self.reference_seconds is not None:
+            object.__setattr__(self, "reference_seconds", _freeze_mapping(self.reference_seconds))
+
+
+@dataclass(frozen=True, slots=True)
+class VoiceCreate:
+    name: str
+    id: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class VoiceUpdate:
+    name: str
+
+
+@dataclass(frozen=True, slots=True)
+class ReferenceCreate:
+    reference_language: Language | str
+    transcript: str = field(default="", repr=False)
+    id: str | None = None
+    emotion_id: str | None = None
+    emotion_label: str = "Neutral"
+    intensity: float = 0.5
+    transcript_source: TranscriptSource | str = TranscriptSource.MANUAL
+    transcript_provider: str | None = None
+    transcript_confirmed: bool = False
+    is_default: bool = False
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "reference_language", Language(self.reference_language))
+        object.__setattr__(self, "transcript_source", TranscriptSource(self.transcript_source))
+
+
+@dataclass(frozen=True, slots=True)
+class ReferenceUpdate:
+    reference_language: Language | str | None = None
+    transcript: str | None = field(default=None, repr=False)
+    emotion_id: str | None = None
+    emotion_label: str | None = None
+    intensity: float | None = None
+    transcript_source: TranscriptSource | str | None = None
+    transcript_provider: str | None = None
+    transcript_confirmed: bool | None = None
+    is_default: bool | None = None
+
+    def __post_init__(self) -> None:
+        if self.reference_language is not None:
+            object.__setattr__(self, "reference_language", Language(self.reference_language))
+        if self.transcript_source is not None:
+            object.__setattr__(self, "transcript_source", TranscriptSource(self.transcript_source))
+
+
+@dataclass(frozen=True, slots=True)
+class ReferenceInfo:
+    id: str
+    voice_id: str
+    emotion_id: str
+    emotion_label: str
+    intensity: float
+    reference_language: str
+    transcript: str = field(repr=False)
+    transcript_source: str
+    transcript_confirmed: bool
+    is_default: bool
+    duration_seconds: float
+    audio_sha256: str
+    revision: int
+    conditioning_revision: int
+    prepare_state: str
+    created_at: str
+    updated_at: str
+    transcript_provider: str | None = None
+    error_code: str | None = None
+    extra: Mapping[str, Any] = field(default_factory=dict, repr=False)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "extra", _freeze_extra(self.extra))
+
+
+__all__ += ["VoiceCreate", "VoiceUpdate", "ReferenceCreate", "ReferenceUpdate", "ReferenceInfo",
+            "TranscriptSource", "VoiceManagementCapabilities"]

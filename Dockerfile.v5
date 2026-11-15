@@ -1,0 +1,25 @@
+# Build the base image with Dockerfile first. Reusing that image avoids a second
+# CUDA/PyTorch installation; this profile adds the pinned V5 dependencies.
+ARG ANIFLIVE_BASE_IMAGE=aniflive-tts:1.5.0-cu128
+FROM ${ANIFLIVE_BASE_IMAGE}
+ARG VCS_REF=unknown
+LABEL org.opencontainers.image.description="GPT-SoVITS v2ProPlus/v5Turbo multilingual TTS · CUDA／TensorRT（Docker）"
+LABEL org.opencontainers.image.vendor="Hiruynk"
+LABEL org.opencontainers.image.revision="${VCS_REF}"
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends --only-upgrade apt libapt-pkg6.0t64 linux-libc-dev \
+    && apt-get purge -y python3-pip python3-wheel python3-setuptools \
+    && rm -rf /var/lib/apt/lists/*
+COPY requirements/v5-cu128.txt /tmp/requirements/v5-cu128.txt
+COPY scripts/v5_transformers_security.py /tmp/v5_transformers_security.py
+RUN python -m pip install --no-cache-dir -r /tmp/requirements/v5-cu128.txt \
+    && python /tmp/v5_transformers_security.py \
+    && python -m pip check \
+    && python -c 'import importlib.util, torch, torchaudio, tensorrt, transformers; assert torch.__version__ == torchaudio.__version__ == "2.10.0+cu128"; assert tensorrt.__version__ == "11.2.1.2"; assert transformers.__version__ == "4.57.6"; assert all(importlib.util.find_spec(n) is None for n in ("distance", "chardet", "eunjeon", "g2p_en")); from x_transformers import Encoder; from pytorch_lightning import LightningModule; from peft import LoraConfig'
+COPY src /app/src
+COPY scripts /app/scripts
+COPY minimal_inference /app/minimal_inference
+COPY README.md LICENSE LICENSING.md THIRD_PARTY_NOTICES.md /app/
+COPY licenses /app/licenses
+RUN rm -rf /app/src/aniflive_tts.egg-info
+ENV PYTHONPATH=/opt/venv/lib/python3.12/site-packages TORCH_CUDNN_V8_API_LRU_CACHE_LIMIT=64

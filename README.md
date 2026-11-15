@@ -4,13 +4,14 @@
 
 # AnifLive-TTS
 
-**A low-latency, high-quality multilingual voice-cloning TTS runtime with first-class Cantonese support**
+**A self-hosted, low-latency, high-quality multilingual voice-cloning TTS runtime**
 
-[![Release](https://img.shields.io/badge/release-v1.5.0--beta-2563eb?style=flat-square)](RELEASE_NOTES_v1.5.0-beta.md)
-[![TensorRT](https://img.shields.io/badge/TensorRT-11.2.1.2-76b900?style=flat-square&logo=nvidia)](https://docs.nvidia.com/deeplearning/tensorrt/)
+[![Release](https://img.shields.io/badge/release-v1.5.0-6b2742?style=flat-square)](RELEASE_NOTES_v1.5.0.md)
+[![GPT-SoVITS v2ProPlus/v5Turbo](https://img.shields.io/badge/GPT--SoVITS-v2ProPlus%2Fv5Turbo-ee8532?style=flat-square)](https://github.com/RVC-Boss/GPT-SoVITS)
 [![CUDA](https://img.shields.io/badge/CUDA-12.8-76b900?style=flat-square&logo=nvidia)](https://developer.nvidia.com/cuda-toolkit)
-[![Model](https://img.shields.io/badge/GPT--SoVITS-V2ProPlus-0f766e?style=flat-square)](https://github.com/RVC-Boss/GPT-SoVITS)
-[![License](https://img.shields.io/badge/license-PolyForm_Noncommercial_1.0.0-22c55e?style=flat-square)](LICENSING.md)
+[![TensorRT](https://img.shields.io/badge/TensorRT-11.2.1.2-76b900?style=flat-square&logo=nvidia)](https://docs.nvidia.com/deeplearning/tensorrt/)
+[![macOS](https://img.shields.io/badge/macOS-Apple_Silicon-4e4d75?style=flat-square&logo=apple)](docs/MACOS_INSTALLATION_EN.md)
+[![License](https://img.shields.io/badge/license-PolyForm_Noncommercial_1.0.0-057ebb?style=flat-square)](LICENSING.md)
 
 [繁體中文](README_ZH_HK.md) · **English** · [简体中文](README_ZH_CN.md)
 
@@ -18,30 +19,35 @@
 
 ## About the Project
 
-AnifLive-TTS is the first-party TTS for AnifEngine-Voice, born from a practical need: while developing AnifEngine-Voice, I could not find a TTS solution that combined **Cantonese**, **low latency**, **high audio quality**, and self-hosted control. 😮‍💨
+AnifLive-TTS grew from a practical need: I wanted a multilingual TTS solution combining **low latency**, **high audio quality**, and self-hosted control. 😮‍💨
 
 I therefore chose GPT-SoVITS as the foundation, reworked its inference internals, and made **low latency** and **high audio quality** the core goals of AnifLive-TTS. 🤓👆
 
-v1 launches with complete V2ProPlus support; future releases will extend the same API and model-package contract to more GPT-SoVITS model generations.
+The project now supports GPT-SoVITS v2ProPlus and v5Turbo through a shared API and model-package workflow.
 
 ## Highlights
 
-- All nine neural stages use TensorRT 11 `execute_async_v3()`.
+- **v2ProPlus:** all nine neural stages use TensorRT 11 `execute_async_v3()`.
+- **v5Turbo:** CUDA/TensorRT on Windows and native Rust/MLX/Metal on Apple Silicon, with 48 kHz output and four-step CFM.
 - Putonghua/Mandarin (`zh`), Cantonese (`yue`), English (`en`), Japanese (`ja`), and Korean (`ko`), plus GPT-SoVITS flat and OpenAI-compatible adapters.
-- Supports GPT-SoVITS V2ProPlus voice-cloning models, packaging custom GPT/SoVITS checkpoints and reference audio as independent voice profiles.
+- Supports GPT-SoVITS v2ProPlus voice-cloning models, packaging custom GPT/SoVITS checkpoints and reference audio as independent voice profiles.
 - Complete mono PCM16 WAV and low-latency PCM16 streaming share one runtime.
-- Package-curated expression profiles support global and per-segment delivery without changing the V2ProPlus neural architecture.
+- Package-curated expression profiles support global and per-segment delivery without changing the v2ProPlus neural architecture.
 - A local five-language WebUI provides model switching, natural-language expression selection, streaming playback, and live latency metrics.
-- One-command V2ProPlus inspection, ONNX export, FP16 conversion, engine build, enqueue validation, and package publication in v1.
+- One-command v2ProPlus inspection, ONNX export, FP16 conversion, engine build, enqueue validation, and package publication in v1.
 - Models and engines are prepared before service startup, keeping the `serve` hot path fully offline.
 
-## Roxy Migurdia from *Mushoku Tensei: Jobless Reincarnation*: V2ProPlus Cantonese Demo
+## Roxy Migurdia from *Mushoku Tensei: Jobless Reincarnation*: v2ProPlus Cantonese Demo
 
 https://github.com/user-attachments/assets/0be5a03d-94a9-4d33-b05f-6bae6fb3cc40
 
 The local WebUI shown in the demo is included in v1.3 and starts with `run_webui.bat` after the API is ready.
 
 ## Performance Benchmarks
+
+For v1.5, the matched-input keep-alive audible TTFA P50/P95 was **75.70/99.37 ms** for v2ProPlus and **80.93/84.33 ms** for v5Turbo on Windows with an RTX 5070 Ti; v5Turbo on a Mac Studio M5 Max measured **404.69/410.78 ms**. See [Benchmarks](docs/BENCHMARKS.md) for the protocol and full results.
+
+The following v1.3 historical benchmark uses the Roxy workload.
 
 > [!NOTE]
 > **Environment:** RTX 5070 Ti 16 GB / driver 596.36 / CUDA runtime 12.8 /
@@ -80,7 +86,7 @@ Run it against an existing local API:
 
 ```powershell
 .\.venv\Scripts\python.exe .\scripts\benchmark_readme.py `
-  --host 127.0.0.1 --port 9881 --locale en `
+  --host 127.0.0.1 --port 9880 --locale en `
   --model roxy-v2proplus `
   --report .\reports\benchmark.json `
   --markdown .\reports\benchmark.md
@@ -96,52 +102,56 @@ docker exec aniflive-tts /app/scripts/entrypoint.sh benchmark `
   --markdown /data/reports/benchmark.md
 ```
 
-Defaults are 10 sessions per model, 10 warm-up requests per session, 100 complete-WAV requests, 100 new-connection streaming requests, and 100 keep-alive streaming requests. The release table uses only `roxy-v2proplus`; every workload runs at concurrency 1.
+Defaults are 10 sessions per model, 10 warm-up requests per session, 100 complete-WAV requests, 100 new-connection streaming requests, and 100 keep-alive streaming requests. The release table used only `roxy-v2proplus`; every workload runs at concurrency 1.
 
 ### GPT-SoVITS Performance Comparison
-
+The values below retain their original measurement types and hardware; the cited sources use different protocols.
 #### First-output latency (lower is faster)
-
-| Repository / system | Metric | Latency | Test conditions | Source |
+| System | Metric | First output | Test conditions | Source |
 |---|---|---:|---|---|
-| **AnifLive-TTS v1.3** | **Audible TTFA P50** | **74.578 ms** 🚀 | **RTX 5070 Ti; persistent HTTP/1.1; 10 Roxy sessions** | **[Local measurement](benchmarks/README_BENCHMARK_SUMMARY.json)** |
+| AnifLive-TTS v1.3 (historical) | Audible TTFA P50 | 74.578 ms | RTX 5070 Ti; persistent HTTP/1.1; 10 Roxy sessions | [Historical local measurement](benchmarks/README_BENCHMARK_SUMMARY.json) |
+| AnifLive-TTS v1.5 v2ProPlus | Audible TTFA P50 | 75.70 ms | Windows; RTX 5070 Ti; TensorRT 11 FP16; keep-alive PCM; 10 sessions | [v1.5 local measurement](benchmarks/V1_5_BENCHMARK_SUMMARY.json) |
+| AnifLive-TTS v1.5 v5Turbo | Audible TTFA P50 | 80.93 ms | Windows; RTX 5070 Ti; TensorRT 11 / Triton FP16; keep-alive PCM; 10 sessions | [v1.5 local measurement](benchmarks/V1_5_BENCHMARK_SUMMARY.json) |
+| gsv.cpp v0.1.3 · v5Turbo | Audible TTFA P50 | 354.45 ms | RTX 5070 Ti; Vulkan; keep-alive PCM; 3-session exploratory run | [v1.5 local measurement](benchmarks/V1_5_BENCHMARK_SUMMARY.json) |
+| AnifLive-TTS v1.5 v5Turbo (M5 Max) | Audible TTFA P50 | 404.69 ms | Mac Studio M5 Max; macOS 27.0; Rust / MLX / Metal FP16; keep-alive PCM; 10 sessions | [v1.5 local measurement](benchmarks/V1_5_BENCHMARK_SUMMARY.json) |
 | GPT-SoVITS C++ TRT Stream | First packet | 460 ms | RTX 2080 Ti 22 GB | [GPT-SoVITS C++](https://github.com/GPT-SoVITS-Devel/GPT-SoVITS-cpp#-performance-benchmarks) |
 | GPT-SoVITS Minimal Inference ONNX Stream | First token | 1,000 ms | RTX 2080 Ti 22 GB; FP16 | [Minimal Inference](https://github.com/GPT-SoVITS-Devel/GPT-SoVITS_minimal_inference#-performance-benchmarks) |
 | GPT-SoVITS Minimal Inference TRT fitted | First token | 2,022 ms | RTX 2080 Ti 22 GB; FP16 | [Minimal Inference](https://github.com/GPT-SoVITS-Devel/GPT-SoVITS_minimal_inference#-performance-benchmarks) |
 
 #### RTF (lower is faster)
-
-| Repository / system | RTF | Backend | Test conditions | Source |
+| System | RTF | Backend / model | Test conditions | Source |
 |---|---:|---|---|---|
-| GPT-SoVITS V2ProPlus | 0.014 | PyTorch parallel inference | RTX 4090; about four minutes of output | [RVC-Boss/GPT-SoVITS](https://github.com/RVC-Boss/GPT-SoVITS#features) |
-| GPT-SoVITS V2ProPlus | 0.028 | PyTorch parallel inference | RTX 4060 Ti | [RVC-Boss/GPT-SoVITS](https://github.com/RVC-Boss/GPT-SoVITS#features) |
-| **AnifLive-TTS v1.3** | **0.087680** | **TensorRT 11 FP16** | **RTX 5070 Ti; 10 Roxy sessions** | **[Local measurement](benchmarks/README_BENCHMARK_SUMMARY.json)** |
+| GPT-SoVITS v2ProPlus | 0.014 | PyTorch parallel inference | RTX 4090; about four minutes of output | [RVC-Boss/GPT-SoVITS](https://github.com/RVC-Boss/GPT-SoVITS#features) |
+| GPT-SoVITS v2ProPlus | 0.028 | PyTorch parallel inference | RTX 4060 Ti | [RVC-Boss/GPT-SoVITS](https://github.com/RVC-Boss/GPT-SoVITS#features) |
+| AnifLive-TTS v1.5 v5Turbo | 0.04728 | TensorRT 11 / Triton FP16 | Windows; RTX 5070 Ti; keep-alive PCM; 10 sessions | [v1.5 local measurement](benchmarks/V1_5_BENCHMARK_SUMMARY.json) |
+| AnifLive-TTS v1.3 (historical) | 0.087680 | TensorRT 11 FP16 | RTX 5070 Ti; 10 Roxy sessions | [Historical local measurement](benchmarks/README_BENCHMARK_SUMMARY.json) |
+| AnifLive-TTS v1.5 v2ProPlus | 0.09483 | TensorRT 11 FP16 | Windows; RTX 5070 Ti; keep-alive PCM; 10 sessions | [v1.5 local measurement](benchmarks/V1_5_BENCHMARK_SUMMARY.json) |
 | GPT-SoVITS C++ TRT | 0.1020 | TensorRT | RTX 2080 Ti 22 GB | [GPT-SoVITS C++](https://github.com/GPT-SoVITS-Devel/GPT-SoVITS-cpp#-performance-benchmarks) |
+| gsv.cpp v0.1.3 · v5Turbo | 0.11197 | Vulkan; F16 AR / F32 vocoder | RTX 5070 Ti; 3-session exploratory run | [v1.5 local measurement](benchmarks/V1_5_BENCHMARK_SUMMARY.json) |
 | GPT-SoVITS Minimal Inference TRT fitted | 0.2096 | TensorRT fitted | RTX 2080 Ti 22 GB; FP16 | [Minimal Inference](https://github.com/GPT-SoVITS-Devel/GPT-SoVITS_minimal_inference#-performance-benchmarks) |
+| AnifLive-TTS v1.5 v5Turbo (M5 Max) | 0.32357 | Rust / MLX / Metal FP16 | Mac Studio M5 Max; macOS 27.0; keep-alive PCM; 10 sessions | [v1.5 local measurement](benchmarks/V1_5_BENCHMARK_SUMMARY.json) |
 
 ### Public Performance Data from Other Open-Source TTS Systems
-
-This is not a controlled benchmark. Except for AnifLive-TTS, every value is reported by its cited source. GPU, model capabilities, input, first-packet size, concurrency, and measurement protocol differ. The tables index public values for matching metrics and do not represent a same-condition ranking.
-
+The values below retain their original measurement types and hardware; the cited sources use different protocols.
 #### First-audio latency (lower is faster)
-
-| System | Metric | Latency | Statistic | Test conditions | Source |
+| System | First-audio metric | First audio | Statistic | Test conditions | Source |
 |---|---|---:|---|---|---|
-| **AnifLive-TTS v1.3** | **Audible TTFA** | **74.578 ms** 🚀 | **P50** | **RTX 5070 Ti; persistent HTTP/1.1; 10 Roxy sessions** | **[Local measurement](benchmarks/README_BENCHMARK_SUMMARY.json)** |
+| AnifLive-TTS v1.3 (historical) | Audible TTFA | 74.578 ms | P50 | RTX 5070 Ti; persistent HTTP/1.1; 10 Roxy sessions | [Historical local measurement](benchmarks/README_BENCHMARK_SUMMARY.json) |
+| AnifLive-TTS v1.5 v2ProPlus | Audible TTFA | 75.70 ms | P50 | Windows; RTX 5070 Ti; keep-alive PCM; 10 sessions | [v1.5 local measurement](benchmarks/V1_5_BENCHMARK_SUMMARY.json) |
+| AnifLive-TTS v1.5 v5Turbo | Audible TTFA | 80.93 ms | P50 | Windows; RTX 5070 Ti; keep-alive PCM; 10 sessions | [v1.5 local measurement](benchmarks/V1_5_BENCHMARK_SUMMARY.json) |
 | Qwen3-TTS-12Hz-0.6B | First-packet latency | 97 ms | Concurrency 1 | Single accelerator; 320 ms speech packet | [Qwen3-TTS Technical Report](https://arxiv.org/abs/2601.15621) |
 | Fish Audio S2 | TTFA | About 100 ms | Project-published value | H200; single GPU | [Fish Audio S2](https://github.com/fishaudio/fish-speech#performance) |
 | Chatterbox-Flash (D=32, α=0.75) | TTFP | 103 ms | Concurrency 1; 50 utterances | H100 | [Chatterbox-Flash paper](https://arxiv.org/abs/2605.30748) |
 | Chatterbox-Flash (default D=16, α=0.5) | TTFP | 118 ms | Concurrency 1; 50 utterances | H100 | [Chatterbox-Flash paper](https://arxiv.org/abs/2605.30748) |
 | CosyVoice2 | First chunk | 196.13 ms | P50 | L20; concurrency 1; client-server | [QwenAudio/CosyVoice](https://github.com/QwenAudio/CosyVoice/blob/main/runtime/triton_trtllm/README.Cosyvoice2.DiT.md#benchmark-with-client-server-mode) |
 
-IndexTTS 2.0/2.5 and VoxCPM2 do not publish first-audio latency under a comparable protocol.
-
 #### RTF (lower is faster)
-
 | System | RTF | Runtime / model | Test conditions | Source |
 |---|---:|---|---|---|
+| AnifLive-TTS v1.5 v5Turbo | 0.04728 | TensorRT 11 / Triton FP16 | Windows; RTX 5070 Ti; 10 sessions | [v1.5 local measurement](benchmarks/V1_5_BENCHMARK_SUMMARY.json) |
 | Chatterbox-Flash (D=32, α=0.75) | 0.076 | Block diffusion | H100; concurrency 1; 50 utterances | [Chatterbox-Flash paper](https://arxiv.org/abs/2605.30748) |
-| **AnifLive-TTS v1.3** | **0.087680** | **TensorRT 11 FP16** | **RTX 5070 Ti; 10 Roxy sessions** | **[Local measurement](benchmarks/README_BENCHMARK_SUMMARY.json)** |
+| AnifLive-TTS v1.3 (historical) | 0.087680 | TensorRT 11 FP16 | RTX 5070 Ti; 10 Roxy sessions | [Historical local measurement](benchmarks/README_BENCHMARK_SUMMARY.json) |
+| AnifLive-TTS v1.5 v2ProPlus | 0.09483 | TensorRT 11 FP16 | Windows; RTX 5070 Ti; 10 sessions | [v1.5 local measurement](benchmarks/V1_5_BENCHMARK_SUMMARY.json) |
 | Chatterbox-Flash (default D=16, α=0.5) | 0.107 | Block diffusion | H100; concurrency 1; 50 utterances | [Chatterbox-Flash paper](https://arxiv.org/abs/2605.30748) |
 | CosyVoice3 | 0.1091 | TRT-LLM; offline batch 1 | L20 | [QwenAudio/CosyVoice](https://github.com/QwenAudio/CosyVoice/blob/main/runtime/triton_trtllm/README.Cosyvoice3.md#benchmark-with-offline-inference-mode) |
 | CosyVoice2 | 0.1228 | TRT-LLM | L20; concurrency 1; client-server | [QwenAudio/CosyVoice](https://github.com/QwenAudio/CosyVoice/blob/main/runtime/triton_trtllm/README.Cosyvoice2.DiT.md#benchmark-with-client-server-mode) |
@@ -151,7 +161,6 @@ IndexTTS 2.0/2.5 and VoxCPM2 do not publish first-audio latency under a comparab
 | Qwen3-TTS-12Hz-0.6B | 0.288 | vLLM V0; concurrency 1 | Single accelerator; CUDA Graph | [Qwen3-TTS Technical Report](https://arxiv.org/abs/2601.15621) |
 | IndexTTS 2.0 | 0.3257 | 2.0 FP16; KV cache | RTX 4090; overall | [index-tts/index-tts](https://github.com/index-tts/index-tts#-inference-speed) |
 
-AnifLive-TTS pre-packages voice profiles and reference conditioning for persistent local voice-cloning services. Users can rebuild TensorRT engines on the target GPU and verify quality through reproducible tests.
 
 ## Deterministic Quality Preservation
 
@@ -160,8 +169,8 @@ AnifLive-TTS pre-packages voice profiles and reference conditioning for persiste
 
 | Voice package | Japanese expression rows | Minimum log-mel | Minimum speaker cosine | Maximum duration difference | Underruns |
 |---|---:|---:|---:|---:|---:|
-| Miku V2ProPlus | 18/18 | 0.999454 | 0.989519 | 0.302% | 0 |
-| Roxy V2ProPlus | 18/18 | 0.994325 | 0.987721 | 0.300% | 0 |
+| Miku v2ProPlus | 18/18 | 0.999454 | 0.989519 | 0.302% | 0 |
+| Roxy v2ProPlus | 18/18 | 0.994325 | 0.987721 | 0.300% | 0 |
 
 These rows describe private local validation overlays only. Their expression
 references, transcripts, and character media are not included in the public
@@ -212,7 +221,7 @@ the [v1.2 semantic experiment record](docs/research/v1.2-semantic-experiments.md
 | FastStart distilled/pruned Transformer | Continuation and refill reliability gates were not met | Not adopted |
 | D16 block diffusion | The evaluated low-rank adaptation did not pass the semantic-quality gate | Not adopted |
 
-These decisions apply to the evaluated AnifLive-TTS V2ProPlus workload, not to every possible implementation of the candidate architectures. See the [v1.3 latency experiment record](docs/research/v1.3-latency-experiments.md) and [expression design record](docs/research/v1.3-reference-expression-design.md).
+See the [v1.3 latency experiment record](docs/research/v1.3-latency-experiments.md) and [expression design record](docs/research/v1.3-reference-expression-design.md).
 
 ## Studio Added in v1.4
 
@@ -226,7 +235,7 @@ Studio adds dataset preparation and review, training, checkpoint continuation, T
 
 For step-by-step instructions, see the [Studio user guide](docs/ANIFLIVE_TTS_STUDIO_GUIDE.md).
 
-## Python SDK Added in v1.5.0-beta
+## Python SDK Added in v1.5-beta
 
 The official Rust-backed Python SDK provides sync/async discovery, WAV synthesis, incremental PCM streaming, expressions, and speech sessions. Install the supplied wheel for your platform and connect to the existing API; no local model or GPU is needed by the client.
 
@@ -242,13 +251,15 @@ with Client("http://127.0.0.1:9880") as client:
 
 See the [SDK manual](docs/SDK_EN.md) for download, installation, usage examples, asynchronous streaming, session lifecycle, and error handling. WebUI and Studio remain available alongside the SDK.
 
+## v1.5: v5Turbo and Native Apple Silicon
+
+v1.5 adds GPT-SoVITS v5Turbo and native Apple Silicon support. On Windows, v5Turbo uses the CUDA/TensorRT backend; on macOS, the native worker uses Rust, MLX and Metal with FP16 or FP32. Voice and Reference management supports zero-shot use, and registered voices can use whole-sentence and per-segment expression controls. Speech Session policy A supports append, flush and cancellation; policies B–F remain experimental.
+
+Mac streaming emits vocoder PCM incrementally after semantic generation and CFM complete. See the [Mac installation guide](docs/MACOS_INSTALLATION_EN.md) and [platform matrix](docs/V1_5_PLATFORM_MATRIX.md) for setup.
+
 ## Architecture And API
 
-AnifLive-TTS is the first-party FP16 TensorRT 11 speech inference platform for
-AnifEngine-Voice. Its first validated v1 acoustic backend is `gsv-v2proplus`,
-with the same contract reserved for future GPT-SoVITS model generations. Python owns the API, five-language frontend, model packages,
-converter, and GPT AR scheduling. CUDA/TensorRT owns all nine model stages,
-GPU sampling, and persistent buffers. One process preloads one active model.
+AnifLive-TTS provides a self-hosted speech inference API for `gsv-v2proplus` and `gsv-v5turbo`. Python handles the API, five-language frontend and model packages. On Windows, CUDA/TensorRT executes the v2ProPlus model stages and accelerates v5Turbo; the macOS V5 backend uses a native MLX/Metal worker. One process preloads one active model.
 
 - Languages: Putonghua/Mandarin (`zh`), Cantonese (`yue`), English (`en`), Japanese (`ja`), and Korean (`ko`); legacy adapters also accept `auto` and `auto_yue`.
 - Canonical endpoint: `POST /v1/audio/speech`.
@@ -265,7 +276,7 @@ See the [Studio guide](docs/ANIFLIVE_TTS_STUDIO_GUIDE.md) for the complete workf
 
 ## Quick Start
 
-Users with an existing GPT-SoVITS voice-cloning model can convert its GPT/SoVITS checkpoints and reference audio directly into an AnifLive-TTS model package.
+The five steps below describe the Windows v2ProPlus workflow. Users with an existing GPT-SoVITS voice-cloning model can convert its GPT/SoVITS checkpoints and reference audio directly into an AnifLive-TTS model package. For Apple Silicon, see the [Mac installation guide](docs/MACOS_INSTALLATION_EN.md).
 
 ### 1. Install the local toolchain
 
@@ -341,7 +352,7 @@ Then add the verified references without modifying the source package:
   --output D:\models\my-v2proplus-expression
 ```
 
-The importer is model-ID agnostic and uses package metadata, so any validated V2ProPlus package follows the same contract.
+The importer is model-ID agnostic and uses package metadata, so any validated v2ProPlus package follows the same contract.
 Use clean, single-speaker WAV files and exact transcripts. The importer copies the
 assets into the new output package, updates checksums, and leaves the original
 neutral package unchanged.
@@ -362,6 +373,18 @@ neutral package unchanged.
 
 ```powershell
 Copy-Item .env.example .env
+```
+
+For the example paths above, set these values in `.env` before starting:
+
+```dotenv
+ANIFLIVE_TTS_HOST_PORT=9880
+ANIFLIVE_TTS_MODELS_DIR=D:/models
+ANIFLIVE_TTS_MODEL_PACKAGE=/data/models/my-v2proplus
+ANIFLIVE_TTS_SHARED_HOST_DIR=D:/models/shared
+```
+
+```powershell
 .\scripts\run_docker.ps1 -CudaProfile cu128 -Build
 ```
 
@@ -386,7 +409,7 @@ Packages without imported profiles keep the expression UI unavailable.
 ## API
 
 ```powershell
-curl.exe -X POST "http://127.0.0.1:9882/v1/audio/speech" `
+curl.exe -X POST "http://127.0.0.1:9880/v1/audio/speech" `
   -H "Content-Type: application/json" `
   --output output.wav `
   --data '{"model":"my-v2proplus","voice_profile":"default","text":"今日はいい天気ですね。","language":"ja","stream":false,"generation":{"top_k":15,"top_p":1.0,"temperature":1.0,"seed":1234}}'
@@ -446,7 +469,7 @@ server rejects mid-phrase switches rather than risk skipped or unclear words:
 
 **v1.3**
 
-- [x] V2ProPlus model conversion and nine-stage TensorRT 11 inference
+- [x] v2ProPlus model conversion and nine-stage TensorRT 11 inference
 - [x] Five-language API, complete WAV, low-latency PCM streaming, and Docker delivery
 - [x] Package-curated expression profiles, per-segment delivery, and the local WebUI
 
@@ -456,25 +479,35 @@ server rejects mid-phrase switches rather than risk skipped or unclear words:
 - [x] Studio training, checkpoint continuation, TensorRT conversion and evaluation
 - [x] Studio model installation, job management and GPU handoff
 
-**Next: Neural Emotion Adapter**
+**v1.5-beta**
+
+- [x] Rust-backed Python SDK with synchronous and asynchronous clients
+
+**v1.5**
+
+- [x] v5Turbo inference with shared-base model support
+- [x] Native Apple Silicon backend and macOS installation path
+
+**Next: GPT-SoVITS Model Generations**
+
+- [ ] Support v5Pro and more future GPT-SoVITS models under the same API and model-package contract
+
+**Later: Neural Emotion Adapter**
 
 - [ ] Implement controllable emotion, intensity, and style with timbre-preservation and latency acceptance
-
-**Later: More GPT-SoVITS generations**
-
-- [ ] Support V2 / V2Pro, V3, and V4 under the same API and model-package contract
 
 ## Compatibility
 
 > [!WARNING]
 > **Before deployment**　`cu128` is the configuration with complete local GPU E2E validation. The `cu126` compatibility profile has source and build-policy validation only; GPU E2E support is not claimed until its image passes the release workflow and validation on a compatible host.
 
-v1.4 currently supports V2ProPlus; other GPT-SoVITS generations remain on the roadmap. Use `cu128` for RTX 50-series/Blackwell GPUs. `cu126` has not passed end-to-end GPU validation on the RTX 5070 Ti; see the [deployment guide](docs/DEPLOYMENT_EN.md).
+Windows supports v2ProPlus and v5Turbo; the native Apple Silicon backend supports v5Turbo. Use `cu128` for RTX 50-series/Blackwell GPUs. `cu126` has not passed end-to-end GPU validation on the RTX 5070 Ti; see the [deployment guide](docs/DEPLOYMENT_EN.md) and [Mac installation guide](docs/MACOS_INSTALLATION_EN.md).
 
 ## Documentation And License
 
 - [API contract](docs/API_EN.md)
 - [Deployment guide](docs/DEPLOYMENT_EN.md)
+- [Native macOS installation](docs/MACOS_INSTALLATION_EN.md)
 - [Performance engineering record](docs/PERFORMANCE_ENGINEERING.md)
 - [Acceptance report](docs/ACCEPTANCE.md)
 - [Rollback guide](docs/ROLLBACK.md)
@@ -482,6 +515,6 @@ v1.4 currently supports V2ProPlus; other GPT-SoVITS generations remain on the ro
 - [Third-party notices](THIRD_PARTY_NOTICES.md)
 - [Third-party media notice](assets/THIRD_PARTY_MEDIA.md)
 
-AnifLive-TTS is the first-party TTS for AnifEngine-Voice. Its current acoustic implementation builds on the research and engineering of [GPT-SoVITS](https://github.com/RVC-Boss/GPT-SoVITS), [GPT-SoVITS Minimal Inference](https://github.com/GPT-SoVITS-Devel/GPT-SoVITS_minimal_inference), and [GPT-SoVITS C++](https://github.com/GPT-SoVITS-Devel/GPT-SoVITS-cpp). Special thanks to GPT-SoVITS creator **花儿不哭** and all other GPT-SoVITS contributors.
+AnifLive-TTS builds on the research and engineering of [GPT-SoVITS](https://github.com/RVC-Boss/GPT-SoVITS), [GPT-SoVITS Minimal Inference](https://github.com/GPT-SoVITS-Devel/GPT-SoVITS_minimal_inference), and [GPT-SoVITS C++](https://github.com/GPT-SoVITS-Devel/GPT-SoVITS-cpp). Special thanks to GPT-SoVITS creator **花儿不哭** and all other GPT-SoVITS contributors.
 
 Original AnifLive-TTS code is licensed under [PolyForm Noncommercial 1.0.0](LICENSE); commercial use requires a separate written Commercial License from Hiruynk. GPT-SoVITS-derived portions retain MIT, Minimal Inference-derived and applicable GPT-SoVITS C++ reference portions retain Apache-2.0, and dependencies retain their own terms. See [LICENSING.md](LICENSING.md) and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

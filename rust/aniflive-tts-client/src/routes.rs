@@ -31,3 +31,37 @@ pub(crate) fn session(base: &Url, id: &str, suffix: Option<&str>) -> Result<Url,
     }
     Ok(url)
 }
+
+pub(crate) fn voice(
+    base: &Url,
+    id: &str,
+    reference: Option<&str>,
+    suffix: Option<&str>,
+) -> Result<Url, ClientError> {
+    if id.is_empty()
+        || id == "."
+        || id == ".."
+        || reference.is_some_and(|v| v.is_empty() || v == "." || v == "..")
+    {
+        return Err(ClientError::InvalidConfiguration);
+    }
+    let mut url = join(base, VOICES)?;
+    {
+        let mut parts = url
+            .path_segments_mut()
+            .map_err(|_| ClientError::InvalidConfiguration)?;
+        parts.push(id);
+        if reference.is_some() || suffix == Some("references") {
+            parts.push("references");
+        }
+        if let Some(reference) = reference {
+            parts.push(reference);
+        }
+        if let Some(suffix) = suffix
+            && suffix != "references"
+        {
+            parts.push(suffix);
+        }
+    }
+    Ok(url)
+}

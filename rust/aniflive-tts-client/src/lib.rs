@@ -14,7 +14,7 @@ pub use models::*;
 pub use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 /// PEP 440 version shared by the Python module and HTTP User-Agent.
 /// Cargo uses SemVer pre-release syntax; keep the mapping checked below.
-pub const VERSION: &str = "1.5.0b1";
+pub const VERSION: &str = "1.5.0";
 
 #[cfg(test)]
 mod version_tests {

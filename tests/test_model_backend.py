@@ -38,3 +38,15 @@ def test_backend_registry_is_read_only_and_unknown_families_fail_closed() -> Non
     assert get_model_backend(None) is None
     assert model_backend_for_manifest({"model_family": "gsv-v3"}) is None
 
+
+def test_v5_cuda_and_metal_packages_are_selected_independently() -> None:
+    from aniflive_tts.model_backend import V5TURBO_BACKEND, V5TurboMacOSBackend
+
+    cuda = {"model_family": "gsv-v5turbo", "precision": "FP16"}
+    assert model_backend_for_manifest(cuda) is V5TURBO_BACKEND
+    for precision in ("FP16", "FP32"):
+        metal = model_backend_for_manifest({**cuda, "precision": precision, "native_runtime": {}})
+        assert isinstance(metal, V5TurboMacOSBackend)
+        assert metal.precision == precision
+        assert metal.engine_manifest_kind == "aniflive-tts-gsv-v5turbo-mlx-metal"
+

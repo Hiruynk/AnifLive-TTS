@@ -64,7 +64,7 @@ def collect(root: Path) -> tuple[str, dict]:
         for path in paths:
             relative = path.relative_to(crate).as_posix()
             content = path.read_bytes()
-            text = content.decode("utf-8")
+            text = content.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n")
             notices.append({"path": relative, "sha256": hashlib.sha256(content).hexdigest()})
             sections.append("\n--- " + relative + " ---\n" + text.rstrip() + "\n")
         inventory.append({
