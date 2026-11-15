@@ -166,6 +166,7 @@ jobs:
         with:
           image-ref: ${{ env.STAGING_IMAGE }}@${{ steps.build.outputs.digest }}
           scanners: vuln,secret
+          timeout: 30m
           vuln-type: os,library
           ignore-unfixed: true
           format: json
