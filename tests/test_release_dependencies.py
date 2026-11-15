@@ -103,6 +103,7 @@ def test_container_workflow_scans_built_image_digest() -> None:
         "Publish the reviewed image and attestations"
     )
     assert "skopeo copy --all --preserve-digests" in workflow
+    assert '"docker://${STAGING_IMAGE%:*}@${IMAGE_DIGEST}"' in workflow
     assert "TRIVY-AnifLive-TTS-v1.5.0-${{ matrix.tag }}.json" in workflow
     assert "spdx-tools==0.8.3" in workflow
     assert 'pyspdxtools -i "${output}"' in workflow
