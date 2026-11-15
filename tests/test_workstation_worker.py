@@ -473,8 +473,8 @@ def test_worker_heartbeats_during_a_long_adapter(
         return original_heartbeat(job_id, claim_token)
 
     def slow_adapter(_job, _project, *, cancel_requested, **_kwargs):
-        deadline = time.monotonic() + 0.18
-        while time.monotonic() < deadline:
+        deadline = time.monotonic() + 2.0
+        while heartbeat_count < 2 and time.monotonic() < deadline:
             assert cancel_requested() is False
             time.sleep(0.01)
         return AdapterResult(
