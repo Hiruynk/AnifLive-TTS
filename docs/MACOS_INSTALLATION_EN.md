@@ -21,10 +21,31 @@ cp scripts/macos-release/macos-v5turbo.env.example "$ANIFLIVE_TTS_MACOS_ENV_FILE
 
 Edit the file to point to a **writable copy** of an existing authorized, converted v5Turbo model package, its upstream frontend source, and the local Open JTalk dictionary. A dynamic shared-base package needs no fixed voice: register your own Voice and Reference after startup. Provide the model weights and converted assets separately; the runtime archive and SDK wheel do not contain them. Keep an untouched original package for rollback.
 
+Before installation, review the [third-party notices](../THIRD_PARTY_NOTICES.md). The command below reuses `setup_shared_assets.py` to download and checksum only the NLTK and fastText text-frontend assets, without downloading GPT-SoVITS model weights. The first run needs network access; verified caches are reused. Place the pinned upstream frontend at `$ANIFLIVE_TTS_SOURCE_DIR/GPT_SoVITS/` and provide an Open JTalk dictionary containing `sys.dic`.
+
 The following example assumes both downloaded files are in `~/Downloads`:
 
 ```bash
 source "$ANIFLIVE_TTS_MACOS_ENV_FILE"
+python3.12 - "$ANIFLIVE_TTS_MACOS_DATA_ROOT" <<'PY'
+from pathlib import Path
+import shutil
+import sys
+from scripts.setup_shared_assets import NLTK_PACKAGES, _digest, _download_fasttext, _download_nltk
+
+root = Path(sys.argv[1]).expanduser().resolve()
+_download_nltk(root)
+cache = root / "cache" / "nltk"
+cache.mkdir(parents=True, exist_ok=True)
+for package, spec in NLTK_PACKAGES.items():
+    source = root / "nltk_data" / spec["subdir"] / f"{package}.zip"
+    destination = cache / f"{package}.zip"
+    if not destination.is_file() or _digest(destination) != spec["zip_sha256"]:
+        shutil.copyfile(source, destination)
+    if _digest(destination) != spec["zip_sha256"]:
+        raise RuntimeError(f"NLTK cache checksum mismatch: {package}")
+_download_fasttext(root / "cache")
+PY
 mkdir -p "$ANIFLIVE_TTS_MACOS_RUNTIME_ROOT/download"
 unzip "$HOME/Downloads/AnifLive-TTS-v1.5.0-macos-arm64-runtime.zip" -d "$ANIFLIVE_TTS_MACOS_RUNTIME_ROOT/download"
 ANIFLIVE_TTS_BUILD_WORKER=0 \

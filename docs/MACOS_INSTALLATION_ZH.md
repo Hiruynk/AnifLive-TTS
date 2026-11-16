@@ -21,10 +21,31 @@ cp scripts/macos-release/macos-v5turbo.env.example "$ANIFLIVE_TTS_MACOS_ENV_FILE
 
 修改設定檔，指定現有、已授權及已轉換 v5Turbo 模型套件的**可寫副本**、上游前處理 source 及本機 Open JTalk 字典。Dynamic shared-base 套件可不含固定聲線，啟動後再登錄自己的 Voice 和 Reference。模型權重及已轉換資產須另行提供；runtime 壓縮檔和 SDK wheel 不包含它們。請保留未修改的原套件以便回退。
 
+開始安裝前，請閱讀 [第三方授權聲明](../THIRD_PARTY_NOTICES.md)。以下命令使用現有的 `setup_shared_assets.py`，只下載並校驗文字前處理所需的 NLTK 和 fastText 資料，不會下載 GPT-SoVITS 模型權重。首次執行需要網路；已驗證的快取可重用。官方前處理原始碼須放在 `$ANIFLIVE_TTS_SOURCE_DIR/GPT_SoVITS/`，本機 Open JTalk 字典須包含 `sys.dic`。
+
 以下例子假設兩個下載檔位於 `~/Downloads`：
 
 ```bash
 source "$ANIFLIVE_TTS_MACOS_ENV_FILE"
+python3.12 - "$ANIFLIVE_TTS_MACOS_DATA_ROOT" <<'PY'
+from pathlib import Path
+import shutil
+import sys
+from scripts.setup_shared_assets import NLTK_PACKAGES, _digest, _download_fasttext, _download_nltk
+
+root = Path(sys.argv[1]).expanduser().resolve()
+_download_nltk(root)
+cache = root / "cache" / "nltk"
+cache.mkdir(parents=True, exist_ok=True)
+for package, spec in NLTK_PACKAGES.items():
+    source = root / "nltk_data" / spec["subdir"] / f"{package}.zip"
+    destination = cache / f"{package}.zip"
+    if not destination.is_file() or _digest(destination) != spec["zip_sha256"]:
+        shutil.copyfile(source, destination)
+    if _digest(destination) != spec["zip_sha256"]:
+        raise RuntimeError(f"NLTK cache checksum mismatch: {package}")
+_download_fasttext(root / "cache")
+PY
 mkdir -p "$ANIFLIVE_TTS_MACOS_RUNTIME_ROOT/download"
 unzip "$HOME/Downloads/AnifLive-TTS-v1.5.0-macos-arm64-runtime.zip" -d "$ANIFLIVE_TTS_MACOS_RUNTIME_ROOT/download"
 ANIFLIVE_TTS_BUILD_WORKER=0 \

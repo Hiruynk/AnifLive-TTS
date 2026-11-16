@@ -19,6 +19,9 @@ on:
         type: boolean
 jobs:
   quality:
+    # v1.5.0 ships Docker source bundles. Prebuilt image jobs are disabled.
+    # Do not re-enable GHCR publication without the maintainer's explicit request.
+    if: ${{ false }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
