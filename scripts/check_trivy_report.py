@@ -6,12 +6,47 @@ import hashlib
 from datetime import date
 import json
 from pathlib import Path
+import re
+import sys
+
+if __package__ in (None, ""):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from scripts.v5_transformers_security import POST_HASHES, UPSTREAM_FIXES, VERSION
 
 
 BLOCKING_SEVERITIES = {"HIGH", "CRITICAL"}
+BACKPORTED_CVES = {"CVE-2026-4372", "CVE-2026-5241", "CVE-2026-9856"}
 
 
-def find_blockers(report: dict[str, object], profile: str, *, applicability: dict | None = None) -> list[str]:
+def verified_transformers_proof(proof: dict, image: str, profile: str) -> bool:
+    """Validate evidence emitted by the isolated verifier for the scanned digest.
+
+    The trusted workflow supplies image identity; the verifier supplies source hashes.
+    A version string or a vulnerability allowlist alone is never sufficient evidence.
+    """
+    if (profile != "cu128" or not isinstance(proof, dict)
+            or VERSION != "4.57.6" or set(UPSTREAM_FIXES) != BACKPORTED_CVES or not POST_HASHES):
+        return False
+    if not isinstance(image, str) or not re.fullmatch(r"[^\s@]+@sha256:[0-9a-f]{64}", image):
+        return False
+    if set(proof) != {"schema", "image", "verification"}:
+        return False
+    if proof["schema"] != "aniflive-transformers-backport-proof-v1" or proof["image"] != image:
+        return False
+    verification = proof["verification"]
+    return (
+        isinstance(verification, dict)
+        and set(verification) == {"status", "version", "upstream_fixes", "sha256"}
+        and verification["status"] == "verified"
+        and verification["version"] == VERSION
+        and verification["upstream_fixes"] == UPSTREAM_FIXES
+        and verification["sha256"] == POST_HASHES
+    )
+
+
+def find_blockers(report: dict[str, object], profile: str, *, applicability: dict | None = None,
+                  transformers_proof: dict | None = None, expected_image: str | None = None) -> list[str]:
     schema_version = report.get("SchemaVersion")
     results = report.get("Results")
     if not isinstance(schema_version, int) or schema_version < 2:
@@ -20,6 +55,14 @@ def find_blockers(report: dict[str, object], profile: str, *, applicability: dic
         return ["invalid-report:missing-artifact-name"]
     if not isinstance(results, list) or not results:
         return ["invalid-report:missing-scan-results"]
+    if expected_image is not None and report["ArtifactName"] != expected_image:
+        return ["invalid-report:artifact-does-not-match-expected-image"]
+
+    backport_verified = False
+    if transformers_proof is not None:
+        backport_verified = verified_transformers_proof(transformers_proof, expected_image, profile)
+        if not backport_verified:
+            return ["invalid-transformers-backport-proof"]
 
     blockers: list[str] = []
     for result in results:
@@ -31,6 +74,10 @@ def find_blockers(report: dict[str, object], profile: str, *, applicability: dic
                 continue
             severity = str(vulnerability.get("Severity", "")).upper()
             if severity not in BLOCKING_SEVERITIES:
+                continue
+            if (backport_verified and vulnerability.get("PkgName") == "transformers"
+                    and vulnerability.get("InstalledVersion") == VERSION
+                    and vulnerability.get("VulnerabilityID") in BACKPORTED_CVES):
                 continue
             if applicability is not None and reviewed_not_affected(report, result, vulnerability, applicability):
                 continue
@@ -100,11 +147,17 @@ def main() -> int:
     parser.add_argument("--report", type=Path, required=True)
     parser.add_argument("--profile", choices=("cu126", "cu128"), required=True)
     parser.add_argument("--applicability", type=Path, help="Explicit source-bound not-affected review")
+    parser.add_argument("--transformers-proof", type=Path, help="Source-hash proof from the immutable image verifier")
+    parser.add_argument("--expected-image", help="Exact immutable image reference passed to Trivy and the verifier")
     args = parser.parse_args()
 
     report = json.loads(args.report.read_text(encoding="utf-8"))
     policy = load_applicability(args.applicability) if args.applicability else None
-    blockers = find_blockers(report, args.profile, applicability=policy)
+    proof = json.loads(args.transformers_proof.read_text(encoding="utf-8")) if args.transformers_proof else None
+    if args.transformers_proof and proof is None:
+        raise ValueError("Transformers proof must be a JSON object")
+    blockers = find_blockers(report, args.profile, applicability=policy,
+                             transformers_proof=proof, expected_image=args.expected_image)
     if blockers:
         print("Unaccepted HIGH/CRITICAL image vulnerabilities:")
         for blocker in blockers:

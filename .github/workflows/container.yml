@@ -172,11 +172,41 @@ jobs:
           format: json
           output: TRIVY-AnifLive-TTS-v1.5.0-${{ matrix.tag }}.json
           exit-code: "0"
+      - name: Verify the cu128 Transformers backport in the scanned immutable image
+        if: ${{ matrix.tag == 'cu128' }}
+        shell: bash
+        env:
+          IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          docker run --rm --network none --read-only --cap-drop ALL \
+            --security-opt no-new-privileges --entrypoint python \
+            "${STAGING_IMAGE}@${IMAGE_DIGEST}" \
+            /app/scripts/v5_transformers_security.py --verify-only > .transformers-verification.json
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          proof = {
+              "schema": "aniflive-transformers-backport-proof-v1",
+              "image": os.environ["STAGING_IMAGE"] + "@" + os.environ["IMAGE_DIGEST"],
+              "verification": json.loads(Path(".transformers-verification.json").read_text()),
+          }
+          Path("TRANSFORMERS-BACKPORT-AnifLive-TTS-v1.5.0-cu128.json").write_text(
+              json.dumps(proof, indent=2) + "\n", encoding="utf-8")
+          PY
       - name: Enforce the image vulnerability policy
-        run: >-
-          python scripts/check_trivy_report.py
-          --profile ${{ matrix.tag }} --applicability scripts/release_vulnerability_applicability.json
-          --report TRIVY-AnifLive-TTS-v1.5.0-${{ matrix.tag }}.json
+        shell: bash
+        env:
+          IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
+          PROFILE: ${{ matrix.tag }}
+        run: |
+          proof_args=()
+          if [ "${PROFILE}" = cu128 ]; then
+            proof_args=(--transformers-proof TRANSFORMERS-BACKPORT-AnifLive-TTS-v1.5.0-cu128.json)
+          fi
+          python scripts/check_trivy_report.py \
+            --profile "${PROFILE}" --applicability scripts/release_vulnerability_applicability.json \
+            --report "TRIVY-AnifLive-TTS-v1.5.0-${PROFILE}.json" \
+            --expected-image "${STAGING_IMAGE}@${IMAGE_DIGEST}" "${proof_args[@]}"
       - name: Publish the reviewed image and attestations
         if: ${{ !inputs.verify_only }}
         shell: bash
@@ -199,6 +229,7 @@ jobs:
             SBOM-AnifLive-TTS-v1.5.0-${{ matrix.tag }}.spdx.json
             RELEASE-METADATA-AnifLive-TTS-v1.5.0-${{ matrix.tag }}.json
             TRIVY-AnifLive-TTS-v1.5.0-${{ matrix.tag }}.json
+            TRANSFORMERS-BACKPORT-AnifLive-TTS-v1.5.0-${{ matrix.tag }}.json
           if-no-files-found: error
   export-existing-sbom:
     needs: quality
